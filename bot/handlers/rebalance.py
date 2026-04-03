@@ -6,10 +6,11 @@ from bot.mexc_client import MexcClient
 from bot.rebalancer import calculate_trades
 from datetime import datetime, timezone
 
+
 async def rebalance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    action = query.data.split(":", 1)[1]
+    action = query.data.split(":", 1)[1] if ":" in query.data else "check"
     user_id = update.effective_user.id
 
     if action == "check":
@@ -21,11 +22,17 @@ async def rebalance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             )
             return
 
-        allocations = await db.get_allocations(user_id)
+        # Get active portfolio
+        portfolio_id = await db.ensure_active_portfolio(user_id)
+        portfolio_info = await db.get_portfolio(portfolio_id)
+        allocations = await db.get_portfolio_allocations(portfolio_id)
+
         if not allocations:
             await query.edit_message_text(
-                "❌ لم تحدد أي عملات بعد.\nاذهب إلى ⚙️ الإعدادات ← إضافة العملات.",
-                reply_markup=main_menu_kb()
+                f"❌ لا يوجد توزيع في محفظة *{portfolio_info.get('name', '')}*.\n"
+                "اذهب إلى ⚙️ الإعدادات ← إضافة العملات.",
+                parse_mode="Markdown",
+                reply_markup=main_menu_kb(),
             )
             return
 
@@ -38,16 +45,26 @@ async def rebalance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         finally:
             await client.close()
 
+        # Use portfolio capital as budget (if set), otherwise use full account
+        capital = portfolio_info.get("capital_usdt", 0.0)
+        effective_total = capital if capital > 0 else total_usdt
+
         threshold = settings.get("threshold", 5.0)
-        trades, drift_report = calculate_trades(portfolio, total_usdt, allocations, threshold)
+        trades, drift_report = calculate_trades(portfolio, effective_total, allocations, threshold)
 
-        # Store in context for execution
         context.user_data["_pending_trades"] = trades
-        context.user_data["_pending_portfolio"] = portfolio
-        context.user_data["_pending_total"] = total_usdt
+        context.user_data["_pending_portfolio_id"] = portfolio_id
+        context.user_data["_pending_total"] = effective_total
 
-        text = f"⚖️ *تحليل إعادة التوازن*\n💰 إجمالي: ${total_usdt:,.2f}\n🎯 حد الانحراف: {threshold}%\n\n"
-        text += "📊 *تقرير الانحراف:*\n"
+        portfolio_name = portfolio_info.get("name", "")
+        text = (
+            f"⚖️ *تحليل إعادة التوازن*\n"
+            f"📁 المحفظة: *{portfolio_name}*\n"
+            f"💰 رأس المال المخصص: ${effective_total:,.2f}\n"
+            f"🏦 إجمالي الحساب: ${total_usdt:,.2f}\n"
+            f"🎯 حد الانحراف: {threshold}%\n\n"
+            "📊 *تقرير الانحراف:*\n"
+        )
 
         for d in drift_report:
             arrow = "🔴" if d["drift_pct"] > 0 else "🟢"
@@ -60,7 +77,7 @@ async def rebalance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
         if not trades:
             text += "\n✅ *المحفظة متوازنة — لا حاجة لأي إجراء*"
-            await query.edit_message_text(text, parse_mode="Markdown", reply_markup=main_menu_kb())
+            await query.edit_message_text(text, parse_mode="Markdown", reply_markup=rebalance_dry_kb())
             return
 
         text += f"\n💡 *الصفقات المطلوبة ({len(trades)}):*\n"
@@ -86,7 +103,9 @@ async def rebalance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         try:
             results = await client.execute_rebalance(trades)
         except Exception as e:
-            await query.edit_message_text(f"❌ خطأ أثناء التنفيذ: {str(e)[:100]}", reply_markup=main_menu_kb())
+            await query.edit_message_text(
+                f"❌ خطأ أثناء التنفيذ: {str(e)[:100]}", reply_markup=main_menu_kb()
+            )
             return
         finally:
             await client.close()
@@ -94,7 +113,10 @@ async def rebalance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         ok = [r for r in results if r.get("status") == "ok"]
         err = [r for r in results if r.get("status") == "error"]
         skip = [r for r in results if r.get("status") == "skip"]
-        total_traded = sum(t["usdt_amount"] for t in trades if any(r["symbol"] == t["symbol"] and r.get("status") == "ok" for r in results))
+        total_traded = sum(
+            t["usdt_amount"] for t in trades
+            if any(r["symbol"] == t["symbol"] and r.get("status") == "ok" for r in results)
+        )
 
         text = "✅ *اكتملت إعادة التوازن*\n\n"
         for r in ok:
@@ -110,7 +132,17 @@ async def rebalance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
         now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
         summary = f"يدوي: {len(ok)} ناجح، {len(err)} خطأ"
-        await db.add_history(user_id, now, summary, total_traded, 1 if not err else 0)
+        portfolio_id = context.user_data.get("_pending_portfolio_id")
+        await db.add_history(user_id, now, summary, total_traded, 1 if not err else 0,
+                             portfolio_id=portfolio_id)
 
         context.user_data.pop("_pending_trades", None)
+        context.user_data.pop("_pending_portfolio_id", None)
         await query.edit_message_text(text, parse_mode="Markdown", reply_markup=main_menu_kb())
+
+
+# aliases for main.py compatibility
+async def execute_rebalance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Alias — execution is handled inside rebalance_callback via action='execute'."""
+    update.callback_query.data = "rebalance:execute"
+    await rebalance_callback(update, context)
