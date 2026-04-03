@@ -1,3 +1,4 @@
+import asyncio
 from telegram import Update
 from telegram.ext import ContextTypes
 from bot.database import db
@@ -21,7 +22,10 @@ async def portfolio_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     client = MexcClient(settings["mexc_api_key"], settings["mexc_secret_key"])
     try:
-        portfolio, total_usdt = await client.get_portfolio()
+        portfolio, total_usdt = await asyncio.wait_for(client.get_portfolio(), timeout=20)
+    except asyncio.TimeoutError:
+        await query.edit_message_text("❌ انتهت المهلة — MEXC لم يستجب. حاول مجدداً.", reply_markup=main_menu_kb())
+        return
     except Exception as e:
         await query.edit_message_text(f"❌ خطأ: {str(e)[:100]}", reply_markup=main_menu_kb())
         return
