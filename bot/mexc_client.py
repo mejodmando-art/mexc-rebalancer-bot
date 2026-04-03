@@ -22,9 +22,11 @@ class MexcClient:
     async def get_portfolio(self) -> dict:
         """Returns {symbol: {'amount': x, 'value_usdt': y}} and total_usdt"""
         balance = await self.exchange.fetch_balance()
-        portfolio = {}
         total_usdt = 0.0
+        portfolio = {}
 
+        # Separate quote currency from assets needing price lookup
+        holdings = {}
         for sym, data in balance["total"].items():
             amount = float(data or 0)
             if amount < 1e-8:
@@ -32,44 +34,75 @@ class MexcClient:
             if sym == self.quote:
                 portfolio[sym] = {"amount": amount, "value_usdt": amount, "price": 1.0}
                 total_usdt += amount
-                continue
-            try:
-                ticker = await self.exchange.fetch_ticker(f"{sym}/{self.quote}")
-                price = float(ticker.get("last") or ticker.get("close") or 0)
-                if price > 0:
-                    val = amount * price
-                    portfolio[sym] = {"amount": amount, "value_usdt": val, "price": price}
-                    total_usdt += val
-            except Exception:
-                continue
+            else:
+                holdings[sym] = amount
+
+        if not holdings:
+            return portfolio, total_usdt
+
+        # Fetch all prices in one request
+        pairs = [f"{sym}/{self.quote}" for sym in holdings]
+        try:
+            tickers = await self.exchange.fetch_tickers(pairs)
+        except Exception:
+            tickers = {}
+
+        for sym, amount in holdings.items():
+            pair = f"{sym}/{self.quote}"
+            ticker = tickers.get(pair, {})
+            price = float(ticker.get("last") or ticker.get("close") or 0)
+            if price > 0:
+                val = amount * price
+                portfolio[sym] = {"amount": amount, "value_usdt": val, "price": price}
+                total_usdt += val
 
         return portfolio, total_usdt
 
     async def execute_rebalance(self, trades: list) -> list:
         """trades: [{'symbol': 'BTC', 'action': 'buy'/'sell', 'usdt_amount': 50}]"""
+        if not trades:
+            return []
+
+        # Fetch all prices and market limits once before the loop
+        pairs = [f"{t['symbol']}/{self.quote}" for t in trades]
+        try:
+            tickers = await self.exchange.fetch_tickers(pairs)
+        except Exception:
+            tickers = {}
+
+        try:
+            markets = await self.exchange.fetch_markets()
+            min_qty_map = {}
+            for m in markets:
+                min_qty_map[m["symbol"]] = m.get("limits", {}).get("amount", {}).get("min", 0) or 0
+        except Exception:
+            min_qty_map = {}
+
         results = []
         for trade in trades:
             sym = trade["symbol"]
             action = trade["action"]
             usdt_amt = trade["usdt_amount"]
+            pair = f"{sym}/{self.quote}"
             try:
-                ticker = await self.exchange.fetch_ticker(f"{sym}/{self.quote}")
-                price = float(ticker["last"])
+                ticker = tickers.get(pair, {})
+                price = float(ticker.get("last") or 0)
+                if not price:
+                    # fallback to single fetch if not in batch result
+                    t = await self.exchange.fetch_ticker(pair)
+                    price = float(t.get("last") or 0)
+                if not price:
+                    raise ValueError("تعذّر جلب السعر")
                 qty = usdt_amt / price
-                market = await self.exchange.fetch_markets()
-                min_qty = 0.0
-                for m in market:
-                    if m["symbol"] == f"{sym}/{self.quote}":
-                        min_qty = m.get("limits", {}).get("amount", {}).get("min", 0) or 0
-                        break
+                min_qty = min_qty_map.get(pair, 0)
                 if qty < min_qty:
                     results.append({"symbol": sym, "action": action, "status": "skip",
                                     "reason": f"الكمية أقل من الحد ({min_qty})"})
                     continue
                 if action == "sell":
-                    order = await self.exchange.create_market_sell_order(f"{sym}/{self.quote}", qty)
+                    order = await self.exchange.create_market_sell_order(pair, qty)
                 else:
-                    order = await self.exchange.create_market_buy_order(f"{sym}/{self.quote}", qty)
+                    order = await self.exchange.create_market_buy_order(pair, qty)
                 results.append({"symbol": sym, "action": action, "status": "ok",
                                 "usdt": usdt_amt, "price": price, "order_id": order.get("id")})
             except Exception as e:
