@@ -126,7 +126,10 @@ class Database:
             dsn = config.database_url
             if dsn.startswith("postgres://"):
                 dsn = dsn.replace("postgres://", "postgresql://", 1)
-            self._pool = await asyncpg.create_pool(dsn, min_size=1, max_size=5)
+            self._pool = await asyncpg.create_pool(
+                dsn, min_size=1, max_size=5,
+                statement_cache_size=0,  # required for pgbouncer/Supabase pooler
+            )
             logger.info("Connected to PostgreSQL")
             await self._init_pg()
         else:
