@@ -138,7 +138,7 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(rebalance_callback, pattern="^rebalance:"))
 
     # ── Settings ───────────────────────────────────────────────────────────────
-    app.add_handler(CallbackQueryHandler(settings_callback,     pattern="^settings:view"))
+    app.add_handler(CallbackQueryHandler(settings_callback,     pattern="^settings:(view|view_allocs)"))
     app.add_handler(CallbackQueryHandler(toggle_auto_callback,  pattern="^toggle_auto$"))
     app.add_handler(CallbackQueryHandler(del_alloc_callback,    pattern="^del_alloc:"))
     app.add_handler(CallbackQueryHandler(clear_allocs_callback, pattern="^clear_allocs"))

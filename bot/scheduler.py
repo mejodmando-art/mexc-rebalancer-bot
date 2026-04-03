@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from bot.database import db
 from bot.mexc_client import MexcClient
@@ -7,32 +7,41 @@ from bot.rebalancer import calculate_trades
 
 logger = logging.getLogger(__name__)
 
+
 async def auto_rebalance_job(app):
-    """Run for all users with auto_enabled=1"""
-    async with app.bot:
-        pass  # ensure bot is accessible
+    """Run rebalance for users whose interval has elapsed since last rebalance."""
+    users = await db.get_all_users_with_auto()
+    now = datetime.now(timezone.utc)
 
-    # Get all auto-enabled users
-    import aiosqlite
-    from bot.config import config
-    async with aiosqlite.connect(config.database_path) as conn:
-        conn.row_factory = aiosqlite.Row
-        async with conn.execute(
-            "SELECT user_id FROM user_settings WHERE auto_enabled=1 AND mexc_api_key IS NOT NULL"
-        ) as cur:
-            users = [r["user_id"] for r in await cur.fetchall()]
-
-    for user_id in users:
+    for row in users:
+        user_id = row["user_id"]
         try:
+            settings = await db.get_settings(user_id)
+            if not settings:
+                continue
+
+            interval_hours = int(settings.get("auto_interval_hours") or 24)
+            last_str = settings.get("last_rebalance_at")
+
+            if last_str:
+                try:
+                    last_dt = datetime.fromisoformat(last_str.replace(" UTC", "+00:00"))
+                    if now - last_dt < timedelta(hours=interval_hours):
+                        continue  # not time yet
+                except Exception:
+                    pass  # if parse fails, run anyway
+
             await _do_rebalance(app, user_id, auto=True)
+
         except Exception as e:
             logger.error(f"Auto rebalance error for {user_id}: {e}")
 
 
 async def _do_rebalance(app, user_id: int, auto: bool = False):
     settings = await db.get_settings(user_id)
-    if not settings:
+    if not settings or not settings.get("mexc_api_key"):
         return
+
     allocations = await db.get_allocations(user_id)
     if not allocations:
         return
@@ -41,28 +50,35 @@ async def _do_rebalance(app, user_id: int, auto: bool = False):
     try:
         portfolio, total_usdt = await client.get_portfolio()
         threshold = settings.get("threshold", 5.0)
-        trades, drift = calculate_trades(portfolio, total_usdt, allocations, threshold)
+        trades, _ = calculate_trades(portfolio, total_usdt, allocations, threshold)
+
+        now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+        # Update last_rebalance_at regardless of whether trades were needed
+        await db.update_settings(user_id, last_rebalance_at=now_str)
 
         if not trades:
-            if auto:
-                return  # No drift, nothing to do
             return
 
         results = await client.execute_rebalance(trades)
-        traded = sum(t["usdt_amount"] for t in trades if t.get("status") != "skip")
-        ok = sum(1 for r in results if r.get("status") == "ok")
+        ok  = sum(1 for r in results if r.get("status") == "ok")
         err = sum(1 for r in results if r.get("status") == "error")
+        traded = sum(
+            t["usdt_amount"] for t in trades
+            if any(r["symbol"] == t["symbol"] and r.get("status") == "ok" for r in results)
+        )
 
-        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
         summary = f"{'تلقائي' if auto else 'يدوي'}: {ok} ناجح، {err} خطأ"
-        await db.add_history(user_id, now, summary, traded, 1 if err == 0 else 0)
+        portfolio_id = await db.get_active_portfolio_id(user_id)
+        await db.add_history(user_id, now_str, summary, traded,
+                             1 if err == 0 else 0, portfolio_id=portfolio_id)
 
         msg = (
             f"{'🤖 توازن تلقائي' if auto else '⚖️ إعادة التوازن'}\n\n"
             f"✅ {ok} صفقة ناجحة\n"
             + (f"❌ {err} خطأ\n" if err else "")
             + f"💵 إجمالي: ${traded:.2f}\n"
-            f"🕐 {now}"
+            f"🕐 {now_str}"
         )
         await app.bot.send_message(user_id, msg)
     finally:
@@ -71,6 +87,7 @@ async def _do_rebalance(app, user_id: int, auto: bool = False):
 
 async def start_scheduler(app) -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler()
+    # Check every hour; each user's own interval is respected inside the job
     scheduler.add_job(
         auto_rebalance_job,
         trigger="interval",

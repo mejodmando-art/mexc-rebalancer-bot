@@ -22,7 +22,7 @@ def main_menu_kb() -> InlineKeyboardMarkup:
 def settings_kb(auto_enabled: bool = False) -> InlineKeyboardMarkup:
     auto_label = "🟢 إيقاف التوازن التلقائي" if auto_enabled else "🔴 تفعيل التوازن التلقائي"
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔑 مفاتيح MEXC API", callback_data="settings:set_api_key")],
+        [InlineKeyboardButton("🔑 مفاتيح MEXC API", callback_data="settings:set_api")],
         [InlineKeyboardButton("📊 عرض التوزيع الحالي", callback_data="settings:view_allocs")],
         [InlineKeyboardButton("➕ إضافة / تعديل عملة", callback_data="settings:add_alloc")],
         [InlineKeyboardButton("🎯 حد الانحراف", callback_data="settings:set_threshold")],
