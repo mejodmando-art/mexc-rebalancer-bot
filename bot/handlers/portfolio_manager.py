@@ -1,4 +1,5 @@
-from telegram import Update
+import asyncio
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
 from bot.database import db
 from bot.keyboards import (
@@ -163,24 +164,94 @@ async def delete_portfolio_confirm_callback(update: Update, context: ContextType
 async def create_portfolio_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    await query.edit_message_text(
-        "📁 *إنشاء محفظة جديدة*\n\nأدخل *اسم المحفظة*:\n"
-        "مثال: محفظة المضاربة / محفظة طويلة المدى\n\n/cancel للإلغاء",
-        parse_mode="Markdown",
-    )
+    user_id = update.effective_user.id
+
+    # Try to fetch real balance from MEXC
+    settings = await db.get_settings(user_id)
+    real_balance = None
+    if settings and settings.get("mexc_api_key"):
+        await query.edit_message_text("⏳ جاري جلب رصيدك من MEXC...")
+        try:
+            from bot.mexc_client import MexcClient
+            client = MexcClient(settings["mexc_api_key"], settings["mexc_secret_key"])
+            try:
+                _, total_usdt = await asyncio.wait_for(client.get_portfolio(), timeout=15)
+                real_balance = total_usdt
+            finally:
+                await client.close()
+        except Exception:
+            real_balance = None
+
+    context.user_data["_real_balance"] = real_balance
+
+    if real_balance is not None:
+        balance_text = f"💰 رصيدك الحالي في MEXC: *${real_balance:,.2f} USDT*\n\n"
+        use_full_btn = InlineKeyboardMarkup([
+            [InlineKeyboardButton(f"✅ استخدام كامل الرصيد (${real_balance:,.2f})", callback_data="portfolio_capital:full")],
+            [InlineKeyboardButton("✏️ تحديد مبلغ مخصص", callback_data="portfolio_capital:custom")],
+            [InlineKeyboardButton("❌ إلغاء", callback_data="cancel")],
+        ])
+        await query.edit_message_text(
+            f"📁 *إنشاء محفظة جديدة*\n\n{balance_text}"
+            "اختر رأس المال لهذه المحفظة:",
+            parse_mode="Markdown",
+            reply_markup=use_full_btn,
+        )
+    else:
+        await query.edit_message_text(
+            "📁 *إنشاء محفظة جديدة*\n\n"
+            "⚠️ لم يتم ربط MEXC API بعد أو تعذّر جلب الرصيد.\n\n"
+            "أدخل *اسم المحفظة*:\n"
+            "مثال: محفظة المضاربة / محفظة طويلة المدى\n\n/cancel للإلغاء",
+            parse_mode="Markdown",
+        )
     return CREATE_NAME
 
 
 async def create_portfolio_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Handle capital choice buttons (full/custom) that arrive as callback queries
+    if update.callback_query:
+        query = update.callback_query
+        await query.answer()
+        choice = query.data.split(":")[1]
+        real_balance = context.user_data.get("_real_balance")
+
+        if choice == "full" and real_balance is not None:
+            context.user_data["_new_portfolio_capital"] = real_balance
+        # For "custom", fall through to ask for name first
+
+        await query.edit_message_text(
+            "📁 أدخل *اسم المحفظة*:\n"
+            "مثال: محفظة المضاربة / محفظة طويلة المدى\n\n/cancel للإلغاء",
+            parse_mode="Markdown",
+        )
+        return CREATE_NAME
+
     name = update.message.text.strip()
     if len(name) < 2 or len(name) > 50:
         await update.message.reply_text("❌ الاسم يجب بين 2 و 50 حرف. أعد المحاولة:")
         return CREATE_NAME
 
     context.user_data["_new_portfolio_name"] = name
+
+    # If capital already chosen (full balance), skip capital input step
+    if "_new_portfolio_capital" in context.user_data:
+        capital = context.user_data.pop("_new_portfolio_capital")
+        user_id = update.effective_user.id
+        await db.create_portfolio(user_id, name, capital)
+        portfolios = await db.get_portfolios(user_id)
+        active_id = await db.get_active_portfolio_id(user_id)
+        await update.message.reply_text(
+            f"✅ *تم إنشاء المحفظة!*\n\n📁 *{name}*\n💰 رأس المال: *${capital:,.2f} USDT*",
+            parse_mode="Markdown",
+            reply_markup=portfolios_list_kb(portfolios, active_id),
+        )
+        return ConversationHandler.END
+
+    real_balance = context.user_data.get("_real_balance")
+    balance_hint = f"\n💡 رصيدك الحالي: ${real_balance:,.2f}" if real_balance else ""
     await update.message.reply_text(
-        f"✅ الاسم: *{name}*\n\n💰 أدخل *رأس المال بالـ USDT*:\n"
-        "هذا هو المبلغ المخصص لهذه المحفظة.\n"
+        f"✅ الاسم: *{name}*\n\n💰 أدخل *رأس المال بالـ USDT*:{balance_hint}\n"
         "مثال: `1000` أو `5000.50`\n\n/cancel للإلغاء",
         parse_mode="Markdown",
     )
@@ -197,17 +268,15 @@ async def create_portfolio_capital(update: Update, context: ContextTypes.DEFAULT
         return CREATE_CAPITAL
 
     name = context.user_data.pop("_new_portfolio_name", "محفظة جديدة")
+    context.user_data.pop("_real_balance", None)
     user_id = update.effective_user.id
 
-    portfolio_id = await db.create_portfolio(user_id, name, capital)
-
+    await db.create_portfolio(user_id, name, capital)
     portfolios = await db.get_portfolios(user_id)
     active_id = await db.get_active_portfolio_id(user_id)
 
     await update.message.reply_text(
-        f"✅ *تم إنشاء المحفظة!*\n\n"
-        f"📁 *{name}*\n"
-        f"💰 رأس المال: *${capital:,.2f} USDT*\n\n"
+        f"✅ *تم إنشاء المحفظة!*\n\n📁 *{name}*\n💰 رأس المال: *${capital:,.2f} USDT*\n\n"
         "يمكنك تفعيلها من قائمة المحافظ وإضافة عملات لها من الإعدادات.",
         parse_mode="Markdown",
         reply_markup=portfolios_list_kb(portfolios, active_id),

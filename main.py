@@ -92,7 +92,10 @@ def build_app() -> Application:
     create_portfolio_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(create_portfolio_start, pattern="^portfolio_new$")],
         states={
-            CREATE_NAME:    [MessageHandler(TEXT, create_portfolio_name)],
+            CREATE_NAME: [
+                MessageHandler(TEXT, create_portfolio_name),
+                CallbackQueryHandler(create_portfolio_name, pattern="^portfolio_capital:"),
+            ],
             CREATE_CAPITAL: [MessageHandler(TEXT, create_portfolio_capital)],
         },
         fallbacks=[CommandHandler("cancel", cancel_portfolio_conv),
