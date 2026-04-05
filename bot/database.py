@@ -496,6 +496,7 @@ class Database:
             "mexc_api_key", "mexc_secret_key", "threshold", "auto_enabled",
             "auto_interval_hours", "quote_currency", "last_rebalance_at",
             "active_portfolio_id", "scalping_enabled", "scalping_trade_size",
+            "whale_enabled", "whale_trade_size",
         }
         for k in kwargs:
             if k not in _ALLOWED_SETTINGS_COLS:
