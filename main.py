@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 from telegram import Update
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
@@ -47,10 +48,20 @@ from bot.handlers.portfolio_manager import (
 from bot.scheduler import start_scheduler
 from bot.scalping.monitor import trade_monitor
 
+class _RedactTokenFilter(logging.Filter):
+    """Remove the Telegram bot token from log records."""
+    _pattern = re.compile(r"bot\d+:[A-Za-z0-9_-]{35,}")
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.msg = self._pattern.sub("bot<REDACTED>", str(record.msg))
+        return True
+
+
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO,
 )
+logging.getLogger().addFilter(_RedactTokenFilter())
 logger = logging.getLogger(__name__)
 
 
