@@ -1,12 +1,11 @@
 """
-Liquidity Sweep detection on 30M candles.
+Liquidity Sweep detection on 15M candles.
 
 A sweep occurs when a candle wicks below the 4H liquidity low and then
 closes back above it — indicating stop-losses were grabbed and price reversed.
 
-The volume spike requirement has been removed: it was filtering out too many
-valid setups. A wick below the zone that closes back above it is sufficient
-confirmation when combined with the other confluence filters (CVD + engulfing).
+Using 15M instead of 30M gives faster detection of the sweep pattern,
+reducing signal lag from ~30 min to ~15 min.
 """
 
 from typing import Dict, Any
@@ -27,8 +26,8 @@ async def detect_sweep(symbol: str, exchange, liquidity_low: float) -> Dict[str,
         }
     """
     try:
-        # Last 20 candles on 30M
-        ohlcv = await exchange.fetch_ohlcv(symbol, timeframe="30m", limit=20)
+        # Last 20 candles on 15M (was 30M — faster sweep detection)
+        ohlcv = await exchange.fetch_ohlcv(symbol, timeframe="15m", limit=20)
         if not ohlcv or len(ohlcv) < 5:
             return _empty_result()
 

@@ -58,10 +58,10 @@ def _status_text(sc: dict, open_count: int) -> str:
         f"  صفقات مفتوحة: *{open_count}*\n\n"
         "━━━━━━━━━━━━━━━━━━━━━\n"
         "📌 *الاستراتيجية:*\n"
-        "  ◈ 4H — مناطق Liquidity\n"
-        "  ◈ 1H — CVD (ضغط الشراء)\n"
-        "  ◈ 30M — Liquidity Sweep\n"
-        "  ◈ 15M — Engulfing (تأكيد الدخول)\n"
+        "  ◈ 4H — مناطق Liquidity (السياق)\n"
+        "  ◈ CVD — ضغط الشراء الفوري\n"
+        "  ◈ 15M — Liquidity Sweep\n"
+        "  ◈ 5M — Engulfing (تأكيد الدخول)\n"
         "━━━━━━━━━━━━━━━━━━━━━"
     )
 
@@ -401,7 +401,7 @@ async def _send_signal(
     text = (
         f"🎯 *Smart Liquidity Flow*\n\n"
         f"📌 `{sym}`\n"
-        f"⏱ التقاطع: 4H + 1H + 30M + 15M\n\n"
+        f"⏱ التقاطع: 4H + CVD + 15M + 5M\n\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"🟢 دخول  : `${entry:.6g}`\n"
         f"🎯 هدف 1 : `${t1:.6g}`  (`+{t1_pct:.2f}%`)\n"
@@ -409,9 +409,9 @@ async def _send_signal(
         f"🛑 وقف   : `${sl:.6g}`  (`{sl_pct:.2f}%`)\n"
         f"📊 R/R   : `1:{rr}`\n\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
-        f"💧 Liquidity Sweep ✅\n"
+        f"💧 Liquidity Sweep 15M ✅\n"
         f"📈 CVD صاعد ✅\n"
-        f"🕯 Engulfing 15M ✅\n\n"
+        f"🕯 Engulfing 5M ✅\n\n"
         f"{exec_line}"
     )
     try:

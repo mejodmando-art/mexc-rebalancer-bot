@@ -4,6 +4,9 @@ Cumulative Volume Delta (CVD) calculation using recent trades.
 Uses the `side` field returned by MEXC for each trade (buy/sell).
 Falls back to price-direction comparison if `side` is unavailable.
 CVD = cumulative sum of (buy_vol - sell_vol)
+
+Uses 200 trades instead of 500 — enough signal for short-term whale
+detection while being faster to fetch and more relevant to current price action.
 """
 
 from typing import Dict, Any
@@ -18,8 +21,8 @@ async def get_cvd(symbol: str, exchange) -> Dict[str, Any]:
         }
     """
     try:
-        # Fetch last 500 recent trades
-        trades = await exchange.fetch_trades(symbol, limit=500)
+        # 200 recent trades — faster API call, still captures current whale activity
+        trades = await exchange.fetch_trades(symbol, limit=200)
         if not trades or len(trades) < 10:
             return {"cvd": 0.0, "trend": "neutral"}
 
