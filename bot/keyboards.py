@@ -80,7 +80,7 @@ def portfolios_list_kb(portfolios: List[Dict], active_id: int) -> InlineKeyboard
     buttons = []
     for p in portfolios:
         active_mark = "✅ " if p['id'] == active_id else "   "
-        label = f"{active_mark}{p['name']}  ·  \${p['capital_usdt']:,.0f}"
+        label = f"{active_mark}{p['name']}  ·  ${p['capital_usdt']:,.0f}"
         buttons.append([InlineKeyboardButton(label, callback_data=f"portfolio:{p['id']}")])
     buttons.append([InlineKeyboardButton("➕ إنشاء محفظة جديدة", callback_data="portfolio_new")])
     buttons.append([InlineKeyboardButton("◀️ القائمة الرئيسية", callback_data="menu:main")])
