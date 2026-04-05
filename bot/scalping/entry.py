@@ -1,10 +1,13 @@
 """
-Entry confirmation on 15M candles using Bullish Engulfing pattern.
+Entry confirmation on 5M candles using Bullish Engulfing pattern.
 
 A Bullish Engulfing forms when:
   - The previous candle is bearish (close < open)
   - The current candle is bullish (close > open)
   - The current candle's body fully engulfs the previous candle's body
+
+Using 5M instead of 15M gives faster entry confirmation — catches the
+move earlier, closer to the actual sweep reversal point.
 """
 
 from typing import Dict, Any
@@ -20,7 +23,7 @@ async def confirm_entry(symbol: str, exchange) -> Dict[str, Any]:
     """
     try:
         # Need at least 3 candles; last one may still be forming
-        ohlcv = await exchange.fetch_ohlcv(symbol, timeframe="15m", limit=4)
+        ohlcv = await exchange.fetch_ohlcv(symbol, timeframe="5m", limit=4)
         if not ohlcv or len(ohlcv) < 3:
             return {"confirmed": False, "entry_price": 0.0}
 
