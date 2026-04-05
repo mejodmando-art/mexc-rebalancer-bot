@@ -256,6 +256,18 @@ async def run_scalping_scan(app) -> None:
                 )
                 continue
 
+            # ── Scan start notification ────────────────────────────────────
+            open_count = len(trade_monitor.open_symbols)
+            await app.bot.send_message(
+                user_id,
+                f"🔍 *Scalping — جاري المسح*\n\n"
+                f"💰 الرصيد: `${usdt_balance:.2f} USDT`\n"
+                f"📦 حجم الصفقة: `${trade_size:.0f} USDT`\n"
+                f"📊 صفقات مفتوحة: `{open_count}`\n\n"
+                f"⏳ يمسح أفضل العملات بحثاً عن فرصة...",
+                parse_mode="Markdown",
+            )
+
             try:
                 setups = await asyncio.wait_for(
                     scan(client.exchange, trade_monitor.open_symbols, trade_size),
@@ -263,7 +275,29 @@ async def run_scalping_scan(app) -> None:
                 )
             except asyncio.TimeoutError:
                 logger.warning(f"Scalping scan timed out for user {user_id}")
+                await app.bot.send_message(
+                    user_id,
+                    "⚠️ *Scalping — انتهت مهلة المسح*\n\nسيحاول مجدداً في الدورة القادمة (15 دقيقة).",
+                    parse_mode="Markdown",
+                )
                 continue
+
+            # ── Scan result notification ───────────────────────────────────
+            if not setups:
+                await app.bot.send_message(
+                    user_id,
+                    "🔎 *Scalping — انتهى المسح*\n\n"
+                    "لم تتوفر فرصة مناسبة الآن.\n"
+                    "📅 المسح القادم بعد *15 دقيقة*.",
+                    parse_mode="Markdown",
+                )
+            else:
+                await app.bot.send_message(
+                    user_id,
+                    f"✨ *Scalping — وُجدت {len(setups)} فرصة!*\n\n"
+                    f"جاري تنفيذ الصفقات...",
+                    parse_mode="Markdown",
+                )
 
             for setup in setups:
                 result = await execute_trade(setup, client.exchange)
