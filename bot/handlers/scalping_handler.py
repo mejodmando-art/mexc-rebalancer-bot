@@ -85,7 +85,6 @@ async def scalping_menu_callback(update: Update, context: ContextTypes.DEFAULT_T
 
 async def scalping_toggle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     user_id = update.effective_user.id
 
     sc = await _get_scalping_settings(user_id)

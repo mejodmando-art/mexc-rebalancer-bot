@@ -79,7 +79,6 @@ async def whale_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def whale_toggle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     user_id = update.effective_user.id
     s = await _get_settings(user_id)
 
