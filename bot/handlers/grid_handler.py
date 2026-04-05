@@ -246,7 +246,8 @@ async def grid_size_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"✅ الحجم: `${val:.0f} USDT`\n\n"
         "🔲 *الخطوة 6/7* — Take Profit (اختياري):\n"
-        "أرسل السعر المستهدف للإغلاق الكامل\n"
+        "أرسل النسبة المئوية للربح المستهدف\n"
+        "مثال: `5` يعني أغلق الشبكة لما السعر يرتفع 5%\n"
         "أو أرسل /skip للتخطي",
         parse_mode="Markdown",
     )
@@ -255,28 +256,33 @@ async def grid_size_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def grid_tp_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        val = float(update.message.text.strip())
-        context.user_data["take_profit"] = val
-        tp_line = f"`${val:.6g}`"
+        val = float(update.message.text.strip().replace("%", ""))
+        if val <= 0 or val > 1000:
+            raise ValueError
+        context.user_data["take_profit_pct"] = val
     except ValueError:
-        await update.message.reply_text("❌ أدخل سعراً صحيحاً أو /skip")
+        await update.message.reply_text("❌ أدخل نسبة صحيحة مثال: `5` أو /skip")
         return GRID_TP
 
     await update.message.reply_text(
-        f"✅ Take Profit: {tp_line}\n\n"
+        f"✅ Take Profit: `+{val}%`\n\n"
         "🔲 *الخطوة 7/7* — Stop Loss (اختياري):\n"
-        "أرسل سعر الإيقاف أو /skip للتخطي",
+        "أرسل النسبة المئوية لوقف الخسارة\n"
+        "مثال: `5` يعني أغلق الشبكة لما السعر ينزل 5%\n"
+        "أو أرسل /skip للتخطي",
         parse_mode="Markdown",
     )
     return GRID_SL
 
 
 async def grid_tp_skip(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["take_profit"] = None
+    context.user_data["take_profit_pct"] = None
     await update.message.reply_text(
         "✅ بدون Take Profit\n\n"
         "🔲 *الخطوة 7/7* — Stop Loss (اختياري):\n"
-        "أرسل سعر الإيقاف أو /skip للتخطي",
+        "أرسل النسبة المئوية لوقف الخسارة\n"
+        "مثال: `5` يعني أغلق الشبكة لما السعر ينزل 5%\n"
+        "أو أرسل /skip للتخطي",
         parse_mode="Markdown",
     )
     return GRID_SL
@@ -284,24 +290,26 @@ async def grid_tp_skip(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def grid_sl_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        val = float(update.message.text.strip())
-        context.user_data["stop_loss"] = val
+        val = float(update.message.text.strip().replace("%", ""))
+        if val <= 0 or val > 100:
+            raise ValueError
+        context.user_data["stop_loss_pct"] = val
     except ValueError:
-        await update.message.reply_text("❌ أدخل سعراً صحيحاً أو /skip")
+        await update.message.reply_text("❌ أدخل نسبة صحيحة مثال: `5` أو /skip")
         return GRID_SL
 
     return await _show_confirmation(update, context)
 
 
 async def grid_sl_skip(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["stop_loss"] = None
+    context.user_data["stop_loss_pct"] = None
     return await _show_confirmation(update, context)
 
 
 async def _show_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE):
     d = context.user_data
-    tp_line = f"🎯 Take Profit: `${d['take_profit']:.6g}`\n" if d.get("take_profit") else "🎯 Take Profit: بدون\n"
-    sl_line = f"🛑 Stop Loss:   `${d['stop_loss']:.6g}`\n"  if d.get("stop_loss")   else "🛑 Stop Loss:   بدون\n"
+    tp_line = f"🎯 Take Profit: `+{d['take_profit_pct']}%`\n" if d.get("take_profit_pct") else "🎯 Take Profit: بدون\n"
+    sl_line = f"🛑 Stop Loss:   `-{d['stop_loss_pct']}%`\n"  if d.get("stop_loss_pct")   else "🛑 Stop Loss:   بدون\n"
 
     text = (
         "📋 *تأكيد إنشاء الشبكة*\n\n"
@@ -347,6 +355,30 @@ async def grid_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TY
             await query.edit_message_text("❌ تعذّر جلب السعر الحالي. حاول مرة أخرى.")
             return ConversationHandler.END
 
+        # ── Balance check ──────────────────────────────────────────────────
+        try:
+            balance = await client.exchange.fetch_balance()
+            usdt_balance = float(balance.get("total", {}).get("USDT", 0) or 0)
+        except Exception:
+            usdt_balance = 0.0
+
+        if usdt_balance < d["order_size_usdt"]:
+            await query.edit_message_text(
+                f"❌ *رصيد غير كافٍ*\n\n"
+                f"💰 رصيدك الحالي: `${usdt_balance:.2f} USDT`\n"
+                f"📦 حجم الشبكة المطلوب: `${d['order_size_usdt']:.0f} USDT`\n\n"
+                f"أضف رصيداً أو قلّل حجم الشبكة.",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("◀️ رجوع", callback_data="grid:menu")
+                ]]),
+            )
+            return ConversationHandler.END
+
+        # ── Calculate TP/SL prices from percentages ────────────────────────
+        take_profit = round(center * (1 + d["take_profit_pct"] / 100), 8) if d.get("take_profit_pct") else None
+        stop_loss   = round(center * (1 - d["stop_loss_pct"]   / 100), 8) if d.get("stop_loss_pct")   else None
+
         # Calculate grid
         grid_levels = calculate_grid_levels(
             center_price = center,
@@ -363,7 +395,28 @@ async def grid_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TY
             order_size_usdt = d["order_size_usdt"],
         )
 
+        # ── If all orders failed → don't save ─────────────────────────────
+        buy_count  = len(result["buy_orders"])
+        sell_count = len(result["sell_orders"])
+        err_count  = len(result["errors"])
+
+        if buy_count == 0 and sell_count == 0:
+            err_sample = result["errors"][0] if result["errors"] else "خطأ غير معروف"
+            await query.edit_message_text(
+                f"❌ *فشل تنفيذ الشبكة*\n\n"
+                f"تعذّر وضع أي أوردر.\n"
+                f"السبب: `{err_sample}`\n\n"
+                f"تأكد من صحة الـ API key وأن الرصيد كافٍ.",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("◀️ رجوع", callback_data="grid:menu")
+                ]]),
+            )
+            return ConversationHandler.END
+
         # Save to DB
+        tp_pct = d.get("take_profit_pct")
+        sl_pct = d.get("stop_loss_pct")
         grid = {
             "user_id":         user_id,
             "symbol":          d["symbol"],
@@ -375,8 +428,8 @@ async def grid_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TY
             "steps":           d["steps"],
             "step_pct":        grid_levels["step_pct"],
             "order_size_usdt": d["order_size_usdt"],
-            "take_profit":     d.get("take_profit"),
-            "stop_loss":       d.get("stop_loss"),
+            "take_profit":     take_profit,
+            "stop_loss":       stop_loss,
             "buy_orders":      result["buy_orders"],
             "sell_orders":     result["sell_orders"],
             "total_trades":    0,
@@ -389,9 +442,8 @@ async def grid_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TY
         grid["id"] = grid_id
         await grid_monitor.add_grid(grid)
 
-        buy_count  = len(result["buy_orders"])
-        sell_count = len(result["sell_orders"])
-        err_count  = len(result["errors"])
+        tp_line = f"🎯 Take Profit: `${take_profit:.6g}`  (`+{tp_pct}%`)\n" if take_profit else ""
+        sl_line = f"🛑 Stop Loss:   `${stop_loss:.6g}`  (`-{sl_pct}%`)\n"   if stop_loss  else ""
 
         await query.edit_message_text(
             f"✅ *الشبكة شغالة!*\n\n"
@@ -399,10 +451,11 @@ async def grid_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TY
             f"السعر الحالي: `${center:.6g}`\n"
             f"الحد العلوي:  `${grid_levels['upper']:.6g}`\n"
             f"الحد السفلي:  `${grid_levels['lower']:.6g}`\n"
-            f"ربح كل خطوة: `{grid_levels['step_pct']:.3f}%`\n\n"
+            f"ربح كل خطوة: `{grid_levels['step_pct']:.3f}%`\n"
+            f"{tp_line}{sl_line}\n"
             f"أوردرات شراء:  `{buy_count}`\n"
             f"أوردرات بيع:   `{sell_count}`\n"
-            + (f"⚠️ أخطاء: `{err_count}`\n" if err_count else ""),
+            + (f"⚠️ أخطاء جزئية: `{err_count}`\n" if err_count else ""),
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup([[
                 InlineKeyboardButton("◀️ القائمة", callback_data="grid:menu")
