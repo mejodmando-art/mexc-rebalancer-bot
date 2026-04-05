@@ -242,10 +242,9 @@ async def run_scalping_scan(app) -> None:
 
             if usdt_balance < trade_size:
                 logger.warning(
-                    f"Scalping: skipping scan for user {user_id} — "
-                    f"balance ${usdt_balance:.2f} < trade_size ${trade_size:.0f}"
+                    f"Scalping: low balance for user {user_id} — "
+                    f"${usdt_balance:.2f} < ${trade_size:.0f}, scanning anyway"
                 )
-                continue
 
             # ── Scan start notification ────────────────────────────────────
             open_count = len(trade_monitor.open_symbols)

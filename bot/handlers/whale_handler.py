@@ -166,8 +166,10 @@ async def run_whale_scan(app) -> None:
                 continue
 
             if usdt_balance < trade_size:
-                logger.warning(f"WhaleScan: skipping user {user_id} — low balance")
-                continue
+                logger.warning(
+                    f"WhaleScan: low balance for user {user_id} — "
+                    f"${usdt_balance:.2f} < ${trade_size:.0f}, scanning anyway"
+                )
 
             # Run scan
             all_open = whale_monitor.open_symbols
@@ -183,6 +185,14 @@ async def run_whale_scan(app) -> None:
             if not setups:
                 logger.info(f"WhaleScan: no setups for user {user_id}")
                 continue
+
+            # Refresh balance before executing
+            try:
+                _, usdt_balance = await asyncio.wait_for(
+                    client.get_portfolio(), timeout=15
+                )
+            except Exception:
+                pass  # use last known balance
 
             for setup in setups:
                 symbol = setup["symbol"]
