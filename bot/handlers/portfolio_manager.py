@@ -11,8 +11,10 @@ from bot.keyboards import (
 # Conversation states
 CREATE_NAME, CREATE_CAPITAL, EDIT_NAME, EDIT_CAPITAL = range(30, 34)
 PORTFOLIO_SET_THRESHOLD, PORTFOLIO_SET_INTERVAL = range(34, 36)
-# Take-profit / stop-loss wizard states
+# Take-profit / stop-loss wizard states (existing portfolio)
 TP_TP1_TYPE, TP_TP1_VALUE, TP_TP1_SELL, TP_TP2_TYPE, TP_TP2_VALUE, TP_TP2_SELL, TP_SL_TYPE, TP_SL_VALUE = range(36, 44)
+# Create-portfolio wizard TP/SL states
+CREATE_TP1_TYPE, CREATE_TP1_VALUE, CREATE_TP2_VALUE, CREATE_SL_VALUE = range(44, 48)
 
 
 async def portfolios_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -245,19 +247,22 @@ async def create_portfolio_name(update: Update, context: ContextTypes.DEFAULT_TY
 
     context.user_data["_new_portfolio_name"] = name
 
-    # If capital already chosen (full balance), skip capital input step
+    # If capital already chosen (full balance), go to TP/SL step
     if "_new_portfolio_capital" in context.user_data:
-        capital = context.user_data.pop("_new_portfolio_capital")
-        user_id = update.effective_user.id
-        await db.create_portfolio(user_id, name, capital)
-        portfolios = await db.get_portfolios(user_id)
-        active_id = await db.get_active_portfolio_id(user_id)
+        capital = context.user_data["_new_portfolio_capital"]
         await update.message.reply_text(
-            f"✅ *تم إنشاء المحفظة!*\n\n📁 *{name}*\n💰 رأس المال: *${capital:,.2f} USDT*",
+            f"✅ رأس المال: *${capital:,.2f} USDT*\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n"
+            "🎯 *هدف الربح الأول (Take Profit 1)*\n\n"
+            "اختر نوع الهدف:",
             parse_mode="Markdown",
-            reply_markup=portfolios_list_kb(portfolios, active_id),
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📊 نسبة مئوية (%)", callback_data="create_tp_type:pct")],
+                [InlineKeyboardButton("💵 مبلغ USDT",       callback_data="create_tp_type:usdt")],
+                [InlineKeyboardButton("⏭ تخطي الأهداف",    callback_data="create_tp_type:skip")],
+            ]),
         )
-        return ConversationHandler.END
+        return CREATE_TP1_TYPE
 
     real_balance = context.user_data.get("_real_balance")
     balance_hint = f"\n💡 رصيدك الحالي: ${real_balance:,.2f}" if real_balance else ""
@@ -278,21 +283,183 @@ async def create_portfolio_capital(update: Update, context: ContextTypes.DEFAULT
         await update.message.reply_text("❌ أدخل رقماً صحيحاً أكبر من أو يساوي 0:")
         return CREATE_CAPITAL
 
-    name = context.user_data.pop("_new_portfolio_name", "محفظة جديدة")
+    context.user_data["_new_portfolio_capital"] = capital
     context.user_data.pop("_real_balance", None)
-    user_id = update.effective_user.id
 
-    await db.create_portfolio(user_id, name, capital)
-    portfolios = await db.get_portfolios(user_id)
-    active_id = await db.get_active_portfolio_id(user_id)
+    # Ask about Take Profit
+    await update.message.reply_text(
+        f"✅ رأس المال: *${capital:,.2f} USDT*\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        "🎯 *هدف الربح الأول (Take Profit 1)*\n\n"
+        "اختر نوع الهدف:",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("📊 نسبة مئوية (%)", callback_data="create_tp_type:pct")],
+            [InlineKeyboardButton("💵 مبلغ USDT",       callback_data="create_tp_type:usdt")],
+            [InlineKeyboardButton("⏭ تخطي الأهداف",    callback_data="create_tp_type:skip")],
+        ]),
+    )
+    return CREATE_TP1_TYPE
+
+
+async def create_tp1_type_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    choice = query.data.split(":")[1]
+
+    if choice == "skip":
+        # Save portfolio without TP/SL
+        await _finalize_portfolio_creation(update, context, tp1_type=None, tp1_value=0,
+                                           tp2_value=0, sl_value=0)
+        return ConversationHandler.END
+
+    context.user_data["_create_tp1_type"] = choice
+    type_label = "نسبة مئوية (%)" if choice == "pct" else "مبلغ USDT"
+    example    = "مثال: `10` تعني +10%" if choice == "pct" else "مثال: `500` تعني $500 ربح"
+
+    await query.edit_message_text(
+        f"🎯 *هدف الربح الأول — {type_label}*\n\n"
+        f"أدخل قيمة الهدف الأول:\n{example}\n\n"
+        "أرسل `0` لتخطي هذا الهدف.\n\n/cancel للإلغاء",
+        parse_mode="Markdown",
+    )
+    return CREATE_TP1_VALUE
+
+
+async def create_tp1_value_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        val = float(update.message.text.strip())
+        if val < 0:
+            raise ValueError
+    except ValueError:
+        await update.message.reply_text("❌ أدخل رقماً أكبر من أو يساوي 0:")
+        return CREATE_TP1_VALUE
+
+    context.user_data["_create_tp1_value"] = val
+
+    # Ask TP2
+    tp1_type = context.user_data.get("_create_tp1_type", "pct")
+    type_label = "نسبة مئوية (%)" if tp1_type == "pct" else "مبلغ USDT"
+    example    = "مثال: `20` تعني +20%" if tp1_type == "pct" else "مثال: `1000` تعني $1000 ربح"
 
     await update.message.reply_text(
-        f"✅ *تم إنشاء المحفظة!*\n\n📁 *{name}*\n💰 رأس المال: *${capital:,.2f} USDT*\n\n"
-        "يمكنك تفعيلها من قائمة المحافظ وإضافة عملات لها من الإعدادات.",
+        f"✅ هدف 1: `{val:.2f}{'%' if tp1_type == 'pct' else ' USDT'}`\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🏆 *هدف الربح الثاني (Take Profit 2)*\n\n"
+        f"أدخل قيمة الهدف الثاني ({type_label}):\n{example}\n\n"
+        "أرسل `0` لتخطي هذا الهدف.\n\n/cancel للإلغاء",
         parse_mode="Markdown",
-        reply_markup=portfolios_list_kb(portfolios, active_id),
+    )
+    return CREATE_TP2_VALUE
+
+
+async def create_tp2_value_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        val = float(update.message.text.strip())
+        if val < 0:
+            raise ValueError
+    except ValueError:
+        await update.message.reply_text("❌ أدخل رقماً أكبر من أو يساوي 0:")
+        return CREATE_TP2_VALUE
+
+    context.user_data["_create_tp2_value"] = val
+    tp1_type = context.user_data.get("_create_tp1_type", "pct")
+    type_label = "نسبة مئوية (%)" if tp1_type == "pct" else "مبلغ USDT"
+    example    = "مثال: `5` تعني -5% خسارة" if tp1_type == "pct" else "مثال: `200` تعني -$200 خسارة"
+
+    await update.message.reply_text(
+        f"✅ هدف 2: `{val:.2f}{'%' if tp1_type == 'pct' else ' USDT'}`\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🛑 *وقف الخسارة (Stop Loss)*\n\n"
+        f"أدخل حد الخسارة ({type_label}):\n{example}\n\n"
+        "عند الوصول لهذا الحد، يتم بيع المحفظة تلقائياً وإيقاف التوازن.\n\n"
+        "أرسل `0` لتخطي وقف الخسارة.\n\n/cancel للإلغاء",
+        parse_mode="Markdown",
+    )
+    return CREATE_SL_VALUE
+
+
+async def create_sl_value_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        val = float(update.message.text.strip())
+        if val < 0:
+            raise ValueError
+    except ValueError:
+        await update.message.reply_text("❌ أدخل رقماً أكبر من أو يساوي 0:")
+        return CREATE_SL_VALUE
+
+    context.user_data["_create_sl_value"] = val
+    tp1_type  = context.user_data.get("_create_tp1_type", "pct")
+    tp1_value = context.user_data.get("_create_tp1_value", 0)
+    tp2_value = context.user_data.get("_create_tp2_value", 0)
+
+    await _finalize_portfolio_creation(
+        update, context,
+        tp1_type=tp1_type, tp1_value=tp1_value,
+        tp2_value=tp2_value, sl_value=val,
     )
     return ConversationHandler.END
+
+
+async def _finalize_portfolio_creation(update, context, tp1_type, tp1_value, tp2_value, sl_value):
+    """Create the portfolio in DB with all settings and show confirmation."""
+    user_id = update.effective_user.id if update.effective_user else None
+    name    = context.user_data.pop("_new_portfolio_name", "محفظة جديدة")
+    capital = context.user_data.pop("_new_portfolio_capital", 0.0)
+    context.user_data.pop("_create_tp1_type",  None)
+    context.user_data.pop("_create_tp1_value", None)
+    context.user_data.pop("_create_tp2_value", None)
+    context.user_data.pop("_create_sl_value",  None)
+
+    portfolio_id = await db.create_portfolio(user_id, name, capital)
+
+    # Save TP/SL if provided
+    if tp1_type and tp1_value > 0:
+        await db.update_portfolio(
+            portfolio_id,
+            tp_enabled=1,
+            tp_entry_value=capital,
+            tp1_type=tp1_type,
+            tp1_value=tp1_value,
+            tp1_sell_pct=50.0,
+            tp2_type=tp1_type,
+            tp2_value=tp2_value,
+            tp2_sell_pct=100.0,
+            sl_type=tp1_type,
+            sl_value=sl_value,
+        )
+
+    portfolios = await db.get_portfolios(user_id)
+    active_id  = await db.get_active_portfolio_id(user_id)
+
+    # Build summary
+    suffix = "%" if tp1_type == "pct" else " USDT"
+    tp1_line = f"🎯 هدف 1: `{tp1_value:.2f}{suffix}`" if tp1_value > 0 else "🎯 هدف 1: غير محدد"
+    tp2_line = f"🏆 هدف 2: `{tp2_value:.2f}{suffix}`" if tp2_value > 0 else "🏆 هدف 2: غير محدد"
+    sl_line  = f"🛑 وقف الخسارة: `{sl_value:.2f}{suffix}`" if sl_value > 0 else "🛑 وقف الخسارة: غير محدد"
+
+    msg = update.message if hasattr(update, "message") and update.message else None
+    text = (
+        f"✅ *تم إنشاء المحفظة!*\n\n"
+        f"📁 *{name}*\n"
+        f"💰 رأس المال: *${capital:,.2f} USDT*\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"{tp1_line}\n"
+        f"{tp2_line}\n"
+        f"{sl_line}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "يمكنك تعديل هذه الإعدادات لاحقاً من تفاصيل المحفظة."
+    )
+
+    if msg:
+        await msg.reply_text(text, parse_mode="Markdown",
+                             reply_markup=portfolios_list_kb(portfolios, active_id))
+    else:
+        # Fallback for callback_query path
+        await update.callback_query.edit_message_text(
+            text, parse_mode="Markdown",
+            reply_markup=portfolios_list_kb(portfolios, active_id)
+        )
 
 
 # ── Edit Portfolio Name Conversation ───────────────────────────────────────────
@@ -862,3 +1029,311 @@ async def portfolio_toggle_auto_callback(update: Update, context: ContextTypes.D
         reply_markup=portfolio_actions_kb(portfolio_id, p["id"] == active_id, bool(p.get("auto_enabled")))
     )
 
+
+
+# ── Portfolio TP/SL Menu ───────────────────────────────────────────────────────
+
+async def portfolio_tp_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = update.effective_user.id
+    portfolio_id = int(query.data.split(":")[1])
+
+    p = await db.get_portfolio(portfolio_id)
+    if not p or p["user_id"] != user_id:
+        await query.answer("❌ محفظة غير موجودة", show_alert=True)
+        return
+
+    tp_enabled = bool(p.get("tp_enabled"))
+    tp1_type   = p.get("tp1_type", "pct")
+    tp1_value  = float(p.get("tp1_value") or 0)
+    tp2_value  = float(p.get("tp2_value") or 0)
+    sl_value   = float(p.get("sl_value") or 0)
+    suffix     = "%" if tp1_type == "pct" else " USDT"
+
+    tp1_line = f"`{tp1_value:.2f}{suffix}`" if tp1_value > 0 else "_غير محدد_"
+    tp2_line = f"`{tp2_value:.2f}{suffix}`" if tp2_value > 0 else "_غير محدد_"
+    sl_line  = f"`{sl_value:.2f}{suffix}`"  if sl_value  > 0 else "_غير محدد_"
+    status   = "🟢 مفعّل" if tp_enabled else "🔴 معطّل"
+
+    text = (
+        f"🎯 *أهداف الربح ووقف الخسارة*\n"
+        f"📁 *{p['name']}*\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"الحالة: {status}\n"
+        f"🎯 هدف 1 (بيع 50%): {tp1_line}\n"
+        f"🏆 هدف 2 (بيع 100%): {tp2_line}\n"
+        f"🛑 وقف الخسارة: {sl_line}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━"
+    )
+
+    buttons = []
+    if tp_enabled:
+        buttons.append([InlineKeyboardButton("🔴 تعطيل الأهداف", callback_data=f"portfolio_tp_deactivate:{portfolio_id}")])
+    else:
+        buttons.append([InlineKeyboardButton("🟢 تفعيل الأهداف", callback_data=f"portfolio_tp_activate:{portfolio_id}")])
+    buttons.append([InlineKeyboardButton("✏️ تعديل الأهداف", callback_data=f"portfolio_tp_setup:{portfolio_id}")])
+    buttons.append([InlineKeyboardButton("◀️ رجوع", callback_data=f"portfolio:{portfolio_id}")])
+
+    await query.edit_message_text(text, parse_mode="Markdown",
+                                  reply_markup=InlineKeyboardMarkup(buttons))
+
+
+async def portfolio_tp_activate_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = update.effective_user.id
+    portfolio_id = int(query.data.split(":")[1])
+    p = await db.get_portfolio(portfolio_id)
+    if not p or p["user_id"] != user_id:
+        await query.answer("❌ محفظة غير موجودة", show_alert=True)
+        return
+    await db.update_portfolio(portfolio_id, tp_enabled=1, tp_entry_value=p["capital_usdt"])
+    await query.answer("✅ تم تفعيل الأهداف")
+    query.data = f"portfolio_tp_menu:{portfolio_id}"
+    await portfolio_tp_menu_callback(update, context)
+
+
+async def portfolio_tp_deactivate_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = update.effective_user.id
+    portfolio_id = int(query.data.split(":")[1])
+    p = await db.get_portfolio(portfolio_id)
+    if not p or p["user_id"] != user_id:
+        await query.answer("❌ محفظة غير موجودة", show_alert=True)
+        return
+    await db.update_portfolio(portfolio_id, tp_enabled=0)
+    await query.answer("✅ تم تعطيل الأهداف")
+    query.data = f"portfolio_tp_menu:{portfolio_id}"
+    await portfolio_tp_menu_callback(update, context)
+
+
+# ── TP/SL Setup Wizard ────────────────────────────────────────────────────────
+
+async def portfolio_tp_setup_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    portfolio_id = int(query.data.split(":")[1])
+    context.user_data["_tp_portfolio_id"] = portfolio_id
+    context.user_data["_tp_step"] = "tp1_type"
+    await query.edit_message_text(
+        "🎯 *إعداد أهداف الربح ووقف الخسارة*\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        "*هدف الربح الأول (TP1)*\n\nاختر نوع الهدف:",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("📊 نسبة مئوية (%)", callback_data="tp_type:pct")],
+            [InlineKeyboardButton("💵 مبلغ USDT",       callback_data="tp_type:usdt")],
+            [InlineKeyboardButton("⏭ تخطي",            callback_data="tp_type:skip")],
+        ]),
+    )
+    return TP_TP1_TYPE
+
+
+async def tp_type_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    choice = query.data.split(":")[1]
+    step   = context.user_data.get("_tp_step", "tp1_type")
+
+    if choice == "skip":
+        if step == "tp1_type":
+            context.user_data.update({"_tp1_type": "pct", "_tp1_value": 0, "_tp_step": "tp2_type"})
+            await query.edit_message_text(
+                "🏆 *هدف الربح الثاني (TP2)*\n\nاختر نوع الهدف:",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("📊 نسبة مئوية (%)", callback_data="tp_type:pct")],
+                    [InlineKeyboardButton("💵 مبلغ USDT",       callback_data="tp_type:usdt")],
+                    [InlineKeyboardButton("⏭ تخطي",            callback_data="tp_type:skip")],
+                ]),
+            )
+            return TP_TP2_TYPE
+        elif step == "tp2_type":
+            context.user_data.update({"_tp2_value": 0, "_tp_step": "sl_type"})
+            await query.edit_message_text(
+                "🛑 *وقف الخسارة (Stop Loss)*\n\nاختر نوع الوقف:",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("📊 نسبة مئوية (%)", callback_data="tp_type:pct")],
+                    [InlineKeyboardButton("💵 مبلغ USDT",       callback_data="tp_type:usdt")],
+                    [InlineKeyboardButton("⏭ تخطي",            callback_data="tp_type:skip")],
+                ]),
+            )
+            return TP_SL_TYPE
+        else:
+            await _save_tp_sl(update, context, sl_value=0)
+            return ConversationHandler.END
+
+    context.user_data["_tp_type"] = choice
+    type_label = "نسبة مئوية (%)" if choice == "pct" else "مبلغ USDT"
+
+    if step == "tp1_type":
+        context.user_data["_tp_step"] = "tp1_value"
+        example = "مثال: `10` = +10%" if choice == "pct" else "مثال: `500` = $500 ربح"
+        await query.edit_message_text(
+            f"🎯 *هدف 1 — {type_label}*\n\nأدخل القيمة:\n{example}\n\n/cancel للإلغاء",
+            parse_mode="Markdown",
+        )
+        return TP_TP1_VALUE
+    elif step == "tp2_type":
+        context.user_data["_tp_step"] = "tp2_value"
+        example = "مثال: `20` = +20%" if choice == "pct" else "مثال: `1000` = $1000 ربح"
+        await query.edit_message_text(
+            f"🏆 *هدف 2 — {type_label}*\n\nأدخل القيمة:\n{example}\n\n/cancel للإلغاء",
+            parse_mode="Markdown",
+        )
+        return TP_TP2_VALUE
+    else:
+        context.user_data["_tp_step"] = "sl_value"
+        example = "مثال: `5` = -5% خسارة" if choice == "pct" else "مثال: `200` = -$200 خسارة"
+        await query.edit_message_text(
+            f"🛑 *وقف الخسارة — {type_label}*\n\nأدخل القيمة:\n{example}\n\n/cancel للإلغاء",
+            parse_mode="Markdown",
+        )
+        return TP_SL_VALUE
+
+
+async def tp1_value_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        val = float(update.message.text.strip())
+        if val < 0:
+            raise ValueError
+    except ValueError:
+        await update.message.reply_text("❌ أدخل رقماً أكبر من أو يساوي 0:")
+        return TP_TP1_VALUE
+    context.user_data["_tp1_value"] = val
+    context.user_data["_tp1_type"]  = context.user_data.get("_tp_type", "pct")
+    context.user_data["_tp_step"]   = "tp1_sell"
+    await update.message.reply_text(
+        f"✅ هدف 1: `{val:.2f}`\n\n"
+        "أدخل نسبة البيع عند هدف 1 (%):\n"
+        "مثال: `50` تعني بيع 50% من المحفظة\n\n/cancel للإلغاء",
+        parse_mode="Markdown",
+    )
+    return TP_TP1_SELL
+
+
+async def tp1_sell_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        val = float(update.message.text.strip())
+        if not (1 <= val <= 100):
+            raise ValueError
+    except ValueError:
+        await update.message.reply_text("❌ أدخل نسبة بين 1 و 100:")
+        return TP_TP1_SELL
+    context.user_data["_tp1_sell"] = val
+    context.user_data["_tp_step"]  = "tp2_type"
+    await update.message.reply_text(
+        f"✅ بيع عند هدف 1: `{val:.0f}%`\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        "🏆 *هدف الربح الثاني (TP2)*\n\nاختر نوع الهدف:",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("📊 نسبة مئوية (%)", callback_data="tp_type:pct")],
+            [InlineKeyboardButton("💵 مبلغ USDT",       callback_data="tp_type:usdt")],
+            [InlineKeyboardButton("⏭ تخطي",            callback_data="tp_type:skip")],
+        ]),
+    )
+    return TP_TP2_TYPE
+
+
+async def tp2_value_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        val = float(update.message.text.strip())
+        if val < 0:
+            raise ValueError
+    except ValueError:
+        await update.message.reply_text("❌ أدخل رقماً أكبر من أو يساوي 0:")
+        return TP_TP2_VALUE
+    context.user_data["_tp2_value"] = val
+    context.user_data["_tp_step"]   = "tp2_sell"
+    await update.message.reply_text(
+        f"✅ هدف 2: `{val:.2f}`\n\n"
+        "أدخل نسبة البيع عند هدف 2 (%):\n"
+        "مثال: `100` تعني بيع كامل المحفظة\n\n/cancel للإلغاء",
+        parse_mode="Markdown",
+    )
+    return TP_TP2_SELL
+
+
+async def tp2_sell_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        val = float(update.message.text.strip())
+        if not (1 <= val <= 100):
+            raise ValueError
+    except ValueError:
+        await update.message.reply_text("❌ أدخل نسبة بين 1 و 100:")
+        return TP_TP2_SELL
+    context.user_data["_tp2_sell"] = val
+    context.user_data["_tp_step"]  = "sl_type"
+    await update.message.reply_text(
+        f"✅ بيع عند هدف 2: `{val:.0f}%`\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        "🛑 *وقف الخسارة (Stop Loss)*\n\nاختر نوع الوقف:",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("📊 نسبة مئوية (%)", callback_data="tp_type:pct")],
+            [InlineKeyboardButton("💵 مبلغ USDT",       callback_data="tp_type:usdt")],
+            [InlineKeyboardButton("⏭ تخطي",            callback_data="tp_type:skip")],
+        ]),
+    )
+    return TP_SL_TYPE
+
+
+async def sl_value_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        val = float(update.message.text.strip())
+        if val < 0:
+            raise ValueError
+    except ValueError:
+        await update.message.reply_text("❌ أدخل رقماً أكبر من أو يساوي 0:")
+        return TP_SL_VALUE
+    await _save_tp_sl(update, context, sl_value=val)
+    return ConversationHandler.END
+
+
+async def _save_tp_sl(update, context, sl_value: float):
+    portfolio_id = context.user_data.pop("_tp_portfolio_id", None)
+    tp1_type  = context.user_data.pop("_tp1_type",  "pct")
+    tp1_value = context.user_data.pop("_tp1_value", 0)
+    tp1_sell  = context.user_data.pop("_tp1_sell",  50.0)
+    tp2_value = context.user_data.pop("_tp2_value", 0)
+    tp2_sell  = context.user_data.pop("_tp2_sell",  100.0)
+    context.user_data.pop("_tp_step", None)
+    context.user_data.pop("_tp_type", None)
+
+    if not portfolio_id:
+        if update.message:
+            await update.message.reply_text("❌ انتهت الجلسة.", reply_markup=main_menu_kb())
+        return
+
+    p = await db.get_portfolio(portfolio_id)
+    await db.update_portfolio(
+        portfolio_id,
+        tp_enabled=1 if (tp1_value > 0 or tp2_value > 0 or sl_value > 0) else 0,
+        tp_entry_value=p["capital_usdt"],
+        tp1_type=tp1_type, tp1_value=tp1_value, tp1_sell_pct=tp1_sell,
+        tp2_type=tp1_type, tp2_value=tp2_value, tp2_sell_pct=tp2_sell,
+        sl_type=tp1_type,  sl_value=sl_value,
+    )
+
+    suffix   = "%" if tp1_type == "pct" else " USDT"
+    tp1_line = f"🎯 هدف 1: `{tp1_value:.2f}{suffix}` (بيع `{tp1_sell:.0f}%`)" if tp1_value > 0 else "🎯 هدف 1: غير محدد"
+    tp2_line = f"🏆 هدف 2: `{tp2_value:.2f}{suffix}` (بيع `{tp2_sell:.0f}%`)" if tp2_value > 0 else "🏆 هدف 2: غير محدد"
+    sl_line  = f"🛑 وقف الخسارة: `{sl_value:.2f}{suffix}`" if sl_value > 0 else "🛑 وقف الخسارة: غير محدد"
+
+    text = (
+        f"✅ *تم حفظ الأهداف*\n\n📁 *{p['name']}*\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"{tp1_line}\n{tp2_line}\n{sl_line}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━"
+    )
+    kb = InlineKeyboardMarkup([[
+        InlineKeyboardButton("◀️ رجوع للمحفظة", callback_data=f"portfolio:{portfolio_id}")
+    ]])
+    if update.message:
+        await update.message.reply_text(text, parse_mode="Markdown", reply_markup=kb)
+    else:
+        await update.callback_query.edit_message_text(text, parse_mode="Markdown", reply_markup=kb)

@@ -32,6 +32,14 @@ from bot.handlers.scalping_handler import (
     scalping_open_trades_callback,
     scalping_settings_callback,
     scalping_size_command,
+    scalping_sell_pick_callback,
+    scalping_sell_confirm_callback,
+    scalping_sell_exec_callback,
+    scalping_set_size_callback,
+    scalping_set_max_trades_callback,
+    scalping_set_daily_limit_callback,
+    scalping_set_trail_pct_callback,
+    scalping_setting_input,
     run_scalping_scan,
     run_scalping_monitor,
 )
@@ -41,6 +49,13 @@ from bot.handlers.whale_handler import (
     whale_open_trades_callback,
     whale_settings_callback,
     whale_size_command,
+    whale_sell_pick_callback,
+    whale_sell_confirm_callback,
+    whale_sell_exec_callback,
+    whale_set_size_callback,
+    whale_set_max_trades_callback,
+    whale_set_daily_limit_callback,
+    whale_setting_input,
     run_whale_scan,
     run_whale_monitor,
 )
@@ -59,6 +74,8 @@ from bot.handlers.portfolio_manager import (
     switch_portfolio_callback, delete_portfolio_callback,
     delete_portfolio_confirm_callback,
     create_portfolio_start, create_portfolio_name, create_portfolio_capital,
+    create_tp1_type_callback, create_tp1_value_input,
+    create_tp2_value_input, create_sl_value_input,
     edit_portfolio_name_start, edit_portfolio_name_input,
     edit_portfolio_capital_start, edit_portfolio_capital_input,
     cancel_portfolio_conv,
@@ -80,6 +97,7 @@ from bot.handlers.portfolio_manager import (
     TP_TP1_TYPE, TP_TP1_VALUE, TP_TP1_SELL,
     TP_TP2_TYPE, TP_TP2_VALUE, TP_TP2_SELL,
     TP_SL_TYPE, TP_SL_VALUE,
+    CREATE_TP1_TYPE, CREATE_TP1_VALUE, CREATE_TP2_VALUE, CREATE_SL_VALUE,
 )
 from bot.portfolio_monitor import run_portfolio_monitor
 from bot.handlers.emergency_handler import (
@@ -165,11 +183,15 @@ def build_app() -> Application:
                 MessageHandler(TEXT, create_portfolio_name),
                 CallbackQueryHandler(create_portfolio_name, pattern="^portfolio_capital:"),
             ],
-            CREATE_CAPITAL: [MessageHandler(TEXT, create_portfolio_capital)],
+            CREATE_CAPITAL:   [MessageHandler(TEXT, create_portfolio_capital)],
+            CREATE_TP1_TYPE:  [CallbackQueryHandler(create_tp1_type_callback, pattern="^create_tp_type:")],
+            CREATE_TP1_VALUE: [MessageHandler(TEXT, create_tp1_value_input)],
+            CREATE_TP2_VALUE: [MessageHandler(TEXT, create_tp2_value_input)],
+            CREATE_SL_VALUE:  [MessageHandler(TEXT, create_sl_value_input)],
         },
         fallbacks=[CommandHandler("cancel", cancel_portfolio_conv),
                    CallbackQueryHandler(cancel_portfolio_conv, pattern="^cancel$")],
-        conversation_timeout=300,
+        conversation_timeout=600,
     )
 
     edit_name_conv = ConversationHandler(
@@ -259,12 +281,25 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(scalping_toggle_callback,      pattern="^scalping:toggle$"))
     app.add_handler(CallbackQueryHandler(scalping_open_trades_callback, pattern="^scalping:open_trades$"))
     app.add_handler(CallbackQueryHandler(scalping_settings_callback,    pattern="^scalping:settings$"))
+    app.add_handler(CallbackQueryHandler(scalping_sell_pick_callback,       pattern="^scalping:sell_pick$"))
+    app.add_handler(CallbackQueryHandler(scalping_sell_confirm_callback,    pattern="^scalping:sell_confirm:"))
+    app.add_handler(CallbackQueryHandler(scalping_sell_exec_callback,       pattern="^scalping:sell_exec:"))
+    app.add_handler(CallbackQueryHandler(scalping_set_size_callback,        pattern="^scalping:set_size$"))
+    app.add_handler(CallbackQueryHandler(scalping_set_max_trades_callback,  pattern="^scalping:set_max_trades$"))
+    app.add_handler(CallbackQueryHandler(scalping_set_daily_limit_callback, pattern="^scalping:set_daily_limit$"))
+    app.add_handler(CallbackQueryHandler(scalping_set_trail_pct_callback,   pattern="^scalping:set_trail_pct$"))
 
     # ── Whale Order Flow ───────────────────────────────────────────────────────
-    app.add_handler(CallbackQueryHandler(whale_menu_callback,        pattern="^whale:menu$"))
-    app.add_handler(CallbackQueryHandler(whale_toggle_callback,      pattern="^whale:toggle$"))
-    app.add_handler(CallbackQueryHandler(whale_open_trades_callback, pattern="^whale:open_trades$"))
-    app.add_handler(CallbackQueryHandler(whale_settings_callback,    pattern="^whale:settings$"))
+    app.add_handler(CallbackQueryHandler(whale_menu_callback,           pattern="^whale:menu$"))
+    app.add_handler(CallbackQueryHandler(whale_toggle_callback,         pattern="^whale:toggle$"))
+    app.add_handler(CallbackQueryHandler(whale_open_trades_callback,    pattern="^whale:open_trades$"))
+    app.add_handler(CallbackQueryHandler(whale_settings_callback,       pattern="^whale:settings$"))
+    app.add_handler(CallbackQueryHandler(whale_sell_pick_callback,      pattern="^whale:sell_pick$"))
+    app.add_handler(CallbackQueryHandler(whale_sell_confirm_callback,   pattern="^whale:sell_confirm:"))
+    app.add_handler(CallbackQueryHandler(whale_sell_exec_callback,      pattern="^whale:sell_exec:"))
+    app.add_handler(CallbackQueryHandler(whale_set_size_callback,       pattern="^whale:set_size$"))
+    app.add_handler(CallbackQueryHandler(whale_set_max_trades_callback, pattern="^whale:set_max_trades$"))
+    app.add_handler(CallbackQueryHandler(whale_set_daily_limit_callback,pattern="^whale:set_daily_limit$"))
 
     # ── Grid Bot ───────────────────────────────────────────────────────────────
     app.add_handler(CallbackQueryHandler(grid_menu_callback,   pattern="^grid:menu$"))
@@ -288,6 +323,18 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(portfolio_sell_coin_callback,      pattern="^portfolio_sell_coin:"))
     app.add_handler(CallbackQueryHandler(portfolio_rebalance_sell_callback, pattern="^portfolio_rebalance_sell:"))
     app.add_handler(CallbackQueryHandler(portfolio_sell_exec_callback,      pattern="^portfolio_sell_exec:"))
+
+    # ── Settings text input (scalping + whale inline settings) ────────────────
+    async def _settings_text_router(update, context):
+        if "_scalping_setting" in context.user_data:
+            await scalping_setting_input(update, context)
+        elif "_whale_setting" in context.user_data:
+            await whale_setting_input(update, context)
+
+    app.add_handler(MessageHandler(
+        filters.TEXT & ~filters.COMMAND & filters.UpdateType.MESSAGE,
+        _settings_text_router,
+    ))
 
     # ── Emergency Sell ─────────────────────────────────────────────────────────
     app.add_handler(CallbackQueryHandler(emergency_menu_callback,              pattern="^emergency:menu$"))

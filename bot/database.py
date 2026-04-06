@@ -187,6 +187,7 @@ class Database:
                     user_id BIGINT NOT NULL,
                     entry_price REAL,
                     stop_loss REAL,
+                    initial_stop_loss REAL,
                     highest_price REAL,
                     target1 REAL,
                     target2 REAL,
@@ -194,10 +195,13 @@ class Database:
                     qty_half REAL,
                     risk_reward REAL,
                     t1_hit INTEGER DEFAULT 0,
+                    t2_hit INTEGER DEFAULT 0,
                     t1_order_id TEXT,
                     t2_order_id TEXT,
+                    sl_order_id TEXT,
                     opened_at TEXT,
-                    breakeven INTEGER DEFAULT 0
+                    breakeven INTEGER DEFAULT 0,
+                    strategy TEXT DEFAULT 'scalping'
                 )"""
             )
             await conn.execute("""
@@ -235,6 +239,13 @@ class Database:
                 "ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS whale_trade_size REAL DEFAULT 10.0",
                 "ALTER TABLE scalping_trades ADD COLUMN IF NOT EXISTS initial_stop_loss REAL",
                 "ALTER TABLE scalping_trades ADD COLUMN IF NOT EXISTS sl_order_id TEXT",
+                "ALTER TABLE scalping_trades ADD COLUMN IF NOT EXISTS t2_hit INTEGER DEFAULT 0",
+                "ALTER TABLE scalping_trades ADD COLUMN IF NOT EXISTS strategy TEXT DEFAULT 'scalping'",
+                "ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS scalping_max_trades INTEGER DEFAULT 3",
+                "ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS scalping_daily_loss_limit REAL DEFAULT 0.0",
+                "ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS scalping_trail_pct REAL DEFAULT 1.5",
+                "ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS whale_max_trades INTEGER DEFAULT 3",
+                "ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS whale_daily_loss_limit REAL DEFAULT 0.0",
                 "ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS threshold REAL DEFAULT 5.0",
                 "ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS auto_enabled INTEGER DEFAULT 0",
                 "ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS auto_interval_hours INTEGER DEFAULT 24",
@@ -309,6 +320,7 @@ class Database:
                     user_id INTEGER NOT NULL,
                     entry_price REAL,
                     stop_loss REAL,
+                    initial_stop_loss REAL,
                     highest_price REAL,
                     target1 REAL,
                     target2 REAL,
@@ -316,10 +328,13 @@ class Database:
                     qty_half REAL,
                     risk_reward REAL,
                     t1_hit INTEGER DEFAULT 0,
+                    t2_hit INTEGER DEFAULT 0,
                     t1_order_id TEXT,
                     t2_order_id TEXT,
+                    sl_order_id TEXT,
                     opened_at TEXT,
-                    breakeven INTEGER DEFAULT 0
+                    breakeven INTEGER DEFAULT 0,
+                    strategy TEXT DEFAULT 'scalping'
                 )""")
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS grids (
@@ -356,6 +371,13 @@ class Database:
                 "ALTER TABLE user_settings ADD COLUMN whale_trade_size REAL DEFAULT 10.0",
                 "ALTER TABLE scalping_trades ADD COLUMN initial_stop_loss REAL",
                 "ALTER TABLE scalping_trades ADD COLUMN sl_order_id TEXT",
+                "ALTER TABLE scalping_trades ADD COLUMN t2_hit INTEGER DEFAULT 0",
+                "ALTER TABLE scalping_trades ADD COLUMN strategy TEXT DEFAULT 'scalping'",
+                "ALTER TABLE user_settings ADD COLUMN scalping_max_trades INTEGER DEFAULT 3",
+                "ALTER TABLE user_settings ADD COLUMN scalping_daily_loss_limit REAL DEFAULT 0.0",
+                "ALTER TABLE user_settings ADD COLUMN scalping_trail_pct REAL DEFAULT 1.5",
+                "ALTER TABLE user_settings ADD COLUMN whale_max_trades INTEGER DEFAULT 3",
+                "ALTER TABLE user_settings ADD COLUMN whale_daily_loss_limit REAL DEFAULT 0.0",
                 "ALTER TABLE portfolios ADD COLUMN threshold REAL DEFAULT 5.0",
                 "ALTER TABLE portfolios ADD COLUMN auto_enabled INTEGER DEFAULT 0",
                 "ALTER TABLE portfolios ADD COLUMN auto_interval_hours INTEGER DEFAULT 24",
@@ -595,7 +617,9 @@ class Database:
             "mexc_api_key", "mexc_secret_key", "threshold", "auto_enabled",
             "auto_interval_hours", "quote_currency", "last_rebalance_at",
             "active_portfolio_id", "scalping_enabled", "scalping_trade_size",
+            "scalping_max_trades", "scalping_daily_loss_limit", "scalping_trail_pct",
             "whale_enabled", "whale_trade_size",
+            "whale_max_trades", "whale_daily_loss_limit",
         }
         for k in kwargs:
             if k not in _ALLOWED_SETTINGS_COLS:
@@ -809,44 +833,49 @@ class Database:
 
     async def save_scalping_trade(self, user_id: int, trade: dict) -> None:
         """Insert or replace an open scalping trade."""
-        highest     = trade.get("highest_price") or trade["entry_price"]
-        initial_sl  = trade.get("initial_stop_loss") or trade["stop_loss"]
+        highest    = trade.get("highest_price") or trade["entry_price"]
+        initial_sl = trade.get("initial_stop_loss") or trade["stop_loss"]
+        strategy   = trade.get("strategy", "scalping")
         async with self._conn() as conn:
             if _USE_PG:
                 await conn.execute(
                     """INSERT INTO scalping_trades
                        (symbol, user_id, entry_price, stop_loss, initial_stop_loss,
                         highest_price, target1, target2, qty, qty_half, risk_reward,
-                        t1_hit, t1_order_id, t2_order_id, sl_order_id, opened_at, breakeven)
-                       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+                        t1_hit, t2_hit, t1_order_id, t2_order_id, sl_order_id,
+                        opened_at, breakeven, strategy)
+                       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
                        ON CONFLICT (symbol) DO UPDATE SET
-                           stop_loss=$4, highest_price=$6, t1_hit=$12,
-                           t1_order_id=$13, t2_order_id=$14, sl_order_id=$15, breakeven=$17""",
+                           stop_loss=$4, highest_price=$6,
+                           t1_hit=$12, t2_hit=$13,
+                           t1_order_id=$14, t2_order_id=$15, sl_order_id=$16,
+                           breakeven=$18""",
                     trade["symbol"], user_id,
                     trade["entry_price"], trade["stop_loss"], initial_sl,
                     highest,
                     trade["target1"], trade["target2"],
                     trade["qty"], trade["qty_half"], trade["risk_reward"],
-                    int(trade["t1_hit"]), trade.get("t1_order_id"),
-                    trade.get("t2_order_id"), trade.get("sl_order_id"),
-                    trade["opened_at"], int(trade["breakeven"]),
+                    int(trade["t1_hit"]), int(trade.get("t2_hit", False)),
+                    trade.get("t1_order_id"), trade.get("t2_order_id"), trade.get("sl_order_id"),
+                    trade["opened_at"], int(trade["breakeven"]), strategy,
                 )
             else:
                 await conn.execute(
                     """INSERT OR REPLACE INTO scalping_trades
                        (symbol, user_id, entry_price, stop_loss, initial_stop_loss,
                         highest_price, target1, target2, qty, qty_half, risk_reward,
-                        t1_hit, t1_order_id, t2_order_id, sl_order_id, opened_at, breakeven)
-                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        t1_hit, t2_hit, t1_order_id, t2_order_id, sl_order_id,
+                        opened_at, breakeven, strategy)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (
                         trade["symbol"], user_id,
                         trade["entry_price"], trade["stop_loss"], initial_sl,
                         highest,
                         trade["target1"], trade["target2"],
                         trade["qty"], trade["qty_half"], trade["risk_reward"],
-                        int(trade["t1_hit"]), trade.get("t1_order_id"),
-                        trade.get("t2_order_id"), trade.get("sl_order_id"),
-                        trade["opened_at"], int(trade["breakeven"]),
+                        int(trade["t1_hit"]), int(trade.get("t2_hit", False)),
+                        trade.get("t1_order_id"), trade.get("t2_order_id"), trade.get("sl_order_id"),
+                        trade["opened_at"], int(trade["breakeven"]), strategy,
                     ),
                 )
                 await conn.commit()

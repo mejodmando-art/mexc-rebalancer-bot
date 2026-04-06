@@ -83,74 +83,56 @@ def _fmt_grid(g: dict) -> str:
 
 def _build_grid_chart(all_orders: list, price: float, upper: float, lower: float) -> str:
     """
-    Build a vertical ASCII price chart showing each grid level.
+    Build a vertical price ladder showing each grid level with live price marker.
 
-    Each row = one price level, sorted top→bottom (highest price first).
-    Current price row is marked with ◀ السعر الحالي.
-
-    Legend:
-      ⬜ sell limit (waiting above price)
-      🟩 buy limit  (waiting below price)
-      ✅ filled order
-      💲 current price line
+    Levels sorted top→bottom. Current price injected between levels.
+    Each row shows: icon | price bar | price | distance from current price.
     """
     if not all_orders or upper <= lower:
         return ""
 
-    # Sort highest → lowest
-    levels = sorted(all_orders, key=lambda x: x["price"], reverse=True)
-
-    # Bar width (number of blocks per row)
-    BAR_W = 10
+    levels      = sorted(all_orders, key=lambda x: x["price"], reverse=True)
+    BAR_W       = 8
     price_range = upper - lower if upper > lower else 1
-
-    lines = []
+    lines       = []
     price_inserted = False
 
-    for i, o in enumerate(levels):
+    for o in levels:
         op   = o["price"]
         side = o["side"]
         st   = o["status"]
 
-        # Insert current price line between levels
         if not price_inserted and price >= op:
-            # price is above or equal to this level — insert price row before
-            pct = ((price - lower) / price_range) * BAR_W
-            bar = "█" * int(pct) + "░" * (BAR_W - int(pct))
-            lines.append(f"💲 `{bar}` `${price:.6g}` ◀️")
+            pct = max(0, min(int(((price - lower) / price_range) * BAR_W), BAR_W))
+            bar = "█" * pct + "░" * (BAR_W - pct)
+            lines.append(f"💲 `│{bar}│` `${price:.6g}` ◀")
             price_inserted = True
 
-        # Build fill bar based on position relative to range
-        pct   = ((op - lower) / price_range) * BAR_W
-        fills = int(max(0, min(pct, BAR_W)))
+        pct   = max(0, min(int(((op - lower) / price_range) * BAR_W), BAR_W))
+        bar   = "█" * pct + "░" * (BAR_W - pct)
+        dist  = ((op - price) / price) * 100
 
         if st == "filled":
             icon = "✅"
-            bar  = "█" * fills + "░" * (BAR_W - fills)
         elif side == "sell":
-            icon = "⬜"
-            bar  = "▒" * fills + "░" * (BAR_W - fills)
+            icon = "🔴"
         else:
-            icon = "🟩"
-            bar  = "▓" * fills + "░" * (BAR_W - fills)
+            icon = "🟢"
 
-        dist    = ((op - price) / price) * 100
-        dist_ar = f"{dist:+.2f}%"
-        lines.append(f"{icon} `{bar}` `${op:.6g}` `{dist_ar}`")
+        lines.append(f"{icon} `│{bar}│` `${op:.6g}` `{dist:+.2f}%`")
 
-    # If price is below all levels
     if not price_inserted:
-        pct = ((price - lower) / price_range) * BAR_W
-        bar = "█" * int(max(0, min(pct, BAR_W))) + "░" * (BAR_W - int(max(0, min(pct, BAR_W))))
-        lines.append(f"💲 `{bar}` `${price:.6g}` ◀️")
+        pct = max(0, min(int(((price - lower) / price_range) * BAR_W), BAR_W))
+        bar = "█" * pct + "░" * (BAR_W - pct)
+        lines.append(f"💲 `│{bar}│` `${price:.6g}` ◀")
 
     return "\n".join(lines)
 
 
 def _fmt_grid_live(g: dict, price: float) -> str:
-    """
-    Build a live status screen for a grid with a visual price chart.
-    """
+    """Build a live grid monitoring screen with visual price ladder and stats."""
+    from datetime import datetime, timezone
+
     symbol   = g["symbol"]
     center   = g["center"]
     upper    = g["upper"]
@@ -158,70 +140,104 @@ def _fmt_grid_live(g: dict, price: float) -> str:
     step_pct = g.get("step_pct", 0)
     trades   = g.get("total_trades", 0)
     shifts   = g.get("shifts", 0)
+    steps    = g.get("steps", 1)
+    size_usdt = g.get("order_size_usdt", 0)
 
+    range_total     = upper - lower if upper > lower else 1
     pct_from_center = ((price - center) / center) * 100
+    pos_pct         = max(0.0, min(1.0, (price - lower) / range_total))
 
-    # Price position bar (horizontal) — shows where price is in the range
-    range_total = upper - lower if upper > lower else 1
-    pos_pct     = max(0.0, min(1.0, (price - lower) / range_total))
-    BAR         = 12
-    filled      = int(pos_pct * BAR)
-    pos_bar     = "▓" * filled + "░" * (BAR - filled)
+    # Horizontal position bar (16 chars wide)
+    BAR = 16
+    filled  = int(pos_pct * BAR)
+    pos_bar = "▓" * filled + "░" * (BAR - filled)
 
-    if price >= upper:
-        zone_label = "🔺 فوق النطاق"
-    elif price <= lower:
-        zone_label = "🔻 تحت النطاق"
+    # Zone detection
+    if price >= upper * 1.001:
+        zone = "🔺 فوق النطاق"
+        zone_warn = "\n⚠️ _السعر خرج من النطاق — الشبكة ستنتقل_"
+    elif price <= lower * 0.999:
+        zone = "🔻 تحت النطاق"
+        zone_warn = "\n⚠️ _السعر خرج من النطاق — الشبكة ستنتقل_"
     elif price >= center:
-        zone_label = "🟢 النصف العلوي"
+        zone = "🟢 النصف العلوي"
+        zone_warn = ""
     else:
-        zone_label = "🔵 النصف السفلي"
+        zone = "🔵 النصف السفلي"
+        zone_warn = ""
 
-    header = (
-        f"📡 *{symbol}* — متابعة حية\n\n"
-        f"⬆️ `${upper:.6g}`\n"
-        f"     `[{pos_bar}]` {pct_from_center:+.2f}%\n"
-        f"⬇️ `${lower:.6g}`\n\n"
-        f"💰 السعر: `${price:.6g}`  {zone_label}\n"
-        f"🎯 المركز: `${center:.6g}`\n"
-        f"━━━━━━━━━━━━━━━━━━━━━\n"
-    )
+    # TP / SL lines
+    tp_line = f"🎯 Take Profit: `${g['take_profit']:.6g}`\n" if g.get("take_profit") else ""
+    sl_line = f"🛑 Stop Loss:   `${g['stop_loss']:.6g}`\n"  if g.get("stop_loss")   else ""
 
-    # Collect all order levels
+    # Collect orders
     buy_orders  = g.get("buy_orders",  [])
     sell_orders = g.get("sell_orders", [])
-
-    all_orders = []
+    all_orders  = []
     for o in buy_orders:
         all_orders.append({"price": o["price"], "side": "buy",  "status": o.get("status", "open")})
     for o in sell_orders:
         all_orders.append({"price": o["price"], "side": "sell", "status": o.get("status", "open")})
-
     all_orders.sort(key=lambda x: x["price"], reverse=True)
 
     filled_count = sum(1 for o in all_orders if o["status"] == "filled")
     open_count   = sum(1 for o in all_orders if o["status"] != "filled")
+    sell_open    = sum(1 for o in all_orders if o["status"] != "filled" and o["side"] == "sell")
+    buy_open     = sum(1 for o in all_orders if o["status"] != "filled" and o["side"] == "buy")
 
-    # Visual chart
-    chart = _build_grid_chart(all_orders, price, upper, lower)
-    chart_section = (
-        "*📊 مستويات الشبكة:*\n"
-        "⬜ بيع  🟩 شراء  ✅ مُنفَّذ  💲 السعر\n"
-        f"{chart}\n"
-    ) if chart else ""
-
-    # PnL
+    # Estimated PnL: each completed buy→sell pair earns step_pct on size_per_level
+    size_per_level = size_usdt / max(steps, 1)
     completed_pairs = trades // 2 if trades > 0 else 0
-    size_per_level  = g.get("order_size_usdt", 0) / max(g.get("steps", 1), 1)
-    est_pnl         = completed_pairs * size_per_level * (step_pct / 100)
+    est_pnl = completed_pairs * size_per_level * (step_pct / 100)
+    pnl_icon = "🟢" if est_pnl >= 0 else "🔴"
 
-    footer = (
+    # Distance to boundaries
+    dist_upper = ((upper - price) / price) * 100
+    dist_lower = ((price - lower) / price) * 100
+
+    now_str = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
+
+    header = (
+        f"📡 *{symbol}* — متابعة حية\n"
+        f"🕐 `{now_str}`\n\n"
+        f"╔══════════════════╗\n"
+        f"  ⬆️  `${upper:.6g}`  (+{dist_upper:.2f}%)\n"
+        f"  `[{pos_bar}]`\n"
+        f"  ⬇️  `${lower:.6g}`  (-{dist_lower:.2f}%)\n"
+        f"╚══════════════════╝\n\n"
+        f"💰 السعر الحالي: `${price:.6g}`\n"
+        f"   {zone}  `{pct_from_center:+.2f}%` من المركز{zone_warn}\n"
+        f"🎯 المركز: `${center:.6g}`\n"
+        f"{tp_line}{sl_line}"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
-        f"✅ مُنفَّذ: `{filled_count}`  |  🟡 مفتوح: `{open_count}`  |  🔄 صفقات: `{trades}`\n"
-        f"💵 ربح تقديري: `${est_pnl:.3f} USDT`  |  🔀 انتقالات: `{shifts}`"
     )
 
-    return header + chart_section + footer
+    # Visual price ladder
+    chart = _build_grid_chart(all_orders, price, upper, lower)
+    chart_section = (
+        f"*📊 سلّم الأسعار:*\n"
+        f"🔴 بيع  🟢 شراء  ✅ مُنفَّذ  💲 السعر\n"
+        f"{chart}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+    ) if chart else ""
+
+    # Stats panel
+    fill_rate = (filled_count / max(len(all_orders), 1)) * 100
+    fill_bar_w = 10
+    fill_filled = int((fill_rate / 100) * fill_bar_w)
+    fill_bar = "█" * fill_filled + "░" * (fill_bar_w - fill_filled)
+
+    stats = (
+        f"*📈 إحصائيات الشبكة:*\n"
+        f"  🔄 صفقات منفذة: `{trades}`\n"
+        f"  🔀 انتقالات: `{shifts}`\n"
+        f"  🔴 بيع مفتوح: `{sell_open}`  |  🟢 شراء مفتوح: `{buy_open}`\n"
+        f"  ✅ مُنفَّذ: `{filled_count}`  |  نسبة التنفيذ: `[{fill_bar}]` `{fill_rate:.0f}%`\n"
+        f"  {pnl_icon} ربح تقديري: `${est_pnl:.4f} USDT`\n"
+        f"  📦 حجم الشبكة: `${size_usdt:.0f} USDT`  |  خطوة: `{step_pct:.3f}%`"
+    )
+
+    return header + chart_section + stats
 
 
 async def grid_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
