@@ -19,6 +19,8 @@ from bot.database import db
 from bot.mexc_client import MexcClient
 from bot.keyboards import back_to_main_kb
 from bot.grid.monitor import grid_monitor
+from bot.scalping.monitor import trade_monitor
+from bot.scalping.whale_monitor import whale_monitor
 
 logger = logging.getLogger(__name__)
 
@@ -271,6 +273,12 @@ async def emergency_exec_selected_callback(update: Update, context: ContextTypes
                 order = await client.exchange.create_market_sell_order(pair, qty)
                 cost  = float(order.get("cost") or 0)
                 results.append(f"🔴 `{sym}` — `${cost:.2f}` ✅")
+                # Remove from scalping/whale monitors if tracked
+                scalping_key = f"{sym}/USDT"
+                if scalping_key in trade_monitor.open_trades:
+                    await trade_monitor.remove_trade(scalping_key)
+                if scalping_key in whale_monitor.open_trades:
+                    await whale_monitor.remove_trade(scalping_key)
             except Exception as e:
                 results.append(f"❌ `{sym}`: {str(e)[:60]}")
     except Exception as e:
@@ -347,6 +355,11 @@ async def emergency_exec_all_callback(update: Update, context: ContextTypes.DEFA
                 order = await client.exchange.create_market_sell_order(pair, qty)
                 cost  = float(order.get("cost") or 0)
                 results.append(f"🔴 `{sym}` — `${cost:.2f}` ✅")
+                # Remove from scalping/whale monitors if tracked
+                if pair in trade_monitor.open_trades:
+                    await trade_monitor.remove_trade(pair)
+                if pair in whale_monitor.open_trades:
+                    await whale_monitor.remove_trade(pair)
             except Exception as e:
                 results.append(f"❌ `{sym}`: {str(e)[:60]}")
     except Exception as e:

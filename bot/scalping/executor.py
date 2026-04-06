@@ -38,8 +38,9 @@ async def execute_trade(setup: Dict[str, Any], exchange) -> Dict[str, Any]:
 
     try:
         # ── Market buy (MEXC Spot requires quoteOrderQty, not base qty) ───
+        logger.info(f"Executor: attempting market buy {symbol} cost={trade_size_usdt:.2f} USDT")
         entry_order = await exchange.create_market_buy_order_with_cost(symbol, trade_size_usdt)
-        logger.info(f"Executor: market buy {symbol} cost={trade_size_usdt} → order {entry_order.get('id')}")
+        logger.info(f"Executor: market buy {symbol} cost={trade_size_usdt} → order {entry_order.get('id')} filled={entry_order.get('filled')} status={entry_order.get('status')}")
 
         # Use the actual filled qty from the order
         filled_qty = float(entry_order.get("filled") or entry_order.get("amount") or 0)
@@ -64,7 +65,7 @@ async def execute_trade(setup: Dict[str, Any], exchange) -> Dict[str, Any]:
         }
 
     except Exception as e:
-        logger.error(f"Executor: failed on {symbol}: {e}")
+        logger.error(f"Executor: failed on {symbol}: {type(e).__name__}: {e}")
         return {
             "status":        "error",
             "symbol":        symbol,
