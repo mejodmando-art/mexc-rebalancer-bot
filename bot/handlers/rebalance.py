@@ -101,7 +101,8 @@ async def rebalance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             )
             return
 
-        threshold = settings.get("threshold", 5.0)
+        # Per-portfolio threshold takes priority over the global user setting
+        threshold = float(portfolio_info.get("threshold") or settings.get("threshold") or 5.0)
         trades, drift_report = calculate_trades(portfolio, effective_total, allocations, threshold)
 
         context.user_data["_pending_trades"] = trades

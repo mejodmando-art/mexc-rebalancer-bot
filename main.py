@@ -65,7 +65,12 @@ from bot.handlers.portfolio_manager import (
     portfolio_sell_all_callback, portfolio_sell_one_callback,
     portfolio_sell_coin_callback, portfolio_rebalance_sell_callback,
     portfolio_sell_exec_callback,
+    portfolio_edit_allocs_callback,
+    portfolio_set_threshold_start, portfolio_set_threshold_input,
+    portfolio_set_interval_start, portfolio_set_interval_input,
+    portfolio_toggle_auto_callback,
     CREATE_NAME, CREATE_CAPITAL, EDIT_NAME, EDIT_CAPITAL,
+    PORTFOLIO_SET_THRESHOLD, PORTFOLIO_SET_INTERVAL,
 )
 from bot.handlers.emergency_handler import (
     emergency_menu_callback,
@@ -173,6 +178,22 @@ def build_app() -> Application:
         conversation_timeout=300,
     )
 
+    portfolio_threshold_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(portfolio_set_threshold_start, pattern="^portfolio_set_threshold:")],
+        states={PORTFOLIO_SET_THRESHOLD: [MessageHandler(TEXT, portfolio_set_threshold_input)]},
+        fallbacks=[CommandHandler("cancel", cancel_portfolio_conv),
+                   CallbackQueryHandler(cancel_portfolio_conv, pattern="^cancel$")],
+        conversation_timeout=300,
+    )
+
+    portfolio_interval_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(portfolio_set_interval_start, pattern="^portfolio_set_interval:")],
+        states={PORTFOLIO_SET_INTERVAL: [MessageHandler(TEXT, portfolio_set_interval_input)]},
+        fallbacks=[CommandHandler("cancel", cancel_portfolio_conv),
+                   CallbackQueryHandler(cancel_portfolio_conv, pattern="^cancel$")],
+        conversation_timeout=300,
+    )
+
     app.add_handler(api_conv)
     app.add_handler(threshold_conv)
     app.add_handler(interval_conv)
@@ -180,6 +201,8 @@ def build_app() -> Application:
     app.add_handler(create_portfolio_conv)
     app.add_handler(edit_name_conv)
     app.add_handler(edit_capital_conv)
+    app.add_handler(portfolio_threshold_conv)
+    app.add_handler(portfolio_interval_conv)
     app.add_handler(build_grid_conv())
 
     # ── Commands ───────────────────────────────────────────────────────────────
@@ -227,6 +250,8 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(switch_portfolio_callback,         pattern="^portfolio_switch:"))
     app.add_handler(CallbackQueryHandler(delete_portfolio_callback,         pattern="^portfolio_delete:\\d+$"))
     app.add_handler(CallbackQueryHandler(delete_portfolio_confirm_callback, pattern="^portfolio_delete_confirm:"))
+    app.add_handler(CallbackQueryHandler(portfolio_edit_allocs_callback,    pattern="^portfolio_edit_allocs:"))
+    app.add_handler(CallbackQueryHandler(portfolio_toggle_auto_callback,    pattern="^portfolio_toggle_auto:"))
     app.add_handler(CallbackQueryHandler(portfolio_sell_all_callback,       pattern="^portfolio_sell_all:"))
     app.add_handler(CallbackQueryHandler(portfolio_sell_one_callback,       pattern="^portfolio_sell_one:"))
     app.add_handler(CallbackQueryHandler(portfolio_sell_coin_callback,      pattern="^portfolio_sell_coin:"))

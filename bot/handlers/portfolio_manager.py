@@ -10,6 +10,7 @@ from bot.keyboards import (
 
 # Conversation states
 CREATE_NAME, CREATE_CAPITAL, EDIT_NAME, EDIT_CAPITAL = range(30, 34)
+PORTFOLIO_SET_THRESHOLD, PORTFOLIO_SET_INTERVAL = range(34, 36)
 
 
 async def portfolios_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -52,11 +53,18 @@ async def portfolio_detail_callback(update: Update, context: ContextTypes.DEFAUL
     allocs = await db.get_portfolio_allocations(portfolio_id)
     total_pct = sum(a["target_percentage"] for a in allocs)
 
+    threshold = p.get("threshold") or 5.0
+    interval  = p.get("auto_interval_hours") or 24
+    auto_on   = bool(p.get("auto_enabled"))
+    auto_line = f"🟢 تلقائي كل {interval}س" if auto_on else "🔴 التوازن التلقائي معطل"
+
     text = (
         f"📁 *{p['name']}*\n\n"
         f"💰 رأس المال: *${p['capital_usdt']:,.2f} USDT*\n"
         f"🪙 عدد العملات: *{len(allocs)}*\n"
         f"📊 مجموع التوزيع: *{total_pct:.1f}%*\n"
+        f"🎯 حد الانحراف: *{threshold}%*\n"
+        f"{auto_line}\n"
         f"{'✅ المحفظة النشطة الآن' if p['id'] == active_id else '⭕ غير نشطة'}\n"
     )
     if allocs:
@@ -68,7 +76,7 @@ async def portfolio_detail_callback(update: Update, context: ContextTypes.DEFAUL
 
     await query.edit_message_text(
         text, parse_mode="Markdown",
-        reply_markup=portfolio_actions_kb(portfolio_id, p["id"] == active_id)
+        reply_markup=portfolio_actions_kb(portfolio_id, p["id"] == active_id, bool(p.get("auto_enabled")))
     )
 
 
@@ -665,4 +673,189 @@ async def portfolio_sell_exec_callback(update: Update, context: ContextTypes.DEF
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("◀️ رجوع للمحفظة", callback_data=f"portfolio:{portfolio_id}")]
         ]),
+    )
+
+
+# ── Per-portfolio: Edit Allocations ───────────────────────────────────────────
+
+async def portfolio_edit_allocs_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Redirect to the global alloc settings flow but scoped to this portfolio."""
+    query = update.callback_query
+    await query.answer()
+    user_id = update.effective_user.id
+    portfolio_id = int(query.data.split(":")[1])
+
+    p = await db.get_portfolio(portfolio_id)
+    if not p or p["user_id"] != user_id:
+        await query.answer("❌ محفظة غير موجودة", show_alert=True)
+        return
+
+    # Make this portfolio active so the alloc flow targets it
+    await db.set_active_portfolio(user_id, portfolio_id)
+    await query.edit_message_text(
+        f"✏️ *تعديل عملات محفظة: {p['name']}*\n\n"
+        "استخدم الإعدادات ← إضافة / تعديل عملة لتعديل التوزيع.",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("⚙️ الإعدادات", callback_data="settings:view")],
+            [InlineKeyboardButton("◀️ رجوع للمحفظة", callback_data=f"portfolio:{portfolio_id}")],
+        ]),
+    )
+
+
+# ── Per-portfolio: Set Threshold ───────────────────────────────────────────────
+
+async def portfolio_set_threshold_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = update.effective_user.id
+    portfolio_id = int(query.data.split(":")[1])
+
+    p = await db.get_portfolio(portfolio_id)
+    if not p or p["user_id"] != user_id:
+        await query.answer("❌ محفظة غير موجودة", show_alert=True)
+        return
+
+    context.user_data["_portfolio_settings_id"] = portfolio_id
+    current = p.get("threshold") or 5.0
+    await query.edit_message_text(
+        f"🎯 *حد الانحراف — {p['name']}*\n\n"
+        f"الحالي: `{current}%`\n\n"
+        "أدخل النسبة المئوية (مثال: `5` تعني 5%).\n"
+        "النطاق المسموح: `1` إلى `50`.",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("❌ إلغاء", callback_data=f"portfolio:{portfolio_id}")]
+        ]),
+    )
+    return PORTFOLIO_SET_THRESHOLD
+
+
+async def portfolio_set_threshold_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    portfolio_id = context.user_data.pop("_portfolio_settings_id", None)
+    if not portfolio_id:
+        await update.message.reply_text("❌ انتهت الجلسة.", reply_markup=main_menu_kb())
+        return ConversationHandler.END
+
+    try:
+        val = float(update.message.text.strip().replace("%", ""))
+        if not (1.0 <= val <= 50.0):
+            raise ValueError
+    except ValueError:
+        await update.message.reply_text("❌ أدخل رقماً بين 1 و 50:")
+        context.user_data["_portfolio_settings_id"] = portfolio_id
+        return PORTFOLIO_SET_THRESHOLD
+
+    await db.update_portfolio(portfolio_id, threshold=val)
+    p = await db.get_portfolio(portfolio_id)
+    await update.message.reply_text(
+        f"✅ *تم تعديل حد الانحراف إلى {val}%*\n\nالمحفظة: *{p['name']}*",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("◀️ رجوع للمحفظة", callback_data=f"portfolio:{portfolio_id}")]
+        ]),
+    )
+    return ConversationHandler.END
+
+
+# ── Per-portfolio: Set Interval ────────────────────────────────────────────────
+
+async def portfolio_set_interval_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = update.effective_user.id
+    portfolio_id = int(query.data.split(":")[1])
+
+    p = await db.get_portfolio(portfolio_id)
+    if not p or p["user_id"] != user_id:
+        await query.answer("❌ محفظة غير موجودة", show_alert=True)
+        return
+
+    context.user_data["_portfolio_settings_id"] = portfolio_id
+    current = p.get("auto_interval_hours") or 24
+    await query.edit_message_text(
+        f"⏱ *فترة التوازن التلقائي — {p['name']}*\n\n"
+        f"الحالية: كل `{current}` ساعة\n\n"
+        "أدخل عدد الساعات (مثال: `24` = يومياً، `168` = أسبوعياً).\n"
+        "النطاق المسموح: `1` إلى `720`.",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("❌ إلغاء", callback_data=f"portfolio:{portfolio_id}")]
+        ]),
+    )
+    return PORTFOLIO_SET_INTERVAL
+
+
+async def portfolio_set_interval_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    portfolio_id = context.user_data.pop("_portfolio_settings_id", None)
+    if not portfolio_id:
+        await update.message.reply_text("❌ انتهت الجلسة.", reply_markup=main_menu_kb())
+        return ConversationHandler.END
+
+    try:
+        val = int(float(update.message.text.strip()))
+        if not (1 <= val <= 720):
+            raise ValueError
+    except ValueError:
+        await update.message.reply_text("❌ أدخل رقماً بين 1 و 720:")
+        context.user_data["_portfolio_settings_id"] = portfolio_id
+        return PORTFOLIO_SET_INTERVAL
+
+    await db.update_portfolio(portfolio_id, auto_interval_hours=val)
+    p = await db.get_portfolio(portfolio_id)
+    await update.message.reply_text(
+        f"✅ *تم تعديل فترة التوازن إلى كل {val} ساعة*\n\nالمحفظة: *{p['name']}*",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("◀️ رجوع للمحفظة", callback_data=f"portfolio:{portfolio_id}")]
+        ]),
+    )
+    return ConversationHandler.END
+
+
+# ── Per-portfolio: Toggle Auto Rebalance ──────────────────────────────────────
+
+async def portfolio_toggle_auto_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = update.effective_user.id
+    portfolio_id = int(query.data.split(":")[1])
+
+    p = await db.get_portfolio(portfolio_id)
+    if not p or p["user_id"] != user_id:
+        await query.answer("❌ محفظة غير موجودة", show_alert=True)
+        return
+
+    new_state = 0 if p.get("auto_enabled") else 1
+    await db.update_portfolio(portfolio_id, auto_enabled=new_state)
+    p = await db.get_portfolio(portfolio_id)
+
+    interval  = p.get("auto_interval_hours") or 24
+    threshold = p.get("threshold") or 5.0
+    auto_on   = bool(p.get("auto_enabled"))
+    auto_line = f"🟢 تلقائي كل {interval}س" if auto_on else "🔴 التوازن التلقائي معطل"
+
+    allocs    = await db.get_portfolio_allocations(portfolio_id)
+    total_pct = sum(a["target_percentage"] for a in allocs)
+    active_id = await db.get_active_portfolio_id(user_id)
+
+    text = (
+        f"📁 *{p['name']}*\n\n"
+        f"💰 رأس المال: *${p['capital_usdt']:,.2f} USDT*\n"
+        f"🪙 عدد العملات: *{len(allocs)}*\n"
+        f"📊 مجموع التوزيع: *{total_pct:.1f}%*\n"
+        f"🎯 حد الانحراف: *{threshold}%*\n"
+        f"{auto_line}\n"
+        f"{'✅ المحفظة النشطة الآن' if p['id'] == active_id else '⭕ غير نشطة'}\n"
+    )
+    if allocs:
+        text += "\n*التوزيع:*\n"
+        for a in allocs[:8]:
+            text += f"• `{a['symbol']:6}` {a['target_percentage']:.1f}%\n"
+        if len(allocs) > 8:
+            text += f"_... و {len(allocs)-8} عملات أخرى_\n"
+
+    await query.edit_message_text(
+        text, parse_mode="Markdown",
+        reply_markup=portfolio_actions_kb(portfolio_id, p["id"] == active_id, bool(p.get("auto_enabled")))
     )

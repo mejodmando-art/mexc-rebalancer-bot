@@ -9,40 +9,38 @@ logger = logging.getLogger(__name__)
 
 
 async def auto_rebalance_job(app):
-    """Run rebalance for users whose interval has elapsed since last rebalance."""
-    users = await db.get_all_users_with_auto()
+    """Run rebalance for each portfolio that has auto_enabled=1 and whose interval has elapsed."""
+    portfolios = await db.get_all_portfolios_with_auto()
     now = datetime.now(timezone.utc)
 
-    for row in users:
-        user_id = row["user_id"]
+    for row in portfolios:
+        portfolio_id   = row["id"]
+        user_id        = row["user_id"]
+        interval_hours = int(row.get("auto_interval_hours") or 24)
+        last_str       = row.get("last_rebalance_at")
+
         try:
-            settings = await db.get_settings(user_id)
-            if not settings:
-                continue
-
-            interval_hours = int(settings.get("auto_interval_hours") or 24)
-            last_str = settings.get("last_rebalance_at")
-
             if last_str:
                 try:
                     last_dt = datetime.fromisoformat(last_str.replace(" UTC", "+00:00"))
                     if now - last_dt < timedelta(hours=interval_hours):
-                        continue  # not time yet
+                        continue  # interval not elapsed yet
                 except Exception:
-                    pass  # if parse fails, run anyway
+                    pass  # parse failure → run anyway
 
-            await _do_rebalance(app, user_id, auto=True)
+            await _do_rebalance(app, user_id, portfolio_id=portfolio_id, auto=True)
 
         except Exception as e:
-            logger.error(f"Auto rebalance error for {user_id}: {e}")
+            logger.error(f"Auto rebalance error portfolio={portfolio_id} user={user_id}: {e}")
 
 
-async def _do_rebalance(app, user_id: int, auto: bool = False):
+async def _do_rebalance(app, user_id: int, portfolio_id: int = None, auto: bool = False):
     settings = await db.get_settings(user_id)
     if not settings or not settings.get("mexc_api_key"):
         return
 
-    portfolio_id = await db.get_active_portfolio_id(user_id)
+    if not portfolio_id:
+        portfolio_id = await db.get_active_portfolio_id(user_id)
     if not portfolio_id:
         portfolio_id = await db.ensure_active_portfolio(user_id)
 
@@ -55,7 +53,8 @@ async def _do_rebalance(app, user_id: int, auto: bool = False):
     client = MexcClient(settings["mexc_api_key"], settings["mexc_secret_key"])
     try:
         portfolio, total_usdt = await client.get_portfolio()
-        threshold = settings.get("threshold", 5.0)
+        # Per-portfolio threshold takes priority over the global user setting
+        threshold = float(portfolio_info.get("threshold") or settings.get("threshold") or 5.0)
 
         # Never trade more than what's actually in the account.
         capital = portfolio_info.get("capital_usdt", 0.0) if portfolio_info else 0.0
@@ -88,8 +87,8 @@ async def _do_rebalance(app, user_id: int, auto: bool = False):
 
         now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
-        # Update last_rebalance_at regardless of whether trades were needed
-        await db.update_settings(user_id, last_rebalance_at=now_str)
+        # Update last_rebalance_at on the portfolio (per-portfolio tracking)
+        await db.update_portfolio(portfolio_id, last_rebalance_at=now_str)
 
         if not trades:
             return
