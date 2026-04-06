@@ -12,9 +12,11 @@ Rules:
 
 from typing import Dict, Any
 
-_STOP_PCT = 0.003   # 0.3% below sweep low
-_T1_R     = 1.5     # target1 = entry + 1.5 × risk (50% exit)
-_T2_R     = 3.0     # target2 = entry + 3.0 × risk (remaining 50% exit)
+_STOP_PCT     = 0.003   # 0.3% below sweep low
+_T1_R         = 1.5     # target1 = entry + 1.5 × risk (50% exit)
+_T2_R         = 3.0     # target2 = entry + 3.0 × risk (remaining 50% exit)
+_MAX_RISK_PCT = 0.02    # SL must not be more than 2% below entry
+_MIN_RISK_PCT = 0.003   # SL must not be less than 0.3% below entry
 
 
 def calculate_risk(
@@ -42,6 +44,11 @@ def calculate_risk(
     risk      = entry_price - stop_loss
 
     if risk <= 0:
+        return _invalid()
+
+    # Reject if SL is too far (> 2%) or too tight (< 0.3%) from entry
+    risk_pct = risk / entry_price
+    if risk_pct > _MAX_RISK_PCT or risk_pct < _MIN_RISK_PCT:
         return _invalid()
 
     target1 = round(entry_price + risk * _T1_R, 8)

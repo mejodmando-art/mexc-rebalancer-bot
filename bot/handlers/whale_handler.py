@@ -29,6 +29,7 @@ def whale_menu_kb(enabled: bool) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(toggle, callback_data="whale:toggle")],
         [InlineKeyboardButton("📊 الصفقات المفتوحة", callback_data="whale:open_trades")],
+        [InlineKeyboardButton("⚙️ إعدادات Whale", callback_data="whale:settings")],
         [InlineKeyboardButton("◀️ القائمة الرئيسية", callback_data="menu:main")],
     ])
 
@@ -99,11 +100,73 @@ async def whale_toggle_callback(update: Update, context: ContextTypes.DEFAULT_TY
     )
 
 
+async def whale_settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = update.effective_user.id
+    s = await _get_settings(user_id)
+
+    await query.edit_message_text(
+        "⚙️ *إعدادات Whale Order Flow*\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        f"  حجم الصفقة الحالي: `${s['trade_size']:.0f}`\n\n"
+        "لتغيير حجم الصفقة أرسل:\n"
+        "`/whale_size 20`\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("◀️ رجوع", callback_data="whale:menu")]
+        ]),
+    )
+
+
+async def whale_size_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Usage: /whale_size 20"""
+    user_id = update.effective_user.id
+    args = context.args
+
+    if not args:
+        s = await _get_settings(user_id)
+        await update.message.reply_text(
+            f"⚙️ حجم الصفقة الحالي: `${s['trade_size']:.0f}`\n\n"
+            f"لتغييره: `/whale_size <المبلغ>`\n"
+            f"مثال: `/whale_size 20`\n\n"
+            f"الحد الأدنى: ${_MIN_TRADE_SIZE:.0f}  ·  الحد الأقصى: ${_MAX_TRADE_SIZE:,.0f}",
+            parse_mode="Markdown",
+        )
+        return
+
+    try:
+        size = float(args[0])
+    except ValueError:
+        await update.message.reply_text(
+            "❌ أدخل رقماً صحيحاً. مثال: `/whale_size 20`",
+            parse_mode="Markdown",
+        )
+        return
+
+    if size < _MIN_TRADE_SIZE or size > _MAX_TRADE_SIZE:
+        await update.message.reply_text(
+            f"❌ يجب أن يكون المبلغ بين ${_MIN_TRADE_SIZE:.0f} و ${_MAX_TRADE_SIZE:,.0f}",
+        )
+        return
+
+    await db.update_settings(user_id, whale_trade_size=size)
+    await update.message.reply_text(
+        f"✅ تم تغيير حجم صفقة Whale إلى `${size:.0f}` USDT",
+        parse_mode="Markdown",
+    )
+
+
 async def whale_open_trades_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    user_id = update.effective_user.id
 
-    trades = whale_monitor.open_trades
+    # Fetch directly from DB to reflect actual persisted state
+    rows = await db.load_scalping_trades()
+    trades = [r for r in rows if r.get("user_id") == user_id and r.get("strategy") == "whale"]
+
     if not trades:
         await query.edit_message_text(
             "📊 *Whale — الصفقات المفتوحة*\n\n"
@@ -117,10 +180,10 @@ async def whale_open_trades_callback(update: Update, context: ContextTypes.DEFAU
         return
 
     text = "📊 *Whale — الصفقات المفتوحة*\n\n━━━━━━━━━━━━━━━━━━━━━\n"
-    for sym, t in trades.items():
+    for t in trades:
         t1 = "✅" if t["t1_hit"] else "⏳"
         text += (
-            f"◈ *{sym}*\n"
+            f"◈ *{t['symbol']}*\n"
             f"   دخول: `${t['entry_price']:.6g}`\n"
             f"   T1: `${t['target1']:.6g}` {t1}  ·  T2: `${t['target2']:.6g}`\n"
             f"   وقف: `${t['stop_loss']:.6g}`\n\n"

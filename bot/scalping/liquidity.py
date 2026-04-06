@@ -10,8 +10,8 @@ actually revisits. Proximity threshold is 5% to catch approaches early.
 
 from typing import Dict, Any
 
-_LOOKBACK       = 24    # 24 × 1H = 1 day
-_PROXIMITY_PCT  = 0.05  # price within 5% of zone boundary
+_LOOKBACK       = 100   # 100 × 1H ≈ 4 days — wider context for reliable zones
+_PROXIMITY_PCT  = 0.03  # price within 3% of zone boundary
 
 
 async def get_liquidity_zones(symbol: str, exchange) -> Dict[str, Any]:

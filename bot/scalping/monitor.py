@@ -37,22 +37,23 @@ class TradeMonitor:
         entry_price     = setup["entry_price"]
         initial_sl      = setup["stop_loss"]
         trade = {
-            "symbol":        symbol,
-            "user_id":       user_id,
-            "entry_price":   entry_price,
-            "stop_loss":     initial_sl,
-            "highest_price": entry_price,   # tracks peak price for trailing
-            "target1":       setup["target1"],
-            "target2":       setup["target2"],  # 3R — sell remaining 50%
-            "qty":           actual_qty,
-            "qty_half":      actual_qty_half,
-            "risk_reward":   setup["risk_reward"],
-            "t1_hit":        False,
-            "t2_hit":        False,
-            "t1_order_id":   result.get("target1_order", {}).get("id"),
-            "t2_order_id":   None,
-            "opened_at":     datetime.now(timezone.utc).isoformat(),
-            "breakeven":     False,
+            "symbol":           symbol,
+            "user_id":          user_id,
+            "entry_price":      entry_price,
+            "stop_loss":        initial_sl,
+            "initial_stop_loss": initial_sl,   # fixed reference for trailing activation
+            "highest_price":    entry_price,   # tracks peak price for trailing
+            "target1":          setup["target1"],
+            "target2":          setup["target2"],  # 3R — sell remaining 50%
+            "qty":              actual_qty,
+            "qty_half":         actual_qty_half,
+            "risk_reward":      setup["risk_reward"],
+            "t1_hit":           False,
+            "t2_hit":           False,
+            "t1_order_id":      result.get("target1_order", {}).get("id"),
+            "t2_order_id":      None,
+            "opened_at":        datetime.now(timezone.utc).isoformat(),
+            "breakeven":        False,
         }
         self.open_trades[symbol] = trade
         try:
@@ -77,22 +78,23 @@ class TradeMonitor:
                 if row.get("strategy") == "whale":
                     continue
                 self.open_trades[row["symbol"]] = {
-                    "symbol":        row["symbol"],
-                    "user_id":       row.get("user_id"),
-                    "entry_price":   row["entry_price"],
-                    "stop_loss":     row["stop_loss"],
-                    "highest_price": row.get("highest_price") or row["entry_price"],
-                    "target1":       row["target1"],
-                    "target2":       row["target2"],
-                    "qty":           row["qty"],
-                    "qty_half":      row["qty_half"],
-                    "risk_reward":   row["risk_reward"],
-                    "t1_hit":        bool(row["t1_hit"]),
-                    "t2_hit":        bool(row.get("t2_hit", False)),
-                    "t1_order_id":   row["t1_order_id"],
-                    "t2_order_id":   row["t2_order_id"],
-                    "opened_at":     row["opened_at"],
-                    "breakeven":     bool(row["breakeven"]),
+                    "symbol":            row["symbol"],
+                    "user_id":           row.get("user_id"),
+                    "entry_price":       row["entry_price"],
+                    "stop_loss":         row["stop_loss"],
+                    "initial_stop_loss": row.get("initial_stop_loss") or row["stop_loss"],
+                    "highest_price":     row.get("highest_price") or row["entry_price"],
+                    "target1":           row["target1"],
+                    "target2":           row["target2"],
+                    "qty":               row["qty"],
+                    "qty_half":          row["qty_half"],
+                    "risk_reward":       row["risk_reward"],
+                    "t1_hit":            bool(row["t1_hit"]),
+                    "t2_hit":            bool(row.get("t2_hit", False)),
+                    "t1_order_id":       row["t1_order_id"],
+                    "t2_order_id":       row["t2_order_id"],
+                    "opened_at":         row["opened_at"],
+                    "breakeven":         bool(row["breakeven"]),
                 }
             if self.open_trades:
                 logger.info(f"Monitor: restored {len(self.open_trades)} open trade(s) from DB")
@@ -149,23 +151,30 @@ class TradeMonitor:
         target2 = trade["target2"]
 
         # ── Update trailing stop ───────────────────────────────────────────
-        # Use tighter trail after T1 is hit (profit already locked)
-        trail_pct = TRAIL_PCT_AFTER_T1 if trade["t1_hit"] else TRAIL_PCT
+        # Trailing only activates after price moves at least 0.5R from entry
+        # to avoid closing the trade on normal noise right after entry.
+        trail_pct   = TRAIL_PCT_AFTER_T1 if trade["t1_hit"] else TRAIL_PCT
+        entry_price = trade["entry_price"]
+        initial_sl  = trade.get("initial_stop_loss") or trade["stop_loss"]
+        risk        = entry_price - initial_sl
+        # Activate trailing only after price gains at least 0.5R
+        trail_active = trade["t1_hit"] or (risk > 0 and price >= entry_price + risk * 0.5)
 
         if price > trade["highest_price"]:
             trade["highest_price"] = price
-            new_sl = round(price * (1 - trail_pct), 8)
-            if new_sl > trade["stop_loss"]:
-                old_sl = trade["stop_loss"]
-                trade["stop_loss"] = new_sl
-                logger.info(
-                    f"Monitor: {symbol} new high {price:.6g} — "
-                    f"SL trailed {old_sl:.6g} → {new_sl:.6g}"
-                )
-                try:
-                    await db.save_scalping_trade(user_id, trade)
-                except Exception as e:
-                    logger.error(f"Monitor: failed to update trailing SL for {symbol}: {e}")
+            if trail_active:
+                new_sl = round(price * (1 - trail_pct), 8)
+                if new_sl > trade["stop_loss"]:
+                    old_sl = trade["stop_loss"]
+                    trade["stop_loss"] = new_sl
+                    logger.info(
+                        f"Monitor: {symbol} new high {price:.6g} — "
+                        f"SL trailed {old_sl:.6g} → {new_sl:.6g}"
+                    )
+                    try:
+                        await db.save_scalping_trade(user_id, trade)
+                    except Exception as e:
+                        logger.error(f"Monitor: failed to update trailing SL for {symbol}: {e}")
 
         # ── Trailing stop hit → close ──────────────────────────────────────
         if price <= trade["stop_loss"]:

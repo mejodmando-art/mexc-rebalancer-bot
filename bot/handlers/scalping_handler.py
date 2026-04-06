@@ -112,8 +112,12 @@ async def scalping_toggle_callback(update: Update, context: ContextTypes.DEFAULT
 async def scalping_open_trades_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    user_id = update.effective_user.id
 
-    trades = trade_monitor.open_trades
+    # Fetch directly from DB to reflect actual persisted state
+    rows = await db.load_scalping_trades()
+    trades = [r for r in rows if r.get("user_id") == user_id and r.get("strategy") != "whale"]
+
     if not trades:
         await query.edit_message_text(
             "📊 *الصفقات المفتوحة*\n\n"
@@ -127,11 +131,11 @@ async def scalping_open_trades_callback(update: Update, context: ContextTypes.DE
         return
 
     text = "📊 *الصفقات المفتوحة*\n\n━━━━━━━━━━━━━━━━━━━━━\n"
-    for sym, t in trades.items():
+    for t in trades:
         t1_status = "✅" if t["t1_hit"] else "⏳"
         be_status  = " 🔒 Breakeven" if t["breakeven"] else ""
         text += (
-            f"◈ *{sym}*{be_status}\n"
+            f"◈ *{t['symbol']}*{be_status}\n"
             f"   دخول: `${t['entry_price']:.6g}`\n"
             f"   وقف:  `${t['stop_loss']:.6g}`\n"
             f"   T1: `${t['target1']:.6g}` {t1_status}  ·  T2: `${t['target2']:.6g}`\n\n"

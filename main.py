@@ -39,6 +39,8 @@ from bot.handlers.whale_handler import (
     whale_menu_callback,
     whale_toggle_callback,
     whale_open_trades_callback,
+    whale_settings_callback,
+    whale_size_command,
     run_whale_scan,
     run_whale_monitor,
 )
@@ -183,6 +185,7 @@ def build_app() -> Application:
     app.add_handler(CommandHandler("help", help_handler))
     app.add_handler(CommandHandler("menu", menu_command))
     app.add_handler(CommandHandler("scalping_size", scalping_size_command))
+    app.add_handler(CommandHandler("whale_size", whale_size_command))
 
     # ── Navigation ─────────────────────────────────────────────────────────────
     app.add_handler(CallbackQueryHandler(handle_menu_callback, pattern="^menu:"))
@@ -208,6 +211,7 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(whale_menu_callback,        pattern="^whale:menu$"))
     app.add_handler(CallbackQueryHandler(whale_toggle_callback,      pattern="^whale:toggle$"))
     app.add_handler(CallbackQueryHandler(whale_open_trades_callback, pattern="^whale:open_trades$"))
+    app.add_handler(CallbackQueryHandler(whale_settings_callback,    pattern="^whale:settings$"))
 
     # ── Grid Bot ───────────────────────────────────────────────────────────────
     app.add_handler(CallbackQueryHandler(grid_menu_callback,   pattern="^grid:menu$"))
@@ -260,7 +264,7 @@ async def main():
     scheduler.add_job(
         run_scalping_monitor,
         trigger="interval",
-        seconds=60,
+        seconds=20,
         args=[app],
         id="scalping_monitor",
         replace_existing=True,
