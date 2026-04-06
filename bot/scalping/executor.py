@@ -59,6 +59,19 @@ async def execute_trade(setup: Dict[str, Any], exchange) -> Dict[str, Any]:
             avg = float(entry_order.get("average") or entry_order.get("price") or setup["entry_price"])
             filled_qty = trade_size_usdt / avg if avg > 0 else setup["qty"]
 
+        # Verify against actual free balance — MEXC sometimes returns filled=0
+        # for market orders even when executed, causing oversell errors on T1/SL.
+        base_sym = symbol.split("/")[0]
+        try:
+            balance    = await exchange.fetch_balance()
+            actual_qty = float(balance.get("free", {}).get(base_sym, 0) or 0)
+            if actual_qty > 0:
+                # Use the lesser of the two to avoid selling more than we hold
+                filled_qty = min(filled_qty, actual_qty) if filled_qty > 0 else actual_qty
+                logger.info(f"Executor: balance check {base_sym} free={actual_qty:.8f} → using {filled_qty:.8f}")
+        except Exception as e:
+            logger.warning(f"Executor: balance check failed for {base_sym}: {e}")
+
         qty_half = round(filled_qty / 2, 8)
 
         # ── 2. Take profit — limit sell at T1 for 50% ────────────────────
