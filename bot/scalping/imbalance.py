@@ -58,10 +58,11 @@ async def get_imbalance(symbol: str, exchange) -> Dict[str, Any]:
         fvg = fvgs[-1]
         fvg_low  = fvg["low"]
         fvg_high = fvg["high"]
+        fvg_age  = fvg["age"]
 
         price_in_fvg    = fvg_low <= current_price <= fvg_high
-        # Price just above FVG (within 0.5%) — gap filled, momentum continuing
-        price_above_fvg = fvg_high < current_price <= fvg_high * 1.005
+        # Price just above FVG (within 0.3%) — gap filled, momentum continuing
+        price_above_fvg = fvg_high < current_price <= fvg_high * 1.003
 
         found = price_in_fvg or price_above_fvg
 
@@ -69,6 +70,7 @@ async def get_imbalance(symbol: str, exchange) -> Dict[str, Any]:
             "found":           found,
             "fvg_low":         fvg_low,
             "fvg_high":        fvg_high,
+            "age":             fvg_age,
             "price_in_fvg":    price_in_fvg,
             "price_above_fvg": price_above_fvg,
         }
@@ -82,6 +84,7 @@ def _empty() -> Dict[str, Any]:
         "found":           False,
         "fvg_low":         0.0,
         "fvg_high":        0.0,
+        "age":             999,
         "price_in_fvg":    False,
         "price_above_fvg": False,
     }

@@ -1,22 +1,22 @@
 """
 Risk management for the Whale Order Flow strategy.
 
-Targets are tight and fast:
-  T1 = entry + 0.5%   (exit 60% here)
-  T2 = entry + 1.0%   (exit remaining 40% here)
-  SL = entry - 0.4%   (tight stop — if whales didn't follow through, exit fast)
+Targets are fast but wide enough to cover fees and slippage:
+  T1 = entry + 0.8%   (exit 60% here — quick profit lock)
+  T2 = entry + 1.6%   (exit remaining 40% here)
+  SL = entry - 0.5%   (tight stop — if whales didn't follow through, exit fast)
 
-R/R = 1:1.25 minimum (0.5% reward vs 0.4% risk)
+R/R = 1:1.6 (0.8% reward vs 0.5% risk at T1)
 
 No trailing stop on this strategy — exits are fixed and fast.
-Average hold time: 5 to 15 minutes.
+Average hold time: 5 to 20 minutes.
 """
 
 from typing import Dict, Any
 
-_T1_PCT = 0.005   # 0.5%
-_T2_PCT = 0.010   # 1.0%
-_SL_PCT = 0.004   # 0.4%
+_T1_PCT = 0.008   # 0.8%
+_T2_PCT = 0.016   # 1.6%
+_SL_PCT = 0.005   # 0.5%
 
 
 def calculate_whale_risk(
