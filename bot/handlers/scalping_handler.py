@@ -365,6 +365,7 @@ async def run_scalping_scan(app) -> None:
                     usdt_balance -= trade_size
                     await trade_monitor.add_trade(setup, result, user_id)
                     await _send_signal(app.bot, user_id, setup, executed=True)
+                    await _send_orders_status(app.bot, user_id, setup, result)
                 else:
                     reason = result.get("reason", "")
                     logger.warning(f"Scalping: execute failed {symbol}: {reason}")
@@ -478,3 +479,46 @@ async def _send_signal(
         await bot.send_message(user_id, text, parse_mode="Markdown")
     except Exception as e:
         logger.error(f"Signal notify failed for {user_id}: {e}")
+
+
+async def _send_orders_status(bot, user_id: int, setup: dict, result: dict) -> None:
+    """Send a follow-up message confirming which orders were placed on MEXC."""
+    sym       = setup["symbol"]
+    t1_placed = result.get("t1_placed", False)
+    sl_placed = result.get("sl_placed", False)
+    t1_error  = result.get("t1_error", "")
+    sl_error  = result.get("sl_error", "")
+
+    t1_id = result.get("target1_order", {}).get("id", "")
+    sl_id = result.get("sl_order", {}).get("id", "")
+
+    t1_line = (
+        f"✅ هدف 1 (T1) — وُضع على MEXC  `#{t1_id}`"
+        if t1_placed else
+        f"❌ هدف 1 (T1) — *فشل الوضع*\n   `{_translate_error(t1_error)}`"
+    )
+    sl_line = (
+        f"✅ وقف الخسارة (SL) — وُضع على MEXC  `#{sl_id}`"
+        if sl_placed else
+        f"❌ وقف الخسارة (SL) — *فشل الوضع*\n   `{_translate_error(sl_error)}`"
+    )
+
+    # Only notify if at least one order failed — success is already implied by the signal message
+    if t1_placed and sl_placed:
+        text = (
+            f"📋 *{sym}* — أوردرات MEXC\n\n"
+            f"{t1_line}\n"
+            f"{sl_line}"
+        )
+    else:
+        text = (
+            f"⚠️ *{sym}* — تحقق من أوردرات MEXC\n\n"
+            f"{t1_line}\n"
+            f"{sl_line}\n\n"
+            f"_الصفقة مفتوحة لكن بعض الأوردرات لم تُوضع على المنصة — راجع حسابك يدوياً._"
+        )
+
+    try:
+        await bot.send_message(user_id, text, parse_mode="Markdown")
+    except Exception as e:
+        logger.error(f"Orders status notify failed for {user_id}: {e}")
