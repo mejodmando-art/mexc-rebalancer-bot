@@ -18,6 +18,7 @@ def main_menu_kb() -> InlineKeyboardMarkup:
         ],
         [InlineKeyboardButton("🐋 Whale Strategy", callback_data="whale:menu")],
         [InlineKeyboardButton("🔲 Grid Bot", callback_data="grid:menu")],
+        [InlineKeyboardButton("🚨 بيع طوارئ", callback_data="emergency:menu")],
         [InlineKeyboardButton("💡 كيف يعمل البوت؟", callback_data="menu:info")],
     ])
 
@@ -95,9 +96,40 @@ def portfolio_actions_kb(portfolio_id: int, is_active: bool) -> InlineKeyboardMa
         buttons.append([InlineKeyboardButton("✅ تفعيل هذه المحفظة", callback_data=f"portfolio_switch:{portfolio_id}")])
     buttons.append([InlineKeyboardButton("✏️ تعديل الاسم", callback_data=f"portfolio_edit_name:{portfolio_id}")])
     buttons.append([InlineKeyboardButton("💰 تعديل رأس المال", callback_data=f"portfolio_edit_capital:{portfolio_id}")])
+    buttons.append([
+        InlineKeyboardButton("🔴 بيع الكل", callback_data=f"portfolio_sell_all:{portfolio_id}"),
+        InlineKeyboardButton("📊 استبدال بنسبة", callback_data=f"portfolio_rebalance_sell:{portfolio_id}"),
+    ])
+    buttons.append([InlineKeyboardButton("🔴 بيع عملة واحدة", callback_data=f"portfolio_sell_one:{portfolio_id}")])
     buttons.append([InlineKeyboardButton("🗑 حذف المحفظة", callback_data=f"portfolio_delete:{portfolio_id}")])
     buttons.append([InlineKeyboardButton("◀️ قائمة المحافظ", callback_data="portfolios")])
     return InlineKeyboardMarkup(buttons)
+
+
+def portfolio_sell_one_kb(portfolio_id: int, symbols: List[str]) -> InlineKeyboardMarkup:
+    """Keyboard to pick a single coin to sell from a portfolio."""
+    buttons = []
+    row = []
+    for i, sym in enumerate(symbols):
+        row.append(InlineKeyboardButton(sym, callback_data=f"portfolio_sell_coin:{portfolio_id}:{sym}"))
+        if len(row) == 3:
+            buttons.append(row)
+            row = []
+    if row:
+        buttons.append(row)
+    buttons.append([InlineKeyboardButton("◀️ رجوع", callback_data=f"portfolio:{portfolio_id}")])
+    return InlineKeyboardMarkup(buttons)
+
+
+def portfolio_sell_confirm_kb(portfolio_id: int, action: str, symbol: str = "") -> InlineKeyboardMarkup:
+    """Confirm/cancel sell action."""
+    confirm_data = f"portfolio_sell_exec:{portfolio_id}:{action}:{symbol}"
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ تأكيد البيع", callback_data=confirm_data),
+            InlineKeyboardButton("❌ إلغاء", callback_data=f"portfolio:{portfolio_id}"),
+        ]
+    ])
 
 
 def portfolio_delete_confirm_kb(portfolio_id: int) -> InlineKeyboardMarkup:

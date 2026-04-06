@@ -5,6 +5,7 @@ from bot.database import db
 from bot.keyboards import (
     portfolios_list_kb, portfolio_actions_kb,
     portfolio_delete_confirm_kb, main_menu_kb, back_to_main_kb,
+    portfolio_sell_one_kb, portfolio_sell_confirm_kb,
 )
 
 # Conversation states
@@ -339,10 +340,23 @@ async def edit_portfolio_capital_start(update: Update, context: ContextTypes.DEF
     return EDIT_CAPITAL
 
 
+async def cancel_portfolio_conv(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.clear()
+    if update.callback_query:
+        await update.callback_query.answer()
+        await update.callback_query.edit_message_text("❌ تم الإلغاء.", reply_markup=main_menu_kb())
+    else:
+        await update.message.reply_text("❌ تم الإلغاء.", reply_markup=main_menu_kb())
+    return ConversationHandler.END
+
+
+# ── Edit Capital with Real Execution ──────────────────────────────────────────
+
 async def edit_portfolio_capital_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Override: after saving new capital, buy/sell to match the new allocation."""
     try:
-        capital = float(update.message.text.strip().replace(",", ""))
-        if capital < 0:
+        new_capital = float(update.message.text.strip().replace(",", ""))
+        if new_capital < 0:
             raise ValueError
     except ValueError:
         await update.message.reply_text("❌ أدخل رقماً صحيحاً:")
@@ -353,23 +367,302 @@ async def edit_portfolio_capital_input(update: Update, context: ContextTypes.DEF
         await update.message.reply_text("❌ انتهت الجلسة.", reply_markup=main_menu_kb())
         return ConversationHandler.END
 
-    await db.update_portfolio(portfolio_id, capital_usdt=capital)
     user_id = update.effective_user.id
+    p = await db.get_portfolio(portfolio_id)
+    old_capital = p["capital_usdt"]
+    diff = new_capital - old_capital
+
+    # Save new capital first
+    await db.update_portfolio(portfolio_id, capital_usdt=new_capital)
+
+    if abs(diff) < 1.0:
+        # No meaningful change — just update DB
+        portfolios = await db.get_portfolios(user_id)
+        active_id = await db.get_active_portfolio_id(user_id)
+        await update.message.reply_text(
+            f"✅ *تم تعديل رأس المال إلى: ${new_capital:,.2f} USDT*\n"
+            "_(لا يوجد فرق كافٍ لتنفيذ صفقات)_",
+            parse_mode="Markdown",
+            reply_markup=portfolios_list_kb(portfolios, active_id),
+        )
+        return ConversationHandler.END
+
+    # Try to execute real trades based on the capital difference
+    settings = await db.get_settings(user_id)
+    if not settings or not settings.get("mexc_api_key"):
+        portfolios = await db.get_portfolios(user_id)
+        active_id = await db.get_active_portfolio_id(user_id)
+        await update.message.reply_text(
+            f"✅ *تم تعديل رأس المال إلى: ${new_capital:,.2f} USDT*\n"
+            "⚠️ لم يتم ربط MEXC API — لم تُنفَّذ صفقات.",
+            parse_mode="Markdown",
+            reply_markup=portfolios_list_kb(portfolios, active_id),
+        )
+        return ConversationHandler.END
+
+    allocs = await db.get_portfolio_allocations(portfolio_id)
+    if not allocs:
+        portfolios = await db.get_portfolios(user_id)
+        active_id = await db.get_active_portfolio_id(user_id)
+        await update.message.reply_text(
+            f"✅ *تم تعديل رأس المال إلى: ${new_capital:,.2f} USDT*\n"
+            "⚠️ لا يوجد توزيع عملات — لم تُنفَّذ صفقات.",
+            parse_mode="Markdown",
+            reply_markup=portfolios_list_kb(portfolios, active_id),
+        )
+        return ConversationHandler.END
+
+    await update.message.reply_text(
+        f"⏳ جاري تنفيذ الصفقات بناءً على الفرق `${diff:+,.2f} USDT`..."
+    )
+
+    from bot.mexc_client import MexcClient
+    client = MexcClient(settings["mexc_api_key"], settings["mexc_secret_key"])
+    results = []
+    try:
+        if diff > 0:
+            # Capital increased → buy each coin proportionally
+            for a in allocs:
+                sym = a["symbol"]
+                pct = a["target_percentage"] / 100.0
+                usdt_to_buy = diff * pct
+                if usdt_to_buy < 1.0:
+                    continue
+                pair = f"{sym}/USDT"
+                try:
+                    order = await client.exchange.create_market_buy_order_with_cost(pair, usdt_to_buy)
+                    results.append(f"🟢 شراء `{sym}` — `${usdt_to_buy:.2f}` ✅")
+                except Exception as e:
+                    results.append(f"❌ شراء `{sym}`: {str(e)[:60]}")
+        else:
+            # Capital decreased → sell each coin proportionally
+            abs_diff = abs(diff)
+            for a in allocs:
+                sym = a["symbol"]
+                pct = a["target_percentage"] / 100.0
+                usdt_to_sell = abs_diff * pct
+                if usdt_to_sell < 1.0:
+                    continue
+                pair = f"{sym}/USDT"
+                try:
+                    ticker = await client.exchange.fetch_ticker(pair)
+                    price = float(ticker.get("last") or 0)
+                    if price <= 0:
+                        results.append(f"❌ بيع `{sym}`: تعذّر جلب السعر")
+                        continue
+                    qty = usdt_to_sell / price
+                    order = await client.exchange.create_market_sell_order(pair, qty)
+                    results.append(f"🔴 بيع `{sym}` — `${usdt_to_sell:.2f}` ✅")
+                except Exception as e:
+                    results.append(f"❌ بيع `{sym}`: {str(e)[:60]}")
+    finally:
+        await client.close()
+
+    action_text = "زيادة" if diff > 0 else "تخفيض"
+    result_text = "\n".join(results) if results else "لم تُنفَّذ أي صفقة"
     portfolios = await db.get_portfolios(user_id)
     active_id = await db.get_active_portfolio_id(user_id)
     await update.message.reply_text(
-        f"✅ *تم تعديل رأس المال إلى: ${capital:,.2f} USDT*",
+        f"✅ *تم {action_text} رأس المال إلى: ${new_capital:,.2f} USDT*\n\n"
+        f"*الصفقات المنفذة:*\n{result_text}",
         parse_mode="Markdown",
         reply_markup=portfolios_list_kb(portfolios, active_id),
     )
     return ConversationHandler.END
 
 
-async def cancel_portfolio_conv(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data.clear()
-    if update.callback_query:
-        await update.callback_query.answer()
-        await update.callback_query.edit_message_text("❌ تم الإلغاء.", reply_markup=main_menu_kb())
-    else:
-        await update.message.reply_text("❌ تم الإلغاء.", reply_markup=main_menu_kb())
-    return ConversationHandler.END
+# ── Portfolio Sell Operations ──────────────────────────────────────────────────
+
+async def portfolio_sell_all_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show confirmation to sell ALL coins in the portfolio at market price."""
+    query = update.callback_query
+    await query.answer()
+    user_id = update.effective_user.id
+    portfolio_id = int(query.data.split(":")[1])
+
+    p = await db.get_portfolio(portfolio_id)
+    if not p or p["user_id"] != user_id:
+        await query.answer("❌ محفظة غير موجودة", show_alert=True)
+        return
+
+    allocs = await db.get_portfolio_allocations(portfolio_id)
+    coins = [a["symbol"] for a in allocs]
+    coins_text = "، ".join(coins) if coins else "لا يوجد عملات"
+
+    await query.edit_message_text(
+        f"⚠️ *تأكيد بيع الكل*\n\n"
+        f"المحفظة: *{p['name']}*\n"
+        f"العملات: `{coins_text}`\n\n"
+        "سيتم بيع جميع العملات بسعر السوق الحالي فوراً.",
+        parse_mode="Markdown",
+        reply_markup=portfolio_sell_confirm_kb(portfolio_id, "all"),
+    )
+
+
+async def portfolio_sell_one_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show list of coins to pick one for selling."""
+    query = update.callback_query
+    await query.answer()
+    user_id = update.effective_user.id
+    portfolio_id = int(query.data.split(":")[1])
+
+    p = await db.get_portfolio(portfolio_id)
+    if not p or p["user_id"] != user_id:
+        await query.answer("❌ محفظة غير موجودة", show_alert=True)
+        return
+
+    allocs = await db.get_portfolio_allocations(portfolio_id)
+    if not allocs:
+        await query.answer("❌ لا يوجد عملات في هذه المحفظة", show_alert=True)
+        return
+
+    symbols = [a["symbol"] for a in allocs]
+    await query.edit_message_text(
+        f"🔴 *بيع عملة واحدة*\n\nاختر العملة التي تريد بيعها من محفظة *{p['name']}*:",
+        parse_mode="Markdown",
+        reply_markup=portfolio_sell_one_kb(portfolio_id, symbols),
+    )
+
+
+async def portfolio_sell_coin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show confirmation for selling a specific coin."""
+    query = update.callback_query
+    await query.answer()
+    user_id = update.effective_user.id
+    parts = query.data.split(":")
+    portfolio_id = int(parts[1])
+    symbol = parts[2]
+
+    p = await db.get_portfolio(portfolio_id)
+    if not p or p["user_id"] != user_id:
+        await query.answer("❌ محفظة غير موجودة", show_alert=True)
+        return
+
+    await query.edit_message_text(
+        f"⚠️ *تأكيد بيع {symbol}*\n\n"
+        f"المحفظة: *{p['name']}*\n\n"
+        f"سيتم بيع كامل رصيد `{symbol}` بسعر السوق الحالي.",
+        parse_mode="Markdown",
+        reply_markup=portfolio_sell_confirm_kb(portfolio_id, "one", symbol),
+    )
+
+
+async def portfolio_rebalance_sell_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show confirmation to sell proportionally (rebalance sell)."""
+    query = update.callback_query
+    await query.answer()
+    user_id = update.effective_user.id
+    portfolio_id = int(query.data.split(":")[1])
+
+    p = await db.get_portfolio(portfolio_id)
+    if not p or p["user_id"] != user_id:
+        await query.answer("❌ محفظة غير موجودة", show_alert=True)
+        return
+
+    allocs = await db.get_portfolio_allocations(portfolio_id)
+    coins_text = "، ".join(a["symbol"] for a in allocs) if allocs else "لا يوجد"
+
+    await query.edit_message_text(
+        f"⚠️ *تأكيد استبدال بنسبة*\n\n"
+        f"المحفظة: *{p['name']}*\n"
+        f"العملات: `{coins_text}`\n\n"
+        "سيتم بيع كل عملة بنسبتها المخصصة من رأس المال الحالي وتحويلها إلى USDT.",
+        parse_mode="Markdown",
+        reply_markup=portfolio_sell_confirm_kb(portfolio_id, "proportional"),
+    )
+
+
+async def portfolio_sell_exec_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Execute the sell operation."""
+    query = update.callback_query
+    await query.answer()
+    user_id = update.effective_user.id
+    parts = query.data.split(":")
+    portfolio_id = int(parts[1])
+    action = parts[2]
+    symbol = parts[3] if len(parts) > 3 else ""
+
+    p = await db.get_portfolio(portfolio_id)
+    if not p or p["user_id"] != user_id:
+        await query.answer("❌ محفظة غير موجودة", show_alert=True)
+        return
+
+    settings = await db.get_settings(user_id)
+    if not settings or not settings.get("mexc_api_key"):
+        await query.answer("❌ يجب ربط MEXC API أولاً", show_alert=True)
+        return
+
+    await query.edit_message_text("⏳ جاري تنفيذ البيع...")
+
+    from bot.mexc_client import MexcClient
+    client = MexcClient(settings["mexc_api_key"], settings["mexc_secret_key"])
+    results = []
+
+    try:
+        balance = await client.exchange.fetch_balance()
+        allocs = await db.get_portfolio_allocations(portfolio_id)
+
+        if action == "all":
+            # Sell all coins in the portfolio
+            for a in allocs:
+                sym = a["symbol"]
+                qty = float(balance.get("free", {}).get(sym, 0) or 0)
+                if qty < 1e-8:
+                    results.append(f"⏭ `{sym}`: رصيد صفر")
+                    continue
+                pair = f"{sym}/USDT"
+                try:
+                    await client.exchange.create_market_sell_order(pair, qty)
+                    results.append(f"🔴 بيع `{sym}` — `{qty:.6g}` ✅")
+                except Exception as e:
+                    results.append(f"❌ `{sym}`: {str(e)[:60]}")
+
+        elif action == "one" and symbol:
+            # Sell a single coin
+            qty = float(balance.get("free", {}).get(symbol, 0) or 0)
+            if qty < 1e-8:
+                results.append(f"⏭ `{symbol}`: رصيد صفر")
+            else:
+                pair = f"{symbol}/USDT"
+                try:
+                    await client.exchange.create_market_sell_order(pair, qty)
+                    results.append(f"🔴 بيع `{symbol}` — `{qty:.6g}` ✅")
+                except Exception as e:
+                    results.append(f"❌ `{symbol}`: {str(e)[:60]}")
+
+        elif action == "proportional":
+            # Sell each coin proportionally based on its target allocation
+            capital = p["capital_usdt"]
+            for a in allocs:
+                sym = a["symbol"]
+                pct = a["target_percentage"] / 100.0
+                usdt_target = capital * pct
+                pair = f"{sym}/USDT"
+                try:
+                    ticker = await client.exchange.fetch_ticker(pair)
+                    price = float(ticker.get("last") or 0)
+                    if price <= 0:
+                        results.append(f"❌ `{sym}`: تعذّر جلب السعر")
+                        continue
+                    qty = usdt_target / price
+                    free_qty = float(balance.get("free", {}).get(sym, 0) or 0)
+                    qty = min(qty, free_qty)
+                    if qty < 1e-8:
+                        results.append(f"⏭ `{sym}`: رصيد غير كافٍ")
+                        continue
+                    await client.exchange.create_market_sell_order(pair, qty)
+                    results.append(f"🔴 بيع `{sym}` — `${usdt_target:.2f}` ✅")
+                except Exception as e:
+                    results.append(f"❌ `{sym}`: {str(e)[:60]}")
+
+    finally:
+        await client.close()
+
+    result_text = "\n".join(results) if results else "لم تُنفَّذ أي صفقة"
+    await query.edit_message_text(
+        f"✅ *اكتملت عملية البيع*\n\n{result_text}",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("◀️ رجوع للمحفظة", callback_data=f"portfolio:{portfolio_id}")]
+        ]),
+    )

@@ -120,19 +120,41 @@ async def grid_stop_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.answer("❌ الشبكة مش موجودة", show_alert=True)
         return
 
+    symbol = grid["symbol"]
+    await query.edit_message_text(f"⏳ جاري إيقاف شبكة *{symbol}* وبيع الرصيد...")
+
     settings = await db.get_settings(user_id)
     client = MexcClient(settings["mexc_api_key"], settings["mexc_secret_key"])
+    sell_result = ""
     try:
         from bot.grid.engine import cancel_all_grid_orders
+
+        # 1. Cancel all open limit orders immediately
         all_orders = grid.get("buy_orders", []) + grid.get("sell_orders", [])
-        await cancel_all_grid_orders(client.exchange, grid["symbol"],
-                                     [o for o in all_orders if o["status"] == "open"])
+        await cancel_all_grid_orders(
+            client.exchange, symbol,
+            [o for o in all_orders if o["status"] == "open"]
+        )
+
+        # 2. Sell the held coin at market price
+        base_coin = symbol.split("/")[0]
+        try:
+            balance = await client.exchange.fetch_balance()
+            qty = float(balance.get("free", {}).get(base_coin, 0) or 0)
+            if qty > 1e-8:
+                await client.exchange.create_market_sell_order(symbol, qty)
+                sell_result = f"🔴 بيع `{base_coin}` — `{qty:.6g}` بسعر السوق ✅"
+            else:
+                sell_result = f"⏭ لا يوجد رصيد `{base_coin}` للبيع"
+        except Exception as e:
+            sell_result = f"⚠️ تعذّر البيع: {str(e)[:80]}"
+
     finally:
         await client.close()
 
     await grid_monitor.remove_grid(grid_id)
     await query.edit_message_text(
-        f"✅ تم إيقاف شبكة *{grid['symbol']}*",
+        f"✅ *تم إيقاف شبكة {symbol}*\n\n{sell_result}",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ رجوع", callback_data="grid:menu")]])
     )
@@ -387,12 +409,13 @@ async def grid_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TY
             steps        = d["steps"],
         )
 
-        # Place orders
+        # Place orders — initial=True: market buy half + limit orders for both sides
         result = await place_grid_orders(
             exchange        = client.exchange,
             symbol          = d["symbol"],
             grid            = grid_levels,
             order_size_usdt = d["order_size_usdt"],
+            initial         = True,
         )
 
         # ── If all orders failed → don't save ─────────────────────────────
@@ -444,6 +467,8 @@ async def grid_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TY
 
         tp_line = f"🎯 Take Profit: `${take_profit:.6g}`  (`+{tp_pct}%`)\n" if take_profit else ""
         sl_line = f"🛑 Stop Loss:   `${stop_loss:.6g}`  (`-{sl_pct}%`)\n"   if stop_loss  else ""
+        mkt_qty = result.get("market_buy_qty", 0)
+        mkt_line = f"🛒 شراء فوري بالسوق: `{mkt_qty:.6g}` وحدة\n" if mkt_qty > 0 else ""
 
         await query.edit_message_text(
             f"✅ *الشبكة شغالة!*\n\n"
@@ -453,6 +478,7 @@ async def grid_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TY
             f"الحد السفلي:  `${grid_levels['lower']:.6g}`\n"
             f"ربح كل خطوة: `{grid_levels['step_pct']:.3f}%`\n"
             f"{tp_line}{sl_line}\n"
+            f"{mkt_line}"
             f"أوردرات شراء:  `{buy_count}`\n"
             f"أوردرات بيع:   `{sell_count}`\n"
             + (f"⚠️ أخطاء جزئية: `{err_count}`\n" if err_count else ""),
