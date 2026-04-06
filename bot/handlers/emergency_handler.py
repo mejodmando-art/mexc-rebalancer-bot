@@ -26,6 +26,22 @@ logger = logging.getLogger(__name__)
 
 _MIN_VALUE_USD = 1.0
 
+# عملات الشبكات والمحافظ — لا يجوز بيعها لأنها بتُستخدم كرسوم أو محافظ أساسية
+NETWORK_COINS = {
+    "BNB",   # رسوم شبكة BSC
+    "ETH",   # رسوم شبكة Ethereum
+    "TRX",   # رسوم شبكة TRON
+    "XRP",   # رسوم شبكة Ripple
+    "SOL",   # رسوم شبكة Solana
+    "MATIC", # رسوم شبكة Polygon
+    "AVAX",  # رسوم شبكة Avalanche
+    "DOT",   # شبكة Polkadot
+    "ADA",   # شبكة Cardano
+    "ATOM",  # شبكة Cosmos
+    "TON",   # رسوم شبكة TON
+    "MX",    # عملة MEXC الأساسية
+}
+
 
 def _get_grid_locked_symbols(user_id: int) -> set:
     """Return base coin symbols that have an active grid for this user."""
@@ -37,24 +53,52 @@ def _get_grid_locked_symbols(user_id: int) -> set:
     return locked
 
 
+def _get_scalping_symbols(user_id: int) -> set:
+    """Return symbols with open scalping trades for this user."""
+    return {
+        sym for sym, t in trade_monitor.open_trades.items()
+        if t.get("user_id") == user_id
+    }
+
+
+def _get_whale_symbols(user_id: int) -> set:
+    """Return symbols with open whale trades for this user."""
+    return {
+        sym for sym, t in whale_monitor.open_trades.items()
+        if t.get("user_id") == user_id
+    }
+
+
 # ── Menu ───────────────────────────────────────────────────────────────────────
 
 async def emergency_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    user_id = update.effective_user.id
     # Clear any previous selection
     context.user_data.pop("_emg_selected", None)
     context.user_data.pop("_emg_portfolio", None)
+
+    scalping_count = len(_get_scalping_symbols(user_id))
+    whale_count    = len(_get_whale_symbols(user_id))
+
+    scalping_label = f"⚡ بيع صفقات Scalping ({scalping_count})" if scalping_count else "⚡ Scalping — لا توجد صفقات"
+    whale_label    = f"🐋 بيع صفقات Whale ({whale_count})"       if whale_count    else "🐋 Whale — لا توجد صفقات"
+
+    buttons = [
+        [InlineKeyboardButton(scalping_label, callback_data="emergency:pick_scalping")],
+        [InlineKeyboardButton(whale_label,    callback_data="emergency:pick_whale")],
+        [InlineKeyboardButton("🔴 اختار عملات أخرى للبيع", callback_data="emergency:pick_coin")],
+        [InlineKeyboardButton("💥 بيع الكل", callback_data="emergency:confirm_all")],
+        [InlineKeyboardButton("◀️ القائمة الرئيسية", callback_data="menu:main")],
+    ]
+
     await query.edit_message_text(
         "🚨 *بيع طوارئ*\n\n"
         "⚠️ سيتم تنفيذ البيع *فوراً* بسعر السوق الحالي.\n\n"
         "اختر نوع البيع:",
         parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔴 اختار عملات للبيع", callback_data="emergency:pick_coin")],
-            [InlineKeyboardButton("💥 بيع الكل (كل العملات)", callback_data="emergency:confirm_all")],
-            [InlineKeyboardButton("◀️ القائمة الرئيسية", callback_data="menu:main")],
-        ]),
+        reply_markup=InlineKeyboardMarkup(buttons),
     )
 
 
@@ -135,42 +179,126 @@ async def emergency_pick_coin_callback(update: Update, context: ContextTypes.DEF
     finally:
         await client.close()
 
-    locked = _get_grid_locked_symbols(user_id)
+    locked  = _get_grid_locked_symbols(user_id)
+    network = NETWORK_COINS
 
     coins = [
         sym for sym, data in portfolio.items()
         if sym != "USDT"
         and data.get("value_usdt", 0) >= _MIN_VALUE_USD
         and sym not in locked
+        and sym not in network
     ]
 
     if not coins:
-        locked_text = (
-            f"\n\n🔒 عملات مقفولة في شبكات: `{'، '.join(sorted(locked))}`"
-            if locked else ""
-        )
         await query.edit_message_text(
-            f"⚠️ لا يوجد عملات متاحة للبيع.{locked_text}",
+            "⚠️ لا يوجد عملات متاحة للبيع.\n\n"
+            f"🔒 مستثنى (شبكات/محافظ): `{'، '.join(sorted(network & set(portfolio.keys())))}`",
             parse_mode="Markdown",
             reply_markup=back_to_main_kb(),
         )
         return
 
-    # Sort by value descending
     coins.sort(key=lambda s: portfolio[s]["value_usdt"], reverse=True)
 
     context.user_data["_emg_portfolio"] = portfolio
     context.user_data["_emg_coins"]     = coins
     context.user_data["_emg_selected"]  = set()
 
-    locked_note = ""
-    if locked:
-        locked_note = f"\n🔒 مستثنى (في شبكة): `{'، '.join(sorted(locked))}`"
+    excluded = sorted((locked | network) & set(portfolio.keys()))
+    excluded_note = f"\n\n🔒 مستثنى: `{'، '.join(excluded)}`" if excluded else ""
 
     await query.edit_message_text(
-        _select_text(set(), portfolio) + locked_note,
+        _select_text(set(), portfolio) + excluded_note,
         parse_mode="Markdown",
         reply_markup=_build_select_kb(coins, set(), portfolio),
+    )
+
+
+# ── Pick scalping trades ───────────────────────────────────────────────────────
+
+async def emergency_pick_scalping_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = update.effective_user.id
+
+    symbols = _get_scalping_symbols(user_id)
+    if not symbols:
+        await query.answer("⚠️ لا توجد صفقات Scalping مفتوحة", show_alert=True)
+        return
+
+    settings = await db.get_settings(user_id)
+    if not settings or not settings.get("mexc_api_key"):
+        await query.answer("❌ يجب ربط MEXC API أولاً", show_alert=True)
+        return
+
+    await query.edit_message_text("⏳ جاري جلب رصيدك من MEXC...")
+    client = MexcClient(settings["mexc_api_key"], settings["mexc_secret_key"])
+    try:
+        portfolio, _ = await client.get_portfolio()
+    except Exception as e:
+        await query.edit_message_text(f"❌ تعذّر جلب الرصيد: {str(e)[:80]}", reply_markup=back_to_main_kb())
+        return
+    finally:
+        await client.close()
+
+    # فلتر العملات اللي عندها صفقة scalping فعلاً
+    coins = [sym.split("/")[0] for sym in symbols if sym.split("/")[0] in portfolio]
+    coins.sort(key=lambda s: portfolio.get(s, {}).get("value_usdt", 0), reverse=True)
+
+    context.user_data["_emg_portfolio"] = portfolio
+    context.user_data["_emg_coins"]     = coins
+    context.user_data["_emg_selected"]  = set(coins)  # محدد كلهم تلقائياً
+
+    await query.edit_message_text(
+        f"⚡ *بيع صفقات Scalping*\n\n"
+        f"عدد الصفقات: *{len(coins)}*\n"
+        "كل الصفقات محددة — اضغط على أي عملة لإلغاء تحديدها:",
+        parse_mode="Markdown",
+        reply_markup=_build_select_kb(coins, set(coins), portfolio),
+    )
+
+
+# ── Pick whale trades ──────────────────────────────────────────────────────────
+
+async def emergency_pick_whale_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = update.effective_user.id
+
+    symbols = _get_whale_symbols(user_id)
+    if not symbols:
+        await query.answer("⚠️ لا توجد صفقات Whale مفتوحة", show_alert=True)
+        return
+
+    settings = await db.get_settings(user_id)
+    if not settings or not settings.get("mexc_api_key"):
+        await query.answer("❌ يجب ربط MEXC API أولاً", show_alert=True)
+        return
+
+    await query.edit_message_text("⏳ جاري جلب رصيدك من MEXC...")
+    client = MexcClient(settings["mexc_api_key"], settings["mexc_secret_key"])
+    try:
+        portfolio, _ = await client.get_portfolio()
+    except Exception as e:
+        await query.edit_message_text(f"❌ تعذّر جلب الرصيد: {str(e)[:80]}", reply_markup=back_to_main_kb())
+        return
+    finally:
+        await client.close()
+
+    coins = [sym.split("/")[0] for sym in symbols if sym.split("/")[0] in portfolio]
+    coins.sort(key=lambda s: portfolio.get(s, {}).get("value_usdt", 0), reverse=True)
+
+    context.user_data["_emg_portfolio"] = portfolio
+    context.user_data["_emg_coins"]     = coins
+    context.user_data["_emg_selected"]  = set(coins)  # محدد كلهم تلقائياً
+
+    await query.edit_message_text(
+        f"🐋 *بيع صفقات Whale*\n\n"
+        f"عدد الصفقات: *{len(coins)}*\n"
+        "كل الصفقات محددة — اضغط على أي عملة لإلغاء تحديدها:",
+        parse_mode="Markdown",
+        reply_markup=_build_select_kb(coins, set(coins), portfolio),
     )
 
 

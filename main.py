@@ -70,6 +70,8 @@ from bot.handlers.portfolio_manager import (
 from bot.handlers.emergency_handler import (
     emergency_menu_callback,
     emergency_pick_coin_callback,
+    emergency_pick_scalping_callback,
+    emergency_pick_whale_callback,
     emergency_toggle_callback,
     emergency_confirm_selected_callback,
     emergency_exec_selected_callback,
@@ -234,6 +236,8 @@ def build_app() -> Application:
     # ── Emergency Sell ─────────────────────────────────────────────────────────
     app.add_handler(CallbackQueryHandler(emergency_menu_callback,              pattern="^emergency:menu$"))
     app.add_handler(CallbackQueryHandler(emergency_pick_coin_callback,         pattern="^emergency:pick_coin$"))
+    app.add_handler(CallbackQueryHandler(emergency_pick_scalping_callback,     pattern="^emergency:pick_scalping$"))
+    app.add_handler(CallbackQueryHandler(emergency_pick_whale_callback,        pattern="^emergency:pick_whale$"))
     app.add_handler(CallbackQueryHandler(emergency_toggle_callback,            pattern="^emergency:toggle:"))
     app.add_handler(CallbackQueryHandler(emergency_confirm_selected_callback,  pattern="^emergency:confirm_selected$"))
     app.add_handler(CallbackQueryHandler(emergency_exec_selected_callback,     pattern="^emergency:exec_selected$"))
