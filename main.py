@@ -59,7 +59,18 @@ from bot.handlers.portfolio_manager import (
     edit_portfolio_name_start, edit_portfolio_name_input,
     edit_portfolio_capital_start, edit_portfolio_capital_input,
     cancel_portfolio_conv,
+    portfolio_sell_all_callback, portfolio_sell_one_callback,
+    portfolio_sell_coin_callback, portfolio_rebalance_sell_callback,
+    portfolio_sell_exec_callback,
     CREATE_NAME, CREATE_CAPITAL, EDIT_NAME, EDIT_CAPITAL,
+)
+from bot.handlers.emergency_handler import (
+    emergency_menu_callback,
+    emergency_pick_coin_callback,
+    emergency_confirm_one_callback,
+    emergency_confirm_all_callback,
+    emergency_exec_one_callback,
+    emergency_exec_all_callback,
 )
 from bot.scheduler import start_scheduler
 from bot.scalping.monitor import trade_monitor
@@ -207,6 +218,19 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(switch_portfolio_callback,         pattern="^portfolio_switch:"))
     app.add_handler(CallbackQueryHandler(delete_portfolio_callback,         pattern="^portfolio_delete:\\d+$"))
     app.add_handler(CallbackQueryHandler(delete_portfolio_confirm_callback, pattern="^portfolio_delete_confirm:"))
+    app.add_handler(CallbackQueryHandler(portfolio_sell_all_callback,       pattern="^portfolio_sell_all:"))
+    app.add_handler(CallbackQueryHandler(portfolio_sell_one_callback,       pattern="^portfolio_sell_one:"))
+    app.add_handler(CallbackQueryHandler(portfolio_sell_coin_callback,      pattern="^portfolio_sell_coin:"))
+    app.add_handler(CallbackQueryHandler(portfolio_rebalance_sell_callback, pattern="^portfolio_rebalance_sell:"))
+    app.add_handler(CallbackQueryHandler(portfolio_sell_exec_callback,      pattern="^portfolio_sell_exec:"))
+
+    # ── Emergency Sell ─────────────────────────────────────────────────────────
+    app.add_handler(CallbackQueryHandler(emergency_menu_callback,         pattern="^emergency:menu$"))
+    app.add_handler(CallbackQueryHandler(emergency_pick_coin_callback,    pattern="^emergency:pick_coin$"))
+    app.add_handler(CallbackQueryHandler(emergency_confirm_one_callback,  pattern="^emergency:confirm_one:"))
+    app.add_handler(CallbackQueryHandler(emergency_confirm_all_callback,  pattern="^emergency:confirm_all$"))
+    app.add_handler(CallbackQueryHandler(emergency_exec_one_callback,     pattern="^emergency:exec_one:"))
+    app.add_handler(CallbackQueryHandler(emergency_exec_all_callback,     pattern="^emergency:exec_all$"))
 
     return app
 

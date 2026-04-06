@@ -71,32 +71,62 @@ async def place_grid_orders(
     symbol: str,
     grid: Dict[str, Any],
     order_size_usdt: float,
+    initial: bool = False,
 ) -> Dict[str, Any]:
     """
-    Place initial grid orders on the exchange.
+    Place grid orders on the exchange.
 
-    Places limit buys at each buy level and limit sells at each sell level.
-    order_size_usdt is split equally across all levels.
+    When initial=True (first-time grid creation):
+      - Uses half the total budget for a market buy at current price
+      - Splits the remaining half equally across buy and sell limit orders
+      - This ensures the bot holds the asset and can profit from both directions
+
+    When initial=False (after a grid shift/reset):
+      - Splits the full budget equally across all levels (standard behavior)
 
     Returns:
         {
-            "buy_orders":  [{"price", "qty", "order_id"}, ...],
-            "sell_orders": [{"price", "qty", "order_id"}, ...],
-            "errors":      [str, ...],
+            "buy_orders":    [{"price", "qty", "order_id"}, ...],
+            "sell_orders":   [{"price", "qty", "order_id"}, ...],
+            "market_buy_qty": float,   # qty bought at market (initial only)
+            "errors":        [str, ...],
         }
     """
     buy_orders  = []
     sell_orders = []
     errors      = []
+    market_buy_qty = 0.0
 
-    total_levels = len(grid["buy_levels"]) + len(grid["sell_levels"])
+    buy_levels  = grid["buy_levels"]
+    sell_levels = grid["sell_levels"]
+    total_levels = len(buy_levels) + len(sell_levels)
+
     if total_levels == 0:
-        return {"buy_orders": [], "sell_orders": [], "errors": ["no levels"]}
+        return {"buy_orders": [], "sell_orders": [], "market_buy_qty": 0.0, "errors": ["no levels"]}
 
-    size_per_level = order_size_usdt / total_levels
+    if initial:
+        # Half budget → market buy at current price
+        market_usdt = order_size_usdt / 2.0
+        limit_usdt  = order_size_usdt / 2.0
+        try:
+            mkt_order = await exchange.create_market_buy_order_with_cost(symbol, market_usdt)
+            market_buy_qty = float(
+                mkt_order.get("filled") or mkt_order.get("amount") or 0
+            )
+            logger.info(f"Grid: market buy {symbol} ${market_usdt:.2f} → qty={market_buy_qty}")
+        except Exception as e:
+            errors.append(f"market_buy: {str(e)[:80]}")
+            logger.warning(f"Grid: market buy failed {symbol}: {e}")
+            # Fall back: use full budget for limit orders
+            limit_usdt = order_size_usdt
+    else:
+        limit_usdt = order_size_usdt
 
-    # Place buy orders (ascending — lowest first)
-    for price in grid["buy_levels"]:
+    # Split limit budget equally across all grid levels
+    size_per_level = limit_usdt / total_levels
+
+    # Place buy limit orders (ascending — lowest first)
+    for price in buy_levels:
         qty = round(size_per_level / price, 8)
         try:
             order = await exchange.create_limit_buy_order(symbol, qty, price)
@@ -111,8 +141,8 @@ async def place_grid_orders(
             errors.append(f"buy@{price:.6g}: {str(e)[:60]}")
             logger.warning(f"Grid: failed buy order {symbol} @ {price}: {e}")
 
-    # Place sell orders (ascending)
-    for price in grid["sell_levels"]:
+    # Place sell limit orders (ascending)
+    for price in sell_levels:
         qty = round(size_per_level / price, 8)
         try:
             order = await exchange.create_limit_sell_order(symbol, qty, price)
@@ -128,9 +158,10 @@ async def place_grid_orders(
             logger.warning(f"Grid: failed sell order {symbol} @ {price}: {e}")
 
     return {
-        "buy_orders":  buy_orders,
-        "sell_orders": sell_orders,
-        "errors":      errors,
+        "buy_orders":     buy_orders,
+        "sell_orders":    sell_orders,
+        "market_buy_qty": market_buy_qty,
+        "errors":         errors,
     }
 
 
