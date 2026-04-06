@@ -239,6 +239,19 @@ class Database:
                 "ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS auto_enabled INTEGER DEFAULT 0",
                 "ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS auto_interval_hours INTEGER DEFAULT 24",
                 "ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS last_rebalance_at TEXT",
+                # Take-profit / stop-loss targets per portfolio
+                "ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS tp_enabled INTEGER DEFAULT 0",
+                "ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS tp_entry_value REAL DEFAULT 0.0",
+                "ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS tp1_type TEXT DEFAULT 'pct'",
+                "ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS tp1_value REAL DEFAULT 0.0",
+                "ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS tp1_sell_pct REAL DEFAULT 50.0",
+                "ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS tp1_hit INTEGER DEFAULT 0",
+                "ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS tp2_type TEXT DEFAULT 'pct'",
+                "ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS tp2_value REAL DEFAULT 0.0",
+                "ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS tp2_sell_pct REAL DEFAULT 100.0",
+                "ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS tp2_hit INTEGER DEFAULT 0",
+                "ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS sl_type TEXT DEFAULT 'pct'",
+                "ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS sl_value REAL DEFAULT 0.0",
             ]:
                 try:
                     await conn.execute(sql)
@@ -347,6 +360,19 @@ class Database:
                 "ALTER TABLE portfolios ADD COLUMN auto_enabled INTEGER DEFAULT 0",
                 "ALTER TABLE portfolios ADD COLUMN auto_interval_hours INTEGER DEFAULT 24",
                 "ALTER TABLE portfolios ADD COLUMN last_rebalance_at TEXT",
+                # Take-profit / stop-loss targets per portfolio
+                "ALTER TABLE portfolios ADD COLUMN tp_enabled INTEGER DEFAULT 0",
+                "ALTER TABLE portfolios ADD COLUMN tp_entry_value REAL DEFAULT 0.0",
+                "ALTER TABLE portfolios ADD COLUMN tp1_type TEXT DEFAULT 'pct'",
+                "ALTER TABLE portfolios ADD COLUMN tp1_value REAL DEFAULT 0.0",
+                "ALTER TABLE portfolios ADD COLUMN tp1_sell_pct REAL DEFAULT 50.0",
+                "ALTER TABLE portfolios ADD COLUMN tp1_hit INTEGER DEFAULT 0",
+                "ALTER TABLE portfolios ADD COLUMN tp2_type TEXT DEFAULT 'pct'",
+                "ALTER TABLE portfolios ADD COLUMN tp2_value REAL DEFAULT 0.0",
+                "ALTER TABLE portfolios ADD COLUMN tp2_sell_pct REAL DEFAULT 100.0",
+                "ALTER TABLE portfolios ADD COLUMN tp2_hit INTEGER DEFAULT 0",
+                "ALTER TABLE portfolios ADD COLUMN sl_type TEXT DEFAULT 'pct'",
+                "ALTER TABLE portfolios ADD COLUMN sl_value REAL DEFAULT 0.0",
             ]:
                 try:
                     await conn.execute(sql)
@@ -392,6 +418,10 @@ class Database:
         _ALLOWED_PORTFOLIO_COLS = {
             "name", "capital_usdt",
             "threshold", "auto_enabled", "auto_interval_hours", "last_rebalance_at",
+            "tp_enabled", "tp_entry_value",
+            "tp1_type", "tp1_value", "tp1_sell_pct", "tp1_hit",
+            "tp2_type", "tp2_value", "tp2_sell_pct", "tp2_hit",
+            "sl_type", "sl_value",
         }
         for k in kwargs:
             if k not in _ALLOWED_PORTFOLIO_COLS:
@@ -651,6 +681,13 @@ class Database:
             return await conn.fetchall(
                 "SELECT id, user_id, threshold, auto_interval_hours, last_rebalance_at "
                 "FROM portfolios WHERE auto_enabled=1"
+            )
+
+    async def get_all_portfolios_with_tp(self) -> list:
+        """Return all portfolios that have take-profit/stop-loss monitoring enabled."""
+        async with self._conn() as conn:
+            return await conn.fetchall(
+                "SELECT * FROM portfolios WHERE tp_enabled=1"
             )
 
     async def get_all_users_with_scalping(self) -> list:

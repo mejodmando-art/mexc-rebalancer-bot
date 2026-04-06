@@ -108,6 +108,7 @@ def portfolio_actions_kb(portfolio_id: int, is_active: bool, auto_enabled: bool 
     ])
     auto_label = "🟢 إيقاف التوازن التلقائي" if auto_enabled else "🔴 تفعيل التوازن التلقائي"
     buttons.append([InlineKeyboardButton(auto_label, callback_data=f"portfolio_toggle_auto:{portfolio_id}")])
+    buttons.append([InlineKeyboardButton("🎯 أهداف الربح ووقف الخسارة", callback_data=f"portfolio_tp_menu:{portfolio_id}")])
     buttons.append([
         InlineKeyboardButton("🔴 بيع الكل",     callback_data=f"portfolio_sell_all:{portfolio_id}"),
         InlineKeyboardButton("📊 بيع بنسبة",    callback_data=f"portfolio_rebalance_sell:{portfolio_id}"),
