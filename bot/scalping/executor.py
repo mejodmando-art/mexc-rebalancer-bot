@@ -72,7 +72,10 @@ async def execute_trade(setup: Dict[str, Any], exchange) -> Dict[str, Any]:
         except Exception as e:
             logger.warning(f"Executor: balance check failed for {base_sym}: {e}")
 
-        qty_half = round(filled_qty / 2, 8)
+        # Apply a small safety margin (0.1%) to avoid oversell due to rounding
+        _SELL_MARGIN = 0.999
+        safe_qty      = round(filled_qty * _SELL_MARGIN, 8)
+        qty_half      = round(safe_qty / 2, 8)
 
         # ── 2. Take profit — limit sell at T1 for 50% ────────────────────
         t1_order = {}
@@ -91,7 +94,7 @@ async def execute_trade(setup: Dict[str, Any], exchange) -> Dict[str, Any]:
         sl_placed = False
         sl_error  = ""
         try:
-            sl_order  = await _place_stop_loss(exchange, symbol, filled_qty, stop_loss)
+            sl_order  = await _place_stop_loss(exchange, symbol, safe_qty, stop_loss)
             sl_placed = True
         except Exception as e:
             sl_error = str(e)[:120]

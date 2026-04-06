@@ -230,8 +230,17 @@ class WhaleTradeMonitor:
         if new_sl > trade["stop_loss"]:
             trade["stop_loss"] = new_sl
 
+        # Fetch actual free balance before placing T2/SL to avoid oversell
+        base_sym = symbol.split("/")[0]
         try:
-            sl_order = await _place_stop_loss(exchange, symbol, trade["qty_40pct"], trade["stop_loss"])
+            bal = await exchange.fetch_balance()
+            actual_free = float(bal.get("free", {}).get(base_sym, 0) or 0)
+            safe_40 = round(min(trade["qty_40pct"], actual_free) * 0.999, 8) if actual_free > 0 else round(trade["qty_40pct"] * 0.999, 8)
+        except Exception:
+            safe_40 = round(trade["qty_40pct"] * 0.999, 8)
+
+        try:
+            sl_order = await _place_stop_loss(exchange, symbol, safe_40, trade["stop_loss"])
             trade["sl_order_id"] = sl_order.get("id")
             logger.info(f"WhaleMonitor: {symbol} T1 filled — new SL @ {trade['stop_loss']:.6g}")
         except Exception as e:
@@ -240,7 +249,7 @@ class WhaleTradeMonitor:
 
         # Place T2 limit order for remaining 40%
         try:
-            t2_order = await exchange.create_limit_sell_order(symbol, trade["qty_40pct"], target2)
+            t2_order = await exchange.create_limit_sell_order(symbol, safe_40, target2)
             trade["t2_order_id"] = t2_order.get("id")
             logger.info(f"WhaleMonitor: {symbol} T2 limit placed @ {target2:.6g}")
         except Exception as e:

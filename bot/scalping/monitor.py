@@ -282,8 +282,20 @@ class TradeMonitor:
         if new_sl > trade["stop_loss"]:
             trade["stop_loss"] = new_sl
 
+        # Fetch actual free balance before placing T2/SL to avoid oversell
+        base_sym = symbol.split("/")[0]
         try:
-            sl_order = await _place_stop_loss(exchange, symbol, trade["qty_half"], trade["stop_loss"])
+            bal = await exchange.fetch_balance()
+            actual_free = float(bal.get("free", {}).get(base_sym, 0) or 0)
+            if actual_free > 0:
+                safe_half = round(min(trade["qty_half"], actual_free) * 0.999, 8)
+            else:
+                safe_half = round(trade["qty_half"] * 0.999, 8)
+        except Exception:
+            safe_half = round(trade["qty_half"] * 0.999, 8)
+
+        try:
+            sl_order = await _place_stop_loss(exchange, symbol, safe_half, trade["stop_loss"])
             trade["sl_order_id"] = sl_order.get("id")
         except Exception as e:
             logger.warning(f"Monitor: failed to place new SL after T1 for {symbol}: {e}")
@@ -291,7 +303,7 @@ class TradeMonitor:
 
         # Place T2 limit order for remaining 50%
         try:
-            t2_order = await exchange.create_limit_sell_order(symbol, trade["qty_half"], target2)
+            t2_order = await exchange.create_limit_sell_order(symbol, safe_half, target2)
             trade["t2_order_id"] = t2_order.get("id")
             logger.info(f"Monitor: {symbol} T2 limit placed @ {target2:.6g}")
         except Exception as e:
