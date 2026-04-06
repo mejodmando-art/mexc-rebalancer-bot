@@ -11,6 +11,8 @@ from bot.keyboards import (
 # Conversation states
 CREATE_NAME, CREATE_CAPITAL, EDIT_NAME, EDIT_CAPITAL = range(30, 34)
 PORTFOLIO_SET_THRESHOLD, PORTFOLIO_SET_INTERVAL = range(34, 36)
+# Take-profit / stop-loss wizard states
+TP_TP1_TYPE, TP_TP1_VALUE, TP_TP1_SELL, TP_TP2_TYPE, TP_TP2_VALUE, TP_TP2_SELL, TP_SL_TYPE, TP_SL_VALUE = range(36, 44)
 
 
 async def portfolios_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -859,3 +861,4 @@ async def portfolio_toggle_auto_callback(update: Update, context: ContextTypes.D
         text, parse_mode="Markdown",
         reply_markup=portfolio_actions_kb(portfolio_id, p["id"] == active_id, bool(p.get("auto_enabled")))
     )
+

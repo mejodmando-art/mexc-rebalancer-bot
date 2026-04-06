@@ -69,9 +69,19 @@ from bot.handlers.portfolio_manager import (
     portfolio_set_threshold_start, portfolio_set_threshold_input,
     portfolio_set_interval_start, portfolio_set_interval_input,
     portfolio_toggle_auto_callback,
+    portfolio_tp_menu_callback,
+    portfolio_tp_activate_callback, portfolio_tp_deactivate_callback,
+    portfolio_tp_setup_start, tp_type_callback,
+    tp1_value_input, tp1_sell_input,
+    tp2_value_input, tp2_sell_input,
+    sl_value_input,
     CREATE_NAME, CREATE_CAPITAL, EDIT_NAME, EDIT_CAPITAL,
     PORTFOLIO_SET_THRESHOLD, PORTFOLIO_SET_INTERVAL,
+    TP_TP1_TYPE, TP_TP1_VALUE, TP_TP1_SELL,
+    TP_TP2_TYPE, TP_TP2_VALUE, TP_TP2_SELL,
+    TP_SL_TYPE, TP_SL_VALUE,
 )
+from bot.portfolio_monitor import run_portfolio_monitor
 from bot.handlers.emergency_handler import (
     emergency_menu_callback,
     emergency_pick_coin_callback,
@@ -194,6 +204,23 @@ def build_app() -> Application:
         conversation_timeout=300,
     )
 
+    tp_setup_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(portfolio_tp_setup_start, pattern="^portfolio_tp_setup:")],
+        states={
+            TP_TP1_TYPE:  [CallbackQueryHandler(tp_type_callback,  pattern="^tp_type:")],
+            TP_TP1_VALUE: [MessageHandler(TEXT, tp1_value_input)],
+            TP_TP1_SELL:  [MessageHandler(TEXT, tp1_sell_input)],
+            TP_TP2_TYPE:  [CallbackQueryHandler(tp_type_callback,  pattern="^tp_type:")],
+            TP_TP2_VALUE: [MessageHandler(TEXT, tp2_value_input)],
+            TP_TP2_SELL:  [MessageHandler(TEXT, tp2_sell_input)],
+            TP_SL_TYPE:   [CallbackQueryHandler(tp_type_callback,  pattern="^tp_type:")],
+            TP_SL_VALUE:  [MessageHandler(TEXT, sl_value_input)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel_portfolio_conv),
+                   CallbackQueryHandler(cancel_portfolio_conv, pattern="^cancel$")],
+        conversation_timeout=600,
+    )
+
     app.add_handler(api_conv)
     app.add_handler(threshold_conv)
     app.add_handler(interval_conv)
@@ -203,6 +230,7 @@ def build_app() -> Application:
     app.add_handler(edit_capital_conv)
     app.add_handler(portfolio_threshold_conv)
     app.add_handler(portfolio_interval_conv)
+    app.add_handler(tp_setup_conv)
     app.add_handler(build_grid_conv())
 
     # ── Commands ───────────────────────────────────────────────────────────────
@@ -252,6 +280,9 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(delete_portfolio_confirm_callback, pattern="^portfolio_delete_confirm:"))
     app.add_handler(CallbackQueryHandler(portfolio_edit_allocs_callback,    pattern="^portfolio_edit_allocs:"))
     app.add_handler(CallbackQueryHandler(portfolio_toggle_auto_callback,    pattern="^portfolio_toggle_auto:"))
+    app.add_handler(CallbackQueryHandler(portfolio_tp_menu_callback,        pattern="^portfolio_tp_menu:"))
+    app.add_handler(CallbackQueryHandler(portfolio_tp_activate_callback,    pattern="^portfolio_tp_activate:"))
+    app.add_handler(CallbackQueryHandler(portfolio_tp_deactivate_callback,  pattern="^portfolio_tp_deactivate:"))
     app.add_handler(CallbackQueryHandler(portfolio_sell_all_callback,       pattern="^portfolio_sell_all:"))
     app.add_handler(CallbackQueryHandler(portfolio_sell_one_callback,       pattern="^portfolio_sell_one:"))
     app.add_handler(CallbackQueryHandler(portfolio_sell_coin_callback,      pattern="^portfolio_sell_coin:"))
@@ -324,6 +355,16 @@ async def main():
         seconds=30,
         args=[app],
         id="grid_monitor",
+        replace_existing=True,
+    )
+
+    # Portfolio TP/SL monitor
+    scheduler.add_job(
+        run_portfolio_monitor,
+        trigger="interval",
+        minutes=5,
+        args=[app],
+        id="portfolio_tp_monitor",
         replace_existing=True,
     )
     logger.info("🤖 Bot started polling...")
