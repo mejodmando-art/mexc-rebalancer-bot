@@ -21,30 +21,13 @@ TRAIL_PCT           = 0.015   # 1.5% trail distance before T1
 TRAIL_PCT_AFTER_T1  = 0.010   # 1.0% trail distance after T1 (tighter — protect profit)
 
 
-async def _place_stop_loss(exchange, symbol: str, qty: float, stop_price: float) -> Dict[str, Any]:
+def _update_stop_loss(symbol: str, stop_price: float) -> Dict[str, Any]:
     """
-    Place a stop-loss sell order on MEXC Spot.
-
-    MEXC Spot requires STOP_LOSS_LIMIT (not stop-market). The limit price is
-    set 0.3% below the stop trigger so the order fills immediately when hit.
+    MEXC Spot has no conditional orders. SL is tracked in software only.
+    Returns a placeholder so the trade dict stays consistent.
     """
-    limit_price = round(stop_price * 0.997, 8)
-    try:
-        order = await exchange.create_order(
-            symbol,
-            "STOP_LOSS_LIMIT",
-            "sell",
-            qty,
-            limit_price,
-            params={"stopPrice": stop_price},
-        )
-        return order
-    except Exception as e:
-        logger.warning(f"Monitor: STOP_LOSS_LIMIT failed for {symbol}: {e} — trying limit fallback")
-
-    # Fallback: plain limit sell at the stop price
-    order = await exchange.create_limit_sell_order(symbol, qty, limit_price)
-    return order
+    logger.info(f"Monitor: SL updated software-side for {symbol} @ {stop_price}")
+    return {"id": None, "stopPrice": stop_price, "type": "software_sl"}
 
 
 class TradeMonitor:
@@ -170,6 +153,13 @@ class TradeMonitor:
         symbol  = trade["symbol"]
         target2 = trade["target2"]
 
+        # ── Stop loss hit — software-side enforcement ─────────────────────
+        # MEXC Spot has no conditional orders, so we check price here and
+        # fire a market sell immediately when SL is breached.
+        if price <= trade["stop_loss"]:
+            await self._on_sl_hit(trade, price, exchange, bot, user_id)
+            return
+
         # ── Check if T1 limit order was filled on MEXC ────────────────────
         if not trade["t1_hit"] and trade.get("t1_order_id"):
             try:
@@ -192,36 +182,56 @@ class TradeMonitor:
                 await self._on_t2_hit(trade, price, exchange, bot, user_id)
                 return
 
-            # Trailing stop — update SL order on MEXC
-            entry_price = trade["entry_price"]
-            initial_sl  = trade.get("initial_stop_loss") or trade["stop_loss"]
-            risk        = entry_price - initial_sl
-
+            # Trailing stop — software-side only
             if price > trade["highest_price"]:
                 trade["highest_price"] = price
                 new_sl = round(price * (1 - TRAIL_PCT_AFTER_T1), 8)
                 if new_sl > trade["stop_loss"]:
                     old_sl = trade["stop_loss"]
                     trade["stop_loss"] = new_sl
+                    _update_stop_loss(symbol, new_sl)
                     logger.info(f"Monitor: {symbol} trailing SL {old_sl:.6g} → {new_sl:.6g}")
-
-                    # Cancel old SL order and place new one
-                    if trade.get("sl_order_id"):
-                        try:
-                            await exchange.cancel_order(trade["sl_order_id"], symbol)
-                        except Exception:
-                            pass
-                    try:
-                        sl_order = await _place_stop_loss(exchange, symbol, trade["qty_half"], new_sl)
-                        trade["sl_order_id"] = sl_order.get("id")
-                        logger.info(f"Monitor: {symbol} new SL order placed @ {new_sl:.6g}")
-                    except Exception as e:
-                        logger.warning(f"Monitor: failed to update SL order for {symbol}: {e}")
-
                     try:
                         await db.save_scalping_trade(user_id, trade)
                     except Exception as e:
                         logger.error(f"Monitor: failed to save trade {symbol}: {e}")
+
+    async def _on_sl_hit(
+        self,
+        trade: Dict[str, Any],
+        price: float,
+        exchange,
+        bot,
+        user_id: int,
+    ) -> None:
+        """Price dropped to or below SL — fire market sell immediately."""
+        symbol = trade["symbol"]
+        qty    = trade["qty_half"] if trade["t1_hit"] else trade["qty"]
+
+        # Cancel open T1/T2 limit orders before selling
+        for order_id in [trade.get("t1_order_id"), trade.get("t2_order_id")]:
+            if order_id:
+                try:
+                    await exchange.cancel_order(order_id, symbol)
+                except Exception:
+                    pass
+
+        try:
+            await exchange.create_market_sell_order(symbol, qty)
+            logger.info(f"Monitor: SL hit {symbol} — market sell qty={qty} @ {price:.6g}")
+        except Exception as e:
+            logger.error(f"Monitor: SL market sell failed for {symbol}: {e}")
+
+        await self.remove_trade(symbol)
+
+        entry  = trade["entry_price"]
+        pnl    = ((price - entry) / entry) * 100
+        await self._notify(
+            bot, user_id,
+            f"🛑 *{symbol}* — Stop Loss اتنفذ\n\n"
+            f"📉 بيع عند `${price:.6g}`  (`{pnl:.2f}%`)\n"
+            f"🔒 SL كان عند `${trade['stop_loss']:.6g}`"
+        )
 
     async def _on_t1_filled(
         self,
@@ -237,25 +247,11 @@ class TradeMonitor:
         trade["t1_hit"]    = True
         trade["breakeven"] = True
 
-        # Cancel existing SL (covers full qty) — replace with half qty SL
-        if trade.get("sl_order_id"):
-            try:
-                await exchange.cancel_order(trade["sl_order_id"], symbol)
-            except Exception:
-                pass
-
-        # New SL at breakeven (entry price) for remaining 50%
+        # Move SL to breakeven (software-side)
         new_sl = round(price * (1 - TRAIL_PCT_AFTER_T1), 8)
         if new_sl > trade["stop_loss"]:
             trade["stop_loss"] = new_sl
-
-        sl_order = {}
-        try:
-            sl_order = await _place_stop_loss(exchange, symbol, trade["qty_half"], trade["stop_loss"])
-            trade["sl_order_id"] = sl_order.get("id")
-            logger.info(f"Monitor: {symbol} T1 filled — new SL @ {trade['stop_loss']:.6g}")
-        except Exception as e:
-            logger.warning(f"Monitor: failed to place new SL after T1 for {symbol}: {e}")
+        _update_stop_loss(symbol, trade["stop_loss"])
 
         # Place T2 limit order for remaining 50%
         try:
@@ -293,8 +289,8 @@ class TradeMonitor:
         symbol = trade["symbol"]
         trade["t2_hit"] = True
 
-        # Cancel SL order — T2 already handled by limit order on MEXC
-        for order_id in [trade.get("sl_order_id"), trade.get("t2_order_id")]:
+        # Cancel T2 limit order if still open (price-based detection fired first)
+        for order_id in [trade.get("t2_order_id")]:
             if order_id:
                 try:
                     await exchange.cancel_order(order_id, symbol)

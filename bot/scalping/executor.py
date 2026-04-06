@@ -23,31 +23,17 @@ from typing import Dict, Any
 logger = logging.getLogger(__name__)
 
 
-async def _place_stop_loss(exchange, symbol: str, qty: float, stop_price: float) -> Dict[str, Any]:
+def _register_stop_loss(symbol: str, stop_price: float) -> Dict[str, Any]:
     """
-    Place a stop-loss sell order on MEXC Spot.
+    MEXC Spot does not support conditional (stop) orders via the API.
+    The stop loss is enforced in software by monitor.py, which checks
+    the price every 20 seconds and fires a market sell when hit.
 
-    MEXC Spot requires STOP_LOSS_LIMIT (not stop-market). The limit price is
-    set 0.3% below the stop trigger so the order fills immediately when hit.
+    This function returns a placeholder so the rest of the code can
+    store and reference the SL level without placing an exchange order.
     """
-    limit_price = round(stop_price * 0.997, 8)
-    try:
-        order = await exchange.create_order(
-            symbol,
-            "STOP_LOSS_LIMIT",
-            "sell",
-            qty,
-            limit_price,
-            params={"stopPrice": stop_price},
-        )
-        return order
-    except Exception as e:
-        logger.warning(f"Executor: STOP_LOSS_LIMIT failed for {symbol}: {e} — trying limit fallback")
-
-    # Fallback: plain limit sell at the stop price (no conditional trigger,
-    # but at least the order exists on the exchange as protection)
-    order = await exchange.create_limit_sell_order(symbol, qty, limit_price)
-    return order
+    logger.info(f"Executor: SL registered software-side for {symbol} @ {stop_price}")
+    return {"id": None, "stopPrice": stop_price, "type": "software_sl"}
 
 
 async def execute_trade(setup: Dict[str, Any], exchange) -> Dict[str, Any]:
@@ -80,16 +66,8 @@ async def execute_trade(setup: Dict[str, Any], exchange) -> Dict[str, Any]:
         except Exception as e:
             logger.warning(f"Executor: T1 limit order failed for {symbol}: {e}")
 
-        # ── 3. Stop loss — stop-limit sell for full qty ───────────────────
-        sl_order = {}
-        try:
-            sl_order = await _place_stop_loss(exchange, symbol, filled_qty, stop_loss)
-            logger.info(
-                f"Executor: SL stop-limit {symbol} qty={filled_qty} "
-                f"trigger={stop_loss} → id={sl_order.get('id')}"
-            )
-        except Exception as e:
-            logger.warning(f"Executor: SL order failed for {symbol}: {e}")
+        # ── 3. Stop loss — software-side (MEXC Spot has no conditional orders) ──
+        sl_order = _register_stop_loss(symbol, stop_loss)
 
         return {
             "status":        "ok",
