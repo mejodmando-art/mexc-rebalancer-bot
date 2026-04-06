@@ -156,6 +156,10 @@ class Database:
                     user_id BIGINT NOT NULL,
                     name TEXT NOT NULL,
                     capital_usdt REAL DEFAULT 0.0,
+                    threshold REAL DEFAULT 5.0,
+                    auto_enabled INTEGER DEFAULT 0,
+                    auto_interval_hours INTEGER DEFAULT 24,
+                    last_rebalance_at TEXT,
                     created_at TEXT DEFAULT (NOW()::TEXT)
                 )""")
             await conn.execute("""
@@ -231,6 +235,10 @@ class Database:
                 "ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS whale_trade_size REAL DEFAULT 10.0",
                 "ALTER TABLE scalping_trades ADD COLUMN IF NOT EXISTS initial_stop_loss REAL",
                 "ALTER TABLE scalping_trades ADD COLUMN IF NOT EXISTS sl_order_id TEXT",
+                "ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS threshold REAL DEFAULT 5.0",
+                "ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS auto_enabled INTEGER DEFAULT 0",
+                "ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS auto_interval_hours INTEGER DEFAULT 24",
+                "ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS last_rebalance_at TEXT",
             ]:
                 try:
                     await conn.execute(sql)
@@ -257,6 +265,10 @@ class Database:
                     user_id INTEGER NOT NULL,
                     name TEXT NOT NULL,
                     capital_usdt REAL DEFAULT 0.0,
+                    threshold REAL DEFAULT 5.0,
+                    auto_enabled INTEGER DEFAULT 0,
+                    auto_interval_hours INTEGER DEFAULT 24,
+                    last_rebalance_at TEXT,
                     created_at TEXT DEFAULT (datetime('now'))
                 )""")
             await conn.execute("""
@@ -331,6 +343,10 @@ class Database:
                 "ALTER TABLE user_settings ADD COLUMN whale_trade_size REAL DEFAULT 10.0",
                 "ALTER TABLE scalping_trades ADD COLUMN initial_stop_loss REAL",
                 "ALTER TABLE scalping_trades ADD COLUMN sl_order_id TEXT",
+                "ALTER TABLE portfolios ADD COLUMN threshold REAL DEFAULT 5.0",
+                "ALTER TABLE portfolios ADD COLUMN auto_enabled INTEGER DEFAULT 0",
+                "ALTER TABLE portfolios ADD COLUMN auto_interval_hours INTEGER DEFAULT 24",
+                "ALTER TABLE portfolios ADD COLUMN last_rebalance_at TEXT",
             ]:
                 try:
                     await conn.execute(sql)
@@ -373,7 +389,10 @@ class Database:
 
     async def update_portfolio(self, portfolio_id: int, **kwargs):
         # Allowlist of columns that can be updated to prevent SQL injection
-        _ALLOWED_PORTFOLIO_COLS = {"name", "capital_usdt"}
+        _ALLOWED_PORTFOLIO_COLS = {
+            "name", "capital_usdt",
+            "threshold", "auto_enabled", "auto_interval_hours", "last_rebalance_at",
+        }
         for k in kwargs:
             if k not in _ALLOWED_PORTFOLIO_COLS:
                 raise ValueError(f"Column not allowed: {k}")
@@ -611,9 +630,27 @@ class Database:
             )
 
     async def get_all_users_with_auto(self) -> list:
+        """Legacy: returns distinct users who have at least one auto-enabled portfolio."""
         async with self._conn() as conn:
+            if _USE_PG:
+                return await conn.fetchall(
+                    "SELECT DISTINCT user_id FROM portfolios WHERE auto_enabled=1"
+                )
             return await conn.fetchall(
-                "SELECT user_id FROM user_settings WHERE auto_enabled=1"
+                "SELECT DISTINCT user_id FROM portfolios WHERE auto_enabled=1"
+            )
+
+    async def get_all_portfolios_with_auto(self) -> list:
+        """Return all portfolios that have auto rebalance enabled, with their user_id."""
+        async with self._conn() as conn:
+            if _USE_PG:
+                return await conn.fetchall(
+                    "SELECT id, user_id, threshold, auto_interval_hours, last_rebalance_at "
+                    "FROM portfolios WHERE auto_enabled=1"
+                )
+            return await conn.fetchall(
+                "SELECT id, user_id, threshold, auto_interval_hours, last_rebalance_at "
+                "FROM portfolios WHERE auto_enabled=1"
             )
 
     async def get_all_users_with_scalping(self) -> list:

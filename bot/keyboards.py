@@ -93,7 +93,7 @@ def portfolios_list_kb(portfolios: List[Dict], active_id: int) -> InlineKeyboard
     return InlineKeyboardMarkup(buttons)
 
 
-def portfolio_actions_kb(portfolio_id: int, is_active: bool) -> InlineKeyboardMarkup:
+def portfolio_actions_kb(portfolio_id: int, is_active: bool, auto_enabled: bool = False) -> InlineKeyboardMarkup:
     buttons = []
     if not is_active:
         buttons.append([InlineKeyboardButton("✅ تفعيل هذه المحفظة", callback_data=f"portfolio_switch:{portfolio_id}")])
@@ -101,6 +101,13 @@ def portfolio_actions_kb(portfolio_id: int, is_active: bool) -> InlineKeyboardMa
         InlineKeyboardButton("✏️ تعديل الاسم",  callback_data=f"portfolio_edit_name:{portfolio_id}"),
         InlineKeyboardButton("💰 رأس المال",     callback_data=f"portfolio_edit_capital:{portfolio_id}"),
     ])
+    buttons.append([InlineKeyboardButton("✏️ إضافة / تعديل عملة", callback_data=f"portfolio_edit_allocs:{portfolio_id}")])
+    buttons.append([
+        InlineKeyboardButton("⏱ فترة التوازن",  callback_data=f"portfolio_set_interval:{portfolio_id}"),
+        InlineKeyboardButton("🎯 حد الانحراف",   callback_data=f"portfolio_set_threshold:{portfolio_id}"),
+    ])
+    auto_label = "🟢 إيقاف التوازن التلقائي" if auto_enabled else "🔴 تفعيل التوازن التلقائي"
+    buttons.append([InlineKeyboardButton(auto_label, callback_data=f"portfolio_toggle_auto:{portfolio_id}")])
     buttons.append([
         InlineKeyboardButton("🔴 بيع الكل",     callback_data=f"portfolio_sell_all:{portfolio_id}"),
         InlineKeyboardButton("📊 بيع بنسبة",    callback_data=f"portfolio_rebalance_sell:{portfolio_id}"),
