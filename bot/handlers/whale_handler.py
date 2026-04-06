@@ -313,6 +313,7 @@ async def run_whale_scan(app) -> None:
                     usdt_balance -= trade_size
                     await whale_monitor.add_trade(setup, result, user_id)
                     await _send_signal(app.bot, user_id, setup, executed=True)
+                    await _send_orders_status(app.bot, user_id, setup, result)
                 else:
                     reason = result.get("reason", "")
                     logger.warning(f"WhaleScan: execute failed {symbol}: {reason}")
@@ -395,3 +396,59 @@ async def _send_signal(bot, user_id: int, setup: dict,
         await bot.send_message(user_id, text, parse_mode="Markdown")
     except Exception as e:
         logger.error(f"WhaleSignal: notify failed {user_id}: {e}")
+
+
+async def _send_orders_status(bot, user_id: int, setup: dict, result: dict) -> None:
+    """Send a follow-up message confirming which orders were placed on MEXC."""
+    sym       = setup["symbol"]
+    t1_placed = result.get("t1_placed", False)
+    sl_placed = result.get("sl_placed", False)
+    t1_error  = result.get("t1_error", "")
+    sl_error  = result.get("sl_error", "")
+
+    t1_id = result.get("target1_order", {}).get("id", "")
+    sl_id = result.get("sl_order", {}).get("id", "")
+
+    def _translate(err: str) -> str:
+        r = err.lower()
+        if "insufficient" in r or "balance" in r or "not enough" in r:
+            return "رصيد غير كافٍ"
+        if "minimum" in r or "min" in r or "too small" in r:
+            return "المبلغ أقل من الحد الأدنى"
+        if "invalid" in r and ("symbol" in r or "pair" in r):
+            return "رمز العملة غير مدعوم"
+        if "auth" in r or "api" in r or "key" in r or "signature" in r:
+            return "خطأ في مفاتيح API"
+        if "timeout" in r or "timed out" in r:
+            return "انتهت المهلة"
+        return err[:60]
+
+    t1_line = (
+        f"✅ هدف 1 (T1) — وُضع على MEXC  `#{t1_id}`"
+        if t1_placed else
+        f"❌ هدف 1 (T1) — *فشل الوضع*\n   `{_translate(t1_error)}`"
+    )
+    sl_line = (
+        f"✅ وقف الخسارة (SL) — وُضع على MEXC  `#{sl_id}`"
+        if sl_placed else
+        f"❌ وقف الخسارة (SL) — *فشل الوضع*\n   `{_translate(sl_error)}`"
+    )
+
+    if t1_placed and sl_placed:
+        text = (
+            f"📋 *{sym}* — أوردرات MEXC\n\n"
+            f"{t1_line}\n"
+            f"{sl_line}"
+        )
+    else:
+        text = (
+            f"⚠️ *{sym}* — تحقق من أوردرات MEXC\n\n"
+            f"{t1_line}\n"
+            f"{sl_line}\n\n"
+            f"_الصفقة مفتوحة لكن بعض الأوردرات لم تُوضع على المنصة — راجع حسابك يدوياً._"
+        )
+
+    try:
+        await bot.send_message(user_id, text, parse_mode="Markdown")
+    except Exception as e:
+        logger.error(f"WhaleOrdersStatus: notify failed {user_id}: {e}")

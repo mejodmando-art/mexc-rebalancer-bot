@@ -63,17 +63,25 @@ async def execute_trade(setup: Dict[str, Any], exchange) -> Dict[str, Any]:
 
         # ── 2. Take profit — limit sell at T1 for 50% ────────────────────
         t1_order = {}
+        t1_placed = False
+        t1_error  = ""
         try:
-            t1_order = await exchange.create_limit_sell_order(symbol, qty_half, target1)
+            t1_order  = await exchange.create_limit_sell_order(symbol, qty_half, target1)
+            t1_placed = True
             logger.info(f"Executor: T1 limit sell {symbol} qty={qty_half} @ {target1} → id={t1_order.get('id')}")
         except Exception as e:
+            t1_error = str(e)[:120]
             logger.warning(f"Executor: T1 limit order failed for {symbol}: {e}")
 
         # ── 3. Stop loss — limit sell on MEXC at SL price ────────────────
         sl_order = {}
+        sl_placed = False
+        sl_error  = ""
         try:
-            sl_order = await _place_stop_loss(exchange, symbol, filled_qty, stop_loss)
+            sl_order  = await _place_stop_loss(exchange, symbol, filled_qty, stop_loss)
+            sl_placed = True
         except Exception as e:
+            sl_error = str(e)[:120]
             logger.warning(f"Executor: SL order failed for {symbol}: {e}")
 
         return {
@@ -85,6 +93,10 @@ async def execute_trade(setup: Dict[str, Any], exchange) -> Dict[str, Any]:
             "sl_order":      sl_order,
             "filled_qty":    filled_qty,
             "qty_half":      qty_half,
+            "t1_placed":     t1_placed,
+            "sl_placed":     sl_placed,
+            "t1_error":      t1_error,
+            "sl_error":      sl_error,
             "reason":        "",
         }
 
