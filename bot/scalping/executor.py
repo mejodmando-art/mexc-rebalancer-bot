@@ -1,12 +1,16 @@
 """
-Trade executor — places market entry only on MEXC.
+Trade executor — places entry + take profit + stop loss on MEXC Spot.
 
-Since MEXC Spot doesn't support native OCO orders:
-  1. Market buy for full qty (using quoteOrderQty / cost)
-  2. No T1 limit order — monitor.py handles T1 via price polling to avoid
-     double-sell (limit fill + market sell racing each other)
-  3. No T2 limit order — trailing stop in monitor.py handles the full exit
-  4. Stop-loss is managed by monitor.py (price polling)
+Flow:
+  1. Market buy (quoteOrderQty)
+  2. Limit sell at T1 for 50% of qty  (take profit partial exit)
+  3. Stop-market sell at SL for full qty (stop loss protection)
+
+T2 and trailing stop are handled by monitor.py after T1 is hit,
+since MEXC Spot does not support chained conditional orders.
+
+Having real orders on MEXC means the position is protected even if
+the bot goes offline.
 """
 
 import logging
@@ -16,49 +20,50 @@ logger = logging.getLogger(__name__)
 
 
 async def execute_trade(setup: Dict[str, Any], exchange) -> Dict[str, Any]:
-    """
-    Args:
-        setup:    dict from scanner.scan() containing all trade parameters
-        exchange: ccxt async exchange instance
-
-    Returns:
-        {
-            "status":        "ok" | "error",
-            "symbol":        str,
-            "entry_order":   dict,
-            "target1_order": dict,   # always empty — monitor handles T1
-            "target2_order": dict,
-            "filled_qty":    float,
-            "qty_half":      float,
-            "reason":        str,    # only on error
-        }
-    """
     symbol          = setup["symbol"]
-    trade_size_usdt = setup["qty"] * setup["entry_price"]   # recover USDT cost
+    trade_size_usdt = setup["qty"] * setup["entry_price"]
+    stop_loss       = setup["stop_loss"]
+    target1         = setup["target1"]
 
     try:
-        # ── Market buy (MEXC Spot requires quoteOrderQty, not base qty) ───
-        logger.info(f"Executor: attempting market buy {symbol} cost={trade_size_usdt:.2f} USDT")
+        # ── 1. Market buy ─────────────────────────────────────────────────
+        logger.info(f"Executor: market buy {symbol} cost={trade_size_usdt:.2f} USDT")
         entry_order = await exchange.create_market_buy_order_with_cost(symbol, trade_size_usdt)
-        logger.info(f"Executor: market buy {symbol} cost={trade_size_usdt} → order {entry_order.get('id')} filled={entry_order.get('filled')} status={entry_order.get('status')}")
+        logger.info(
+            f"Executor: filled {symbol} → id={entry_order.get('id')} "
+            f"filled={entry_order.get('filled')} status={entry_order.get('status')}"
+        )
 
-        # Use the actual filled qty from the order
         filled_qty = float(entry_order.get("filled") or entry_order.get("amount") or 0)
         if filled_qty <= 0:
-            avg_price = float(entry_order.get("average") or entry_order.get("price") or setup["entry_price"])
-            filled_qty = trade_size_usdt / avg_price if avg_price > 0 else setup["qty"]
+            avg = float(entry_order.get("average") or entry_order.get("price") or setup["entry_price"])
+            filled_qty = trade_size_usdt / avg if avg > 0 else setup["qty"]
 
         qty_half = round(filled_qty / 2, 8)
 
-        # T1 and trailing stop are handled entirely by monitor.py via price
-        # polling — no limit orders placed here to prevent double-sell races.
+        # ── 2. Take profit — limit sell at T1 for 50% ────────────────────
+        t1_order = {}
+        try:
+            t1_order = await exchange.create_limit_sell_order(symbol, qty_half, target1)
+            logger.info(f"Executor: T1 limit sell {symbol} qty={qty_half} @ {target1} → id={t1_order.get('id')}")
+        except Exception as e:
+            logger.warning(f"Executor: T1 limit order failed for {symbol}: {e}")
+
+        # ── 3. Stop loss — stop-market sell for full qty ──────────────────
+        sl_order = {}
+        try:
+            sl_order = await exchange.createStopMarketOrder(symbol, "sell", filled_qty, stop_loss)
+            logger.info(f"Executor: SL stop-market {symbol} qty={filled_qty} trigger={stop_loss} → id={sl_order.get('id')}")
+        except Exception as e:
+            logger.warning(f"Executor: SL order failed for {symbol}: {e}")
 
         return {
             "status":        "ok",
             "symbol":        symbol,
             "entry_order":   entry_order,
-            "target1_order": {},   # intentionally empty
+            "target1_order": t1_order,
             "target2_order": {},
+            "sl_order":      sl_order,
             "filled_qty":    filled_qty,
             "qty_half":      qty_half,
             "reason":        "",
@@ -72,5 +77,6 @@ async def execute_trade(setup: Dict[str, Any], exchange) -> Dict[str, Any]:
             "entry_order":   {},
             "target1_order": {},
             "target2_order": {},
+            "sl_order":      {},
             "reason":        str(e)[:120],
         }
