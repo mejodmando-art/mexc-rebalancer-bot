@@ -12,17 +12,20 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     await update.message.reply_text(
-        f"✨ *أهلاً {user.first_name}!*\n\n"
-        "━━━━━━━━━━━━━━━━━━━━━\n"
-        "🤖 *بوت إعادة توازن محفظة MEXC*\n"
-        "━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "🚀 *ما يقدر يعمله البوت:*\n"
-        "  ◈ مراقبة محفظتك في الوقت الفعلي\n"
-        "  ◈ إعادة توازن تلقائية ويدوية\n"
-        "  ◈ إدارة محافظ متعددة برأس مال مستقل\n"
-        "  ◈ دعم حتى 20 عملة لكل محفظة\n"
-        "  ◈ حد انحراف مخصص لكل محفظة\n\n"
-        "⚙️ *للبدء:* اربط مفاتيح MEXC API من الإعدادات.",
+        f"*أهلاً {user.first_name}* 👋\n\n"
+        "┌─────────────────────┐\n"
+        "│   🤖 MEXC Trade Bot  │\n"
+        "└─────────────────────┘\n\n"
+        "📌 *الاستراتيجيات المتاحة:*\n"
+        "  ⚡ *Scalping* — Smart Liquidity Flow\n"
+        "  🐋 *Whale* — Order Flow Strategy\n"
+        "  🔲 *Grid Bot* — شبكة أوردرات تلقائية\n\n"
+        "📌 *إدارة المحفظة:*\n"
+        "  💰 عرض الرصيد الحالي\n"
+        "  ⚖️ إعادة توازن تلقائية ويدوية\n"
+        "  🗂 محافظ متعددة برأس مال مستقل\n"
+        "  🚨 بيع طوارئ فوري\n\n"
+        "⚙️ ابدأ بربط مفاتيح MEXC API من *الإعدادات*",
         parse_mode="Markdown",
         reply_markup=main_menu_kb(),
     )
@@ -48,7 +51,7 @@ async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "━━━━━━━━━━━━━━━━━━━━━\n"
         "من زر 🗂 محافظي أنشئ محافظ منفصلة\n"
         "لكل محفظة رأس مال وتوزيع مستقل\n\n"
-        "✖️ `/cancel` — إلغاء أي عملية جارية",
+        "❌ `/cancel` — إلغاء أي عملية جارية",
         parse_mode="Markdown",
         reply_markup=main_menu_kb(),
     )
@@ -56,7 +59,7 @@ async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "🏠 *القائمة الرئيسية*\n\nاختر ما تريد:",
+        "🏠 *القائمة الرئيسية*",
         parse_mode="Markdown",
         reply_markup=main_menu_kb(),
     )
@@ -66,7 +69,7 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     query = update.callback_query
     await query.answer()
     await query.edit_message_text(
-        "🏠 *القائمة الرئيسية*\n\nاختر ما تريد:",
+        "🏠 *القائمة الرئيسية*",
         parse_mode="Markdown",
         reply_markup=main_menu_kb(),
     )

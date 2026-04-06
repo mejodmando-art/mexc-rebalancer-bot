@@ -5,34 +5,40 @@ from typing import List, Dict
 def main_menu_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("💼 رصيد المحفظة", callback_data="balance"),
-            InlineKeyboardButton("⚡ إعادة التوازن", callback_data="rebalance:check"),
+            InlineKeyboardButton("💰 رصيد المحفظة",   callback_data="balance"),
+            InlineKeyboardButton("⚖️ إعادة التوازن",  callback_data="rebalance:check"),
         ],
         [
-            InlineKeyboardButton("🛠 الإعدادات", callback_data="menu:settings"),
-            InlineKeyboardButton("📋 السجل", callback_data="history"),
+            InlineKeyboardButton("⚡ Scalping",        callback_data="scalping:menu"),
+            InlineKeyboardButton("🐋 Whale Strategy",  callback_data="whale:menu"),
         ],
         [
-            InlineKeyboardButton("🗂 محافظي", callback_data="portfolios"),
-            InlineKeyboardButton("🎯 Scalping", callback_data="scalping:menu"),
+            InlineKeyboardButton("🔲 Grid Bot",        callback_data="grid:menu"),
+            InlineKeyboardButton("🗂 محافظي",          callback_data="portfolios"),
         ],
-        [InlineKeyboardButton("🐋 Whale Strategy", callback_data="whale:menu")],
-        [InlineKeyboardButton("🔲 Grid Bot", callback_data="grid:menu")],
-        [InlineKeyboardButton("🚨 بيع طوارئ", callback_data="emergency:menu")],
-        [InlineKeyboardButton("💡 كيف يعمل البوت؟", callback_data="menu:info")],
+        [
+            InlineKeyboardButton("🚨 بيع طوارئ",       callback_data="emergency:menu"),
+            InlineKeyboardButton("📋 السجل",           callback_data="history"),
+        ],
+        [
+            InlineKeyboardButton("⚙️ الإعدادات",       callback_data="menu:settings"),
+            InlineKeyboardButton("❓ كيف يعمل البوت",  callback_data="menu:info"),
+        ],
     ])
 
 
 def settings_kb(auto_enabled: bool = False) -> InlineKeyboardMarkup:
     auto_label = "🟢 إيقاف التوازن التلقائي" if auto_enabled else "🔴 تفعيل التوازن التلقائي"
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔐 مفاتيح MEXC API", callback_data="settings:set_api")],
-        [InlineKeyboardButton("📊 عرض التوزيع الحالي", callback_data="settings:view_allocs")],
-        [InlineKeyboardButton("✏️ إضافة / تعديل عملة", callback_data="settings:add_alloc")],
-        [InlineKeyboardButton("🎯 حد الانحراف المسموح", callback_data="settings:set_threshold")],
-        [InlineKeyboardButton("⏱ فترة التوازن التلقائي", callback_data="settings:set_interval")],
-        [InlineKeyboardButton(auto_label, callback_data="toggle_auto")],
-        [InlineKeyboardButton("◀️ القائمة الرئيسية", callback_data="menu:main")],
+        [InlineKeyboardButton("🔑 مفاتيح MEXC API",        callback_data="settings:set_api")],
+        [InlineKeyboardButton("📊 عرض التوزيع الحالي",     callback_data="settings:view_allocs")],
+        [InlineKeyboardButton("✏️ إضافة / تعديل عملة",    callback_data="settings:add_alloc")],
+        [
+            InlineKeyboardButton("🎯 حد الانحراف",         callback_data="settings:set_threshold"),
+            InlineKeyboardButton("⏱ فترة التوازن",         callback_data="settings:set_interval"),
+        ],
+        [InlineKeyboardButton(auto_label,                  callback_data="toggle_auto")],
+        [InlineKeyboardButton("◀️ رجوع",                   callback_data="menu:main")],
     ])
 
 
@@ -82,11 +88,11 @@ def back_to_settings_kb() -> InlineKeyboardMarkup:
 def portfolios_list_kb(portfolios: List[Dict], active_id: int) -> InlineKeyboardMarkup:
     buttons = []
     for p in portfolios:
-        active_mark = "✅ " if p['id'] == active_id else "   "
+        active_mark = "✅ " if p['id'] == active_id else ""
         label = f"{active_mark}{p['name']}  ·  ${p['capital_usdt']:,.0f}"
         buttons.append([InlineKeyboardButton(label, callback_data=f"portfolio:{p['id']}")])
-    buttons.append([InlineKeyboardButton("➕ إنشاء محفظة جديدة", callback_data="portfolio_new")])
-    buttons.append([InlineKeyboardButton("◀️ القائمة الرئيسية", callback_data="menu:main")])
+    buttons.append([InlineKeyboardButton("➕ محفظة جديدة",  callback_data="portfolio_new")])
+    buttons.append([InlineKeyboardButton("◀️ رجوع",         callback_data="menu:main")])
     return InlineKeyboardMarkup(buttons)
 
 
@@ -94,15 +100,17 @@ def portfolio_actions_kb(portfolio_id: int, is_active: bool) -> InlineKeyboardMa
     buttons = []
     if not is_active:
         buttons.append([InlineKeyboardButton("✅ تفعيل هذه المحفظة", callback_data=f"portfolio_switch:{portfolio_id}")])
-    buttons.append([InlineKeyboardButton("✏️ تعديل الاسم", callback_data=f"portfolio_edit_name:{portfolio_id}")])
-    buttons.append([InlineKeyboardButton("💰 تعديل رأس المال", callback_data=f"portfolio_edit_capital:{portfolio_id}")])
     buttons.append([
-        InlineKeyboardButton("🔴 بيع الكل", callback_data=f"portfolio_sell_all:{portfolio_id}"),
-        InlineKeyboardButton("📊 استبدال بنسبة", callback_data=f"portfolio_rebalance_sell:{portfolio_id}"),
+        InlineKeyboardButton("✏️ تعديل الاسم",  callback_data=f"portfolio_edit_name:{portfolio_id}"),
+        InlineKeyboardButton("💰 رأس المال",     callback_data=f"portfolio_edit_capital:{portfolio_id}"),
+    ])
+    buttons.append([
+        InlineKeyboardButton("🔴 بيع الكل",     callback_data=f"portfolio_sell_all:{portfolio_id}"),
+        InlineKeyboardButton("📊 بيع بنسبة",    callback_data=f"portfolio_rebalance_sell:{portfolio_id}"),
     ])
     buttons.append([InlineKeyboardButton("🔴 بيع عملة واحدة", callback_data=f"portfolio_sell_one:{portfolio_id}")])
-    buttons.append([InlineKeyboardButton("🗑 حذف المحفظة", callback_data=f"portfolio_delete:{portfolio_id}")])
-    buttons.append([InlineKeyboardButton("◀️ قائمة المحافظ", callback_data="portfolios")])
+    buttons.append([InlineKeyboardButton("🗑 حذف المحفظة",     callback_data=f"portfolio_delete:{portfolio_id}")])
+    buttons.append([InlineKeyboardButton("◀️ رجوع",            callback_data="portfolios")])
     return InlineKeyboardMarkup(buttons)
 
 
