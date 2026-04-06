@@ -43,13 +43,14 @@ class TradeMonitor:
             "stop_loss":     initial_sl,
             "highest_price": entry_price,   # tracks peak price for trailing
             "target1":       setup["target1"],
-            "target2":       setup["target1"],  # T2 removed — trailing handles exit
+            "target2":       setup["target2"],  # 3R — sell remaining 50%
             "qty":           actual_qty,
             "qty_half":      actual_qty_half,
             "risk_reward":   setup["risk_reward"],
             "t1_hit":        False,
+            "t2_hit":        False,
             "t1_order_id":   result.get("target1_order", {}).get("id"),
-            "t2_order_id":   None,   # no T2 limit order
+            "t2_order_id":   None,
             "opened_at":     datetime.now(timezone.utc).isoformat(),
             "breakeven":     False,
         }
@@ -87,6 +88,7 @@ class TradeMonitor:
                     "qty_half":      row["qty_half"],
                     "risk_reward":   row["risk_reward"],
                     "t1_hit":        bool(row["t1_hit"]),
+                    "t2_hit":        bool(row.get("t2_hit", False)),
                     "t1_order_id":   row["t1_order_id"],
                     "t2_order_id":   row["t2_order_id"],
                     "opened_at":     row["opened_at"],
@@ -144,6 +146,7 @@ class TradeMonitor:
     ) -> None:
         symbol  = trade["symbol"]
         target1 = trade["target1"]
+        target2 = trade["target2"]
 
         # ── Update trailing stop ───────────────────────────────────────────
         # Use tighter trail after T1 is hit (profit already locked)
@@ -169,21 +172,41 @@ class TradeMonitor:
             await self._close_trade(trade, price, "trailing_stop", exchange, bot, user_id)
             return
 
+        # ── T2 hit → sell remaining 50%, close trade ───────────────────────
+        if trade["t1_hit"] and not trade.get("t2_hit") and price >= target2:
+            trade["t2_hit"] = True
+            remaining_qty = trade["qty_half"]
+            try:
+                await exchange.create_market_sell_order(symbol, remaining_qty)
+                logger.info(f"Monitor: {symbol} T2 hit — sold {remaining_qty} @ {price:.6g}")
+            except Exception as e:
+                logger.error(f"Monitor: T2 sell failed for {symbol}: {e}")
+
+            await self.remove_trade(symbol)
+
+            entry  = trade["entry_price"]
+            t2_pct = ((price - entry) / entry) * 100
+            await self._notify(
+                bot, user_id,
+                f"🏆 *{symbol}* — هدف 2 اتحقق!\n\n"
+                f"✅ بيع الـ 50% الباقية عند `${price:.6g}`  (`+{t2_pct:.2f}%`)\n"
+                f"🎯 هدف 1 + هدف 2 تحققا — الصفقة مغلقة بالكامل\n"
+                f"📊 R/R: `1:{trade['risk_reward']}`"
+            )
+            return
+
         # ── T1 hit → sell 50%, tighten trail ──────────────────────────────
         if not trade["t1_hit"] and price >= target1:
             trade["t1_hit"]    = True
             trade["breakeven"] = True
 
-            # Sell half position via market order.
-            # No limit order to cancel — executor no longer places one,
-            # so there is no risk of a double-sell race.
             try:
                 await exchange.create_market_sell_order(symbol, trade["qty_half"])
                 logger.info(f"Monitor: {symbol} T1 hit — sold {trade['qty_half']} @ {price:.6g}")
             except Exception as e:
                 logger.error(f"Monitor: T1 partial sell failed for {symbol}: {e}")
 
-            # Tighten trail immediately
+            # Tighten trail immediately after T1
             new_sl = round(price * (1 - TRAIL_PCT_AFTER_T1), 8)
             if new_sl > trade["stop_loss"]:
                 trade["stop_loss"] = new_sl
@@ -195,12 +218,14 @@ class TradeMonitor:
 
             entry  = trade["entry_price"]
             t1_pct = ((price - entry) / entry) * 100
+            t2_pct = ((target2 - entry) / entry) * 100
             await self._notify(
                 bot, user_id,
                 f"🎯 *{symbol}* — هدف 1 اتحقق!\n\n"
                 f"✅ بيع 50% عند `${price:.6g}`  (`+{t1_pct:.2f}%`)\n"
+                f"🎯 هدف 2: `${target2:.6g}`  (`+{t2_pct:.2f}%`) — ينتظر\n"
                 f"🔒 الـ trailing stop انضغط لـ `{TRAIL_PCT_AFTER_T1*100:.0f}%`\n"
-                f"📈 الباقي شغال مع الـ trailing — يلاحق السعر لأعلى"
+                f"📈 الباقي شغال نحو هدف 2"
             )
 
     async def _close_trade(
@@ -245,7 +270,12 @@ class TradeMonitor:
             result_icon = "✅"
             result_line = f"📈 ربح: `+{pnl:.2f}%`"
 
-        t1_line = "✅ هدف 1 تحقق (50% بيع)" if trade["t1_hit"] else "⏳ هدف 1 لم يُحقق"
+        if trade["t1_hit"] and trade.get("t2_hit"):
+            t1_line = "✅ هدف 1 + هدف 2 تحققا"
+        elif trade["t1_hit"]:
+            t1_line = "✅ هدف 1 تحقق (50% بيع) — هدف 2 لم يُحقق"
+        else:
+            t1_line = "⏳ هدف 1 لم يُحقق"
 
         msg = (
             f"{result_icon} *{symbol}* — Trailing Stop\n\n"

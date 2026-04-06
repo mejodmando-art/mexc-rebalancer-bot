@@ -1,21 +1,20 @@
 """
-Risk management: calculates stop loss, T1 target, and position size.
+Risk management: calculates stop loss, T1, T2 targets, and position size.
 
 Rules:
   stop_loss = sweep_low * 0.997       (0.3% below the sweep wick)
   target1   = entry + risk * 1.5      (1.5R — sell 50% here, lock partial profit)
+  target2   = entry + risk * 3.0      (3R  — sell remaining 50% here)
 
-  No T2 hard target — the trailing stop in monitor.py handles the full exit,
-  allowing the trade to ride the trend as far as it goes.
-
-  Minimum R/R check removed: with a trailing stop there is no fixed reward,
-  so R/R is open-ended. Any valid sweep entry is accepted.
+  After T1 is hit the trailing stop tightens to protect profit.
+  After T2 is hit the full position is closed.
 """
 
 from typing import Dict, Any
 
 _STOP_PCT = 0.003   # 0.3% below sweep low
-_T1_R     = 1.5     # target1 = entry + 1.5 × risk (partial exit)
+_T1_R     = 1.5     # target1 = entry + 1.5 × risk (50% exit)
+_T2_R     = 3.0     # target2 = entry + 3.0 × risk (remaining 50% exit)
 
 
 def calculate_risk(
@@ -28,11 +27,11 @@ def calculate_risk(
     Returns:
         {
             "stop_loss":     float,
-            "target1":       float,
-            "target2":       float,   # same as target1 — trailing handles full exit
+            "target1":       float,   # 1.5R — sell 50%
+            "target2":       float,   # 3.0R — sell remaining 50%
             "qty":           float,
             "qty_half":      float,
-            "risk_reward":   float,   # initial R (open-ended with trailing)
+            "risk_reward":   float,
             "valid":         bool,
         }
     """
@@ -46,21 +45,21 @@ def calculate_risk(
         return _invalid()
 
     target1 = round(entry_price + risk * _T1_R, 8)
+    target2 = round(entry_price + risk * _T2_R, 8)
 
     qty      = round(trade_size_usdt / entry_price, 8)
     qty_half = round(qty / 2, 8)
 
-    # R/R shown in notifications — open-ended since trailing stop rides the trend
-    rr = round(_T1_R, 2)
+    rr = round(_T2_R, 2)
 
     return {
         "stop_loss":   stop_loss,
         "target1":     target1,
-        "target2":     target1,   # monitor uses trailing, not a hard T2
+        "target2":     target2,
         "qty":         qty,
         "qty_half":    qty_half,
         "risk_reward": rr,
-        "valid":       True,      # any valid sweep entry is accepted
+        "valid":       True,
     }
 
 
