@@ -1,12 +1,16 @@
 """
-Whale trade monitor — runs every 30 seconds.
+Whale trade monitor — runs every 20 seconds.
 
-Handles fixed-target exits (no trailing stop):
-  - T1 (+0.5%): sell 60%, keep 40%
-  - T2 (+1.0%): sell remaining 40%
-  - SL (-0.4%): sell everything immediately
+After entry, real orders are placed on MEXC:
+  - Limit sell at T1 for 60% of qty
+  - Stop-market sell at SL for full qty
 
-Fast exits — average hold 5–15 minutes.
+When T1 fills:
+  - Cancel old SL, place new SL for remaining 40%
+  - Place limit sell at T2 for remaining 40%
+
+Having real orders on MEXC means the position is protected even if
+the bot goes offline.
 """
 
 import logging
@@ -41,6 +45,9 @@ class WhaleTradeMonitor:
             "risk_reward": setup["risk_reward"],
             "t1_hit":      False,
             "t2_hit":      False,
+            "t1_order_id": result.get("target1_order", {}).get("id"),
+            "t2_order_id": None,
+            "sl_order_id": result.get("sl_order", {}).get("id"),
             "opened_at":   datetime.now(timezone.utc).isoformat(),
             "strategy":    "whale",
         }
@@ -80,6 +87,9 @@ class WhaleTradeMonitor:
                     "risk_reward": row["risk_reward"],
                     "t1_hit":      bool(row["t1_hit"]),
                     "t2_hit":      bool(row.get("t2_hit", 0)),
+                    "t1_order_id": row.get("t1_order_id"),
+                    "t2_order_id": row.get("t2_order_id"),
+                    "sl_order_id": row.get("sl_order_id"),
                     "opened_at":   row["opened_at"],
                     "strategy":    "whale",
                 }
@@ -123,83 +133,109 @@ class WhaleTradeMonitor:
         symbol  = trade["symbol"]
         target1 = trade["target1"]
         target2 = trade["target2"]
-        sl      = trade["stop_loss"]
 
-        # ── Stop loss hit ──────────────────────────────────────────────────
-        if price <= sl:
-            await self._close_trade(trade, price, "stop_loss", exchange, bot, user_id)
-            return
-
-        # ── T2 hit → sell remaining 40% ────────────────────────────────────
-        if not trade["t2_hit"] and price >= target2:
-            trade["t2_hit"] = True
+        # ── Check if T1 limit order was filled on MEXC ────────────────────
+        if not trade["t1_hit"] and trade.get("t1_order_id"):
             try:
-                await exchange.create_market_sell_order(symbol, trade["qty_40pct"])
-                logger.info(f"WhaleMonitor: {symbol} T2 hit — sold {trade['qty_40pct']} @ {price:.6g}")
+                t1_order = await exchange.fetch_order(trade["t1_order_id"], symbol)
+                if t1_order.get("status") == "closed":
+                    await self._on_t1_filled(trade, price, exchange, bot, user_id)
+                    return
             except Exception as e:
-                logger.error(f"WhaleMonitor: T2 sell failed {symbol}: {e}")
+                logger.warning(f"WhaleMonitor: could not fetch T1 order for {symbol}: {e}")
 
-            await self.remove_trade(symbol)
-            entry  = trade["entry_price"]
-            pnl    = ((price - entry) / entry) * 100
-            await self._notify(
-                bot, user_id,
-                f"✅ *{symbol}* — هدف 2 اتحقق!\n\n"
-                f"🎯 بيع 40% عند `${price:.6g}`  (`+{pnl:.2f}%`)\n"
-                f"📊 الصفقة اتغلقت كاملاً"
-            )
-            return
-
-        # ── T1 hit → sell 60% ──────────────────────────────────────────────
+        # ── Fallback: price-based T1 detection ────────────────────────────
         if not trade["t1_hit"] and price >= target1:
-            trade["t1_hit"] = True
-            try:
-                await exchange.create_market_sell_order(symbol, trade["qty_60pct"])
-                logger.info(f"WhaleMonitor: {symbol} T1 hit — sold {trade['qty_60pct']} @ {price:.6g}")
-            except Exception as e:
-                logger.error(f"WhaleMonitor: T1 sell failed {symbol}: {e}")
+            await self._on_t1_filled(trade, price, exchange, bot, user_id)
+            return
 
+        # ── T2 hit (price-based fallback after T1) ─────────────────────────
+        if trade["t1_hit"] and not trade["t2_hit"] and price >= target2:
+            await self._on_t2_hit(trade, price, exchange, bot, user_id)
+            return
+
+    async def _on_t1_filled(self, trade, price, exchange, bot, user_id) -> None:
+        symbol  = trade["symbol"]
+        target2 = trade["target2"]
+        trade["t1_hit"] = True
+
+        # Cancel old SL (full qty) — replace with 40% qty SL
+        if trade.get("sl_order_id"):
             try:
-                await db.save_scalping_trade(user_id, trade)
+                await exchange.cancel_order(trade["sl_order_id"], symbol)
             except Exception:
                 pass
 
-            entry  = trade["entry_price"]
-            pnl    = ((price - entry) / entry) * 100
-            await self._notify(
-                bot, user_id,
-                f"🎯 *{symbol}* — هدف 1 اتحقق!\n\n"
-                f"✅ بيع 60% عند `${price:.6g}`  (`+{pnl:.2f}%`)\n"
-                f"⏳ الباقي (40%) شايل لهدف 2: `${target2:.6g}`\n"
-                f"🛑 الوقف لسه: `${sl:.6g}`"
-            )
-
-    async def _close_trade(self, trade, price, reason, exchange, bot, user_id) -> None:
-        symbol = trade["symbol"]
-
-        # Sell whatever remains
-        remaining = trade["qty_40pct"] if trade["t1_hit"] else trade["qty"]
+        # New SL for remaining 40%
+        sl_order = {}
         try:
-            await exchange.create_market_sell_order(symbol, remaining)
+            sl_order = await exchange.createStopMarketOrder(
+                symbol, "sell", trade["qty_40pct"], trade["stop_loss"]
+            )
+            trade["sl_order_id"] = sl_order.get("id")
+            logger.info(f"WhaleMonitor: {symbol} T1 filled — new SL @ {trade['stop_loss']:.6g}")
         except Exception as e:
-            logger.error(f"WhaleMonitor: close sell failed {symbol}: {e}")
+            logger.warning(f"WhaleMonitor: failed to place new SL after T1 for {symbol}: {e}")
+
+        # Place T2 limit order for remaining 40%
+        try:
+            t2_order = await exchange.create_limit_sell_order(symbol, trade["qty_40pct"], target2)
+            trade["t2_order_id"] = t2_order.get("id")
+            logger.info(f"WhaleMonitor: {symbol} T2 limit placed @ {target2:.6g}")
+        except Exception as e:
+            logger.warning(f"WhaleMonitor: failed to place T2 order for {symbol}: {e}")
+
+        try:
+            await db.save_scalping_trade(user_id, trade)
+        except Exception:
+            pass
+
+        entry = trade["entry_price"]
+        pnl   = ((price - entry) / entry) * 100
+        await self._notify(
+            bot, user_id,
+            f"🎯 *{symbol}* — هدف 1 اتحقق!\n\n"
+            f"✅ بيع 60% عند `${price:.6g}`  (`+{pnl:.2f}%`)\n"
+            f"🎯 هدف 2: `${target2:.6g}` — أوردر على MEXC ✅\n"
+            f"🛑 Stop Loss محدث على MEXC ✅"
+        )
+
+    async def _on_t2_hit(self, trade, price, exchange, bot, user_id) -> None:
+        symbol = trade["symbol"]
+        trade["t2_hit"] = True
+
+        # Cancel remaining orders
+        for order_id in [trade.get("sl_order_id"), trade.get("t2_order_id")]:
+            if order_id:
+                try:
+                    await exchange.cancel_order(order_id, symbol)
+                except Exception:
+                    pass
 
         await self.remove_trade(symbol)
 
         entry = trade["entry_price"]
         pnl   = ((price - entry) / entry) * 100
-        icon  = "✅" if pnl >= 0 else "🛑"
-        sign  = "+" if pnl >= 0 else ""
-
         await self._notify(
             bot, user_id,
-            f"{icon} *{symbol}* — إغلاق\n\n"
-            f"دخول: `${entry:.6g}`\n"
-            f"خروج: `${price:.6g}`\n"
-            f"━━━━━━━━━━━━━━━━━━━━━\n"
-            f"{'📈 ربح' if pnl >= 0 else '📉 خسارة'}: `{sign}{pnl:.2f}%`\n"
-            f"{'✅ هدف 1 تحقق' if trade['t1_hit'] else '⏳ هدف 1 لم يتحقق'}"
+            f"✅ *{symbol}* — هدف 2 اتحقق!\n\n"
+            f"🎯 بيع 40% عند `${price:.6g}`  (`+{pnl:.2f}%`)\n"
+            f"📊 الصفقة اتغلقت كاملاً"
         )
+
+    async def cancel_all_orders(self, trade: Dict, exchange) -> None:
+        """Cancel all open orders for a trade (called on manual sell or cleanup)."""
+        symbol = trade["symbol"]
+        for order_id in [
+            trade.get("t1_order_id"),
+            trade.get("t2_order_id"),
+            trade.get("sl_order_id"),
+        ]:
+            if order_id:
+                try:
+                    await exchange.cancel_order(order_id, symbol)
+                except Exception:
+                    pass
 
     async def _notify(self, bot, user_id: int, text: str) -> None:
         try:
