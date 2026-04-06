@@ -163,9 +163,44 @@ async def whale_open_trades_callback(update: Update, context: ContextTypes.DEFAU
     await query.answer()
     user_id = update.effective_user.id
 
-    # Fetch directly from DB to reflect actual persisted state
+    await query.edit_message_text("⏳ جاري التحقق من الصفقات...")
+
+    # Fetch from DB
     rows = await db.load_scalping_trades()
     trades = [r for r in rows if r.get("user_id") == user_id and r.get("strategy") == "whale"]
+
+    if not trades:
+        await query.edit_message_text(
+            "📊 *Whale — الصفقات المفتوحة*\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n"
+            "لا توجد صفقات مفتوحة حالياً.",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("◀️ رجوع", callback_data="whale:menu")]
+            ]),
+        )
+        return
+
+    # Cross-check with actual MEXC balance — remove stale trades
+    settings = await db.get_settings(user_id)
+    if settings and settings.get("mexc_api_key"):
+        client = MexcClient(settings["mexc_api_key"], settings["mexc_secret_key"])
+        try:
+            balance = await client.exchange.fetch_balance()
+            free = balance.get("free", {})
+            stale = []
+            for t in trades:
+                base = t["symbol"].replace("/USDT", "")
+                qty  = float(free.get(base, 0) or 0)
+                if qty < 1e-6:
+                    stale.append(t["symbol"])
+            for sym in stale:
+                await whale_monitor.remove_trade(sym)
+            trades = [t for t in trades if t["symbol"] not in stale]
+        except Exception:
+            pass
+        finally:
+            await client.close()
 
     if not trades:
         await query.edit_message_text(
