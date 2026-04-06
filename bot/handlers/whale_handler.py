@@ -538,6 +538,7 @@ async def run_whale_scan(app) -> None:
                 continue
 
             trade_size = float(settings.get("whale_trade_size", 10.0))
+            max_trades = int(settings.get("whale_max_trades", 3))
             client = MexcClient(settings["mexc_api_key"], settings["mexc_secret_key"])
 
             # Balance check
@@ -558,6 +559,13 @@ async def run_whale_scan(app) -> None:
             # Run scan — only pass this user's open symbols to avoid blocking
             # symbols that belong to other users
             all_open = whale_monitor.open_symbols_for(user_id)
+
+            # ── Max trades cap ─────────────────────────────────────────────
+            if len(all_open) >= max_trades:
+                logger.info(
+                    f"WhaleScan: user {user_id} at max_trades={max_trades}, skipping scan"
+                )
+                continue
             try:
                 setups = await asyncio.wait_for(
                     whale_scan(client.exchange, all_open, trade_size),

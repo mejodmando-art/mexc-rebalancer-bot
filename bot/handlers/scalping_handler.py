@@ -430,6 +430,7 @@ async def run_scalping_scan(app) -> None:
                 continue
 
             trade_size = float(settings.get("scalping_trade_size", 10.0))
+            max_trades = int(settings.get("scalping_max_trades", 3))
             client = MexcClient(settings["mexc_api_key"], settings["mexc_secret_key"])
 
             # ── Pre-scan balance check ─────────────────────────────────────
@@ -450,18 +451,14 @@ async def run_scalping_scan(app) -> None:
                     f"${usdt_balance:.2f} < ${trade_size:.0f}, scanning anyway"
                 )
 
-            # ── Scan start notification ────────────────────────────────────
             user_open_symbols = trade_monitor.open_symbols_for(user_id)
-            open_count = len(user_open_symbols)
-            await app.bot.send_message(
-                user_id,
-                f"🔍 *Scalping — جاري المسح*\n\n"
-                f"💰 الرصيد: `${usdt_balance:.2f} USDT`\n"
-                f"📦 حجم الصفقة: `${trade_size:.0f} USDT`\n"
-                f"📊 صفقات مفتوحة: `{open_count}`\n\n"
-                f"⏳ يمسح أفضل العملات بحثاً عن فرصة...",
-                parse_mode="Markdown",
-            )
+
+            # ── Max trades cap ─────────────────────────────────────────────
+            if len(user_open_symbols) >= max_trades:
+                logger.info(
+                    f"Scalping: user {user_id} at max_trades={max_trades}, skipping scan"
+                )
+                continue
 
             try:
                 setups = await asyncio.wait_for(
@@ -470,23 +467,10 @@ async def run_scalping_scan(app) -> None:
                 )
             except asyncio.TimeoutError:
                 logger.warning(f"Scalping scan timed out for user {user_id}")
-                await app.bot.send_message(
-                    user_id,
-                    "⚠️ *Scalping — انتهت مهلة المسح*\n\nسيحاول مجدداً في الدورة القادمة (15 دقيقة).",
-                    parse_mode="Markdown",
-                )
                 continue
 
-            # ── Scan result notification ───────────────────────────────────
-            if not setups:
-                await app.bot.send_message(
-                    user_id,
-                    "🔎 *Scalping — انتهى المسح*\n\n"
-                    "لم تتوفر فرصة مناسبة الآن.\n"
-                    "📅 المسح القادم بعد *15 دقيقة*.",
-                    parse_mode="Markdown",
-                )
-            else:
+            # Only notify when setups are found — silent when nothing found
+            if setups:
                 await app.bot.send_message(
                     user_id,
                     f"✨ *Scalping — وُجدت {len(setups)} فرصة!*\n\n"

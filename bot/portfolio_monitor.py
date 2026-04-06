@@ -18,6 +18,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Dict, Any, List
 
+from bot.config import config
 from bot.database import db
 from bot.mexc_client import MexcClient
 
@@ -39,15 +40,17 @@ async def _sell_portfolio_pct(
     exchange,
     allocations: List[Dict],
     sell_pct: float,
+    quote: str = None,
 ) -> List[str]:
     """
     Sell sell_pct% of each coin in the portfolio at market price.
     Returns a list of result lines for the notification message.
     """
+    quote = quote or config.quote_currency or "USDT"
     results = []
     for a in allocations:
         sym  = a["symbol"]
-        pair = f"{sym}/USDT"
+        pair = f"{sym}/{quote}"
         try:
             balance = await exchange.fetch_balance()
             qty_total = float(balance.get("free", {}).get(sym, 0) or 0)
@@ -99,6 +102,8 @@ async def _check_portfolio(app, p: Dict[str, Any]) -> None:
     if not allocations:
         return
 
+    quote = settings.get("quote_currency") or config.quote_currency or "USDT"
+
     client = MexcClient(settings["mexc_api_key"], settings["mexc_secret_key"])
     try:
         portfolio_balances, _ = await client.get_portfolio()
@@ -125,7 +130,7 @@ async def _check_portfolio(app, p: Dict[str, Any]) -> None:
     sl_value = float(p.get("sl_value") or 0)
     sl_type  = p.get("sl_type") or "pct"
     if sl_value > 0 and _target_reached(current_value, entry_value, sl_type, sl_value, is_sl=True):
-        results = await _sell_portfolio_pct(client.exchange, allocations, 100.0)
+        results = await _sell_portfolio_pct(client.exchange, allocations, 100.0, quote=quote)
         await db.update_portfolio(portfolio_id, tp_enabled=0, tp1_hit=1, tp2_hit=1)
         result_text = "\n".join(results)
         sl_desc = f"-{sl_value}%" if sl_type == "pct" else f"${sl_value:.2f}"
@@ -146,7 +151,7 @@ async def _check_portfolio(app, p: Dict[str, Any]) -> None:
         tp1_type     = p.get("tp1_type") or "pct"
         tp1_sell_pct = float(p.get("tp1_sell_pct") or 50.0)
         if tp1_value > 0 and _target_reached(current_value, entry_value, tp1_type, tp1_value):
-            results = await _sell_portfolio_pct(client.exchange, allocations, tp1_sell_pct)
+            results = await _sell_portfolio_pct(client.exchange, allocations, tp1_sell_pct, quote=quote)
             await db.update_portfolio(portfolio_id, tp1_hit=1)
             result_text = "\n".join(results)
             tp1_desc = f"+{tp1_value}%" if tp1_type == "pct" else f"${tp1_value:.2f}"
@@ -169,7 +174,7 @@ async def _check_portfolio(app, p: Dict[str, Any]) -> None:
         tp2_type     = p.get("tp2_type") or "pct"
         tp2_sell_pct = float(p.get("tp2_sell_pct") or 100.0)
         if tp2_value > 0 and _target_reached(current_value, entry_value, tp2_type, tp2_value):
-            results = await _sell_portfolio_pct(client.exchange, allocations, tp2_sell_pct)
+            results = await _sell_portfolio_pct(client.exchange, allocations, tp2_sell_pct, quote=quote)
             await db.update_portfolio(portfolio_id, tp2_hit=1, tp_enabled=0)
             result_text = "\n".join(results)
             tp2_desc = f"+{tp2_value}%" if tp2_type == "pct" else f"${tp2_value:.2f}"

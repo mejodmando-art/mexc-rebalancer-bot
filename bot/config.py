@@ -1,6 +1,12 @@
 import os
 import sys
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # python-dotenv not installed — rely on real env vars
+
 
 def _require(key: str) -> str:
     val = os.environ.get(key, "").strip()

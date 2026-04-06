@@ -271,6 +271,11 @@ class Database:
 
     async def _init_sqlite(self):
         async with self._conn() as conn:
+            # WAL mode allows concurrent reads alongside writes, preventing
+            # "database is locked" errors when multiple scheduler jobs run simultaneously.
+            await conn.execute("PRAGMA journal_mode=WAL")
+            await conn.execute("PRAGMA synchronous=NORMAL")
+            await conn.commit()
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS user_settings (
                     user_id INTEGER PRIMARY KEY,
