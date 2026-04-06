@@ -20,10 +20,7 @@ def main_menu_kb() -> InlineKeyboardMarkup:
             InlineKeyboardButton("🚨 بيع طوارئ",       callback_data="emergency:menu"),
             InlineKeyboardButton("📋 السجل",           callback_data="history"),
         ],
-        [
-            InlineKeyboardButton("⚙️ الإعدادات",       callback_data="menu:settings"),
-            InlineKeyboardButton("❓ كيف يعمل البوت",  callback_data="menu:info"),
-        ],
+        [InlineKeyboardButton("⚙️ الإعدادات", callback_data="menu:settings")],
     ])
 
 
