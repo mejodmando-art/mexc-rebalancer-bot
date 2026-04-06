@@ -1,6 +1,8 @@
 import asyncio
 import logging
+import os
 import re
+from aiohttp import web
 from telegram import Update
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
@@ -414,6 +416,21 @@ async def main():
         id="portfolio_tp_monitor",
         replace_existing=True,
     )
+    # Health check HTTP server — required by Koyeb to confirm the process is alive
+    port = int(os.environ.get("PORT", 8000))
+
+    async def _health(_request):
+        return web.Response(text="ok")
+
+    http_app = web.Application()
+    http_app.router.add_get("/", _health)
+    http_app.router.add_get("/health", _health)
+    runner = web.AppRunner(http_app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    logger.info(f"Health check server listening on port {port}")
+
     logger.info("🤖 Bot started polling...")
     async with app:
         await app.start()
@@ -427,6 +444,7 @@ async def main():
             await app.updater.stop()
             await app.stop()
             scheduler.shutdown(wait=False)
+            await runner.cleanup()
 
 
 if __name__ == "__main__":
