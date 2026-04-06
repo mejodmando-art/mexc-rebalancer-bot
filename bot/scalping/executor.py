@@ -23,17 +23,20 @@ from typing import Dict, Any
 logger = logging.getLogger(__name__)
 
 
-def _register_stop_loss(symbol: str, stop_price: float) -> Dict[str, Any]:
+async def _place_stop_loss(exchange, symbol: str, qty: float, stop_price: float) -> Dict[str, Any]:
     """
-    MEXC Spot does not support conditional (stop) orders via the API.
-    The stop loss is enforced in software by monitor.py, which checks
-    the price every 20 seconds and fires a market sell when hit.
+    Place a limit sell at the stop price on MEXC Spot.
 
-    This function returns a placeholder so the rest of the code can
-    store and reference the SL level without placing an exchange order.
+    MEXC Spot does not support conditional (stop) orders. A plain limit sell
+    at the SL price is the closest equivalent — it sits on the exchange and
+    executes automatically when price reaches it, even if the bot is offline.
+
+    Edge case: if price gaps below SL without touching it, the order won't
+    fill. This is rare on liquid coins but possible on smaller ones.
     """
-    logger.info(f"Executor: SL registered software-side for {symbol} @ {stop_price}")
-    return {"id": None, "stopPrice": stop_price, "type": "software_sl"}
+    order = await exchange.create_limit_sell_order(symbol, qty, stop_price)
+    logger.info(f"Executor: SL limit sell {symbol} qty={qty} @ {stop_price} → id={order.get('id')}")
+    return order
 
 
 async def execute_trade(setup: Dict[str, Any], exchange) -> Dict[str, Any]:
@@ -66,8 +69,12 @@ async def execute_trade(setup: Dict[str, Any], exchange) -> Dict[str, Any]:
         except Exception as e:
             logger.warning(f"Executor: T1 limit order failed for {symbol}: {e}")
 
-        # ── 3. Stop loss — software-side (MEXC Spot has no conditional orders) ──
-        sl_order = _register_stop_loss(symbol, stop_loss)
+        # ── 3. Stop loss — limit sell on MEXC at SL price ────────────────
+        sl_order = {}
+        try:
+            sl_order = await _place_stop_loss(exchange, symbol, filled_qty, stop_loss)
+        except Exception as e:
+            logger.warning(f"Executor: SL order failed for {symbol}: {e}")
 
         return {
             "status":        "ok",

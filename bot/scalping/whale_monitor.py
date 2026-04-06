@@ -22,13 +22,17 @@ from bot.database import db
 logger = logging.getLogger(__name__)
 
 
-def _update_stop_loss(symbol: str, stop_price: float) -> Dict[str, Any]:
+async def _place_stop_loss(exchange, symbol: str, qty: float, stop_price: float) -> Dict[str, Any]:
     """
-    MEXC Spot has no conditional orders. SL is tracked in software only.
-    Returns a placeholder so the trade dict stays consistent.
+    Place a limit sell at the stop price on MEXC Spot.
+
+    MEXC Spot does not support conditional orders. A plain limit sell at the
+    SL price sits on the exchange and executes automatically even if the bot
+    is offline.
     """
-    logger.info(f"WhaleMonitor: SL updated software-side for {symbol} @ {stop_price}")
-    return {"id": None, "stopPrice": stop_price, "type": "software_sl"}
+    order = await exchange.create_limit_sell_order(symbol, qty, stop_price)
+    logger.info(f"WhaleMonitor: SL limit sell {symbol} qty={qty} @ {stop_price} → id={order.get('id')}")
+    return order
 
 
 class WhaleTradeMonitor:
@@ -143,7 +147,17 @@ class WhaleTradeMonitor:
         target1 = trade["target1"]
         target2 = trade["target2"]
 
-        # ── Stop loss hit — software-side enforcement ─────────────────────
+        # ── Check if SL limit order was filled on MEXC ────────────────────
+        if trade.get("sl_order_id"):
+            try:
+                sl_order = await exchange.fetch_order(trade["sl_order_id"], symbol)
+                if sl_order.get("status") == "closed":
+                    await self._on_sl_hit(trade, price, exchange, bot, user_id)
+                    return
+            except Exception as e:
+                logger.warning(f"WhaleMonitor: could not fetch SL order for {symbol}: {e}")
+
+        # ── Fallback: price-based SL detection ───────────────────────────
         if price <= trade["stop_loss"]:
             await self._on_sl_hit(trade, price, exchange, bot, user_id)
             return
@@ -169,11 +183,11 @@ class WhaleTradeMonitor:
             return
 
     async def _on_sl_hit(self, trade, price, exchange, bot, user_id) -> None:
-        """Price dropped to or below SL — fire market sell immediately."""
+        """SL limit order filled on MEXC (or price-based fallback triggered)."""
         symbol = trade["symbol"]
         qty    = trade["qty_40pct"] if trade["t1_hit"] else trade["qty"]
 
-        # Cancel open T1/T2 limit orders before selling
+        # Cancel open T1/T2 orders
         for order_id in [trade.get("t1_order_id"), trade.get("t2_order_id")]:
             if order_id:
                 try:
@@ -181,11 +195,13 @@ class WhaleTradeMonitor:
                 except Exception:
                     pass
 
-        try:
-            await exchange.create_market_sell_order(symbol, qty)
-            logger.info(f"WhaleMonitor: SL hit {symbol} — market sell qty={qty} @ {price:.6g}")
-        except Exception as e:
-            logger.error(f"WhaleMonitor: SL market sell failed for {symbol}: {e}")
+        # Fallback: if SL order wasn't on exchange, fire market sell now
+        if not trade.get("sl_order_id"):
+            try:
+                await exchange.create_market_sell_order(symbol, qty)
+                logger.info(f"WhaleMonitor: SL fallback market sell {symbol} qty={qty} @ {price:.6g}")
+            except Exception as e:
+                logger.error(f"WhaleMonitor: SL fallback market sell failed for {symbol}: {e}")
 
         await self.remove_trade(symbol)
 
@@ -203,12 +219,24 @@ class WhaleTradeMonitor:
         target2 = trade["target2"]
         trade["t1_hit"] = True
 
-        # Move SL to breakeven (software-side)
+        # Cancel old SL (full qty) and place new one for remaining 40%
+        if trade.get("sl_order_id"):
+            try:
+                await exchange.cancel_order(trade["sl_order_id"], symbol)
+            except Exception:
+                pass
+
         new_sl = round(trade["entry_price"] * 0.999, 8)
         if new_sl > trade["stop_loss"]:
             trade["stop_loss"] = new_sl
-        _update_stop_loss(symbol, trade["stop_loss"])
-        logger.info(f"WhaleMonitor: {symbol} T1 filled — SL moved to {trade['stop_loss']:.6g}")
+
+        try:
+            sl_order = await _place_stop_loss(exchange, symbol, trade["qty_40pct"], trade["stop_loss"])
+            trade["sl_order_id"] = sl_order.get("id")
+            logger.info(f"WhaleMonitor: {symbol} T1 filled — new SL @ {trade['stop_loss']:.6g}")
+        except Exception as e:
+            logger.warning(f"WhaleMonitor: failed to place new SL after T1 for {symbol}: {e}")
+            trade["sl_order_id"] = None
 
         # Place T2 limit order for remaining 40%
         try:
