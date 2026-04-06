@@ -18,10 +18,21 @@ from telegram.ext import ContextTypes
 from bot.database import db
 from bot.mexc_client import MexcClient
 from bot.keyboards import back_to_main_kb
+from bot.grid.monitor import grid_monitor
 
 logger = logging.getLogger(__name__)
 
 _MIN_VALUE_USD = 1.0
+
+
+def _get_grid_locked_symbols(user_id: int) -> set:
+    """Return base coin symbols that have an active grid for this user."""
+    locked = set()
+    for grid in grid_monitor.active_grids.values():
+        if grid.get("user_id") == user_id:
+            base = grid["symbol"].split("/")[0]
+            locked.add(base)
+    return locked
 
 
 # ── Menu ───────────────────────────────────────────────────────────────────────
@@ -122,14 +133,23 @@ async def emergency_pick_coin_callback(update: Update, context: ContextTypes.DEF
     finally:
         await client.close()
 
+    locked = _get_grid_locked_symbols(user_id)
+
     coins = [
         sym for sym, data in portfolio.items()
-        if sym != "USDT" and data.get("value_usdt", 0) >= _MIN_VALUE_USD
+        if sym != "USDT"
+        and data.get("value_usdt", 0) >= _MIN_VALUE_USD
+        and sym not in locked
     ]
 
     if not coins:
+        locked_text = (
+            f"\n\n🔒 عملات مقفولة في شبكات: `{'، '.join(sorted(locked))}`"
+            if locked else ""
+        )
         await query.edit_message_text(
-            "⚠️ لا يوجد عملات بقيمة كافية للبيع.",
+            f"⚠️ لا يوجد عملات متاحة للبيع.{locked_text}",
+            parse_mode="Markdown",
             reply_markup=back_to_main_kb(),
         )
         return
@@ -141,8 +161,12 @@ async def emergency_pick_coin_callback(update: Update, context: ContextTypes.DEF
     context.user_data["_emg_coins"]     = coins
     context.user_data["_emg_selected"]  = set()
 
+    locked_note = ""
+    if locked:
+        locked_note = f"\n🔒 مستثنى (في شبكة): `{'، '.join(sorted(locked))}`"
+
     await query.edit_message_text(
-        _select_text(set(), portfolio),
+        _select_text(set(), portfolio) + locked_note,
         parse_mode="Markdown",
         reply_markup=_build_select_kb(coins, set(), portfolio),
     )

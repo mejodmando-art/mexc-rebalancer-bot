@@ -54,12 +54,28 @@ async def rebalance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
         capital = portfolio_info.get("capital_usdt", 0.0)
 
-        # Bug fix: never trade more than what's actually in the account.
-        # If a capital budget is set but the real balance is lower, use the real balance.
+        # Calculate the value of only the coins in this portfolio's allocation.
+        # This isolates each portfolio so rebalancing doesn't bleed into coins
+        # belonging to other portfolios or grid bots.
+        alloc_symbols = {a["symbol"] for a in allocations}
+        portfolio_value = sum(
+            portfolio.get(sym, {}).get("value_usdt", 0.0)
+            for sym in alloc_symbols
+        )
+        # Also include USDT that belongs to this portfolio's capital budget
+        usdt_in_account = portfolio.get("USDT", {}).get("value_usdt", 0.0)
+
+        # Use the portfolio's own coin values + proportional USDT share.
+        # If a capital budget is set, cap at that budget; otherwise use the
+        # actual value of the portfolio's coins.
         if capital > 0:
-            effective_total = min(capital, total_usdt)
+            effective_total = min(capital, portfolio_value + usdt_in_account)
         else:
-            effective_total = total_usdt
+            effective_total = portfolio_value + usdt_in_account
+
+        # Fallback: if portfolio coins have no value yet (all USDT), use total
+        if effective_total < 1.0 and total_usdt >= 1.0:
+            effective_total = min(capital, total_usdt) if capital > 0 else total_usdt
 
         # Block execution if the account is essentially empty (< $1)
         if effective_total < 1.0:
@@ -97,8 +113,8 @@ async def rebalance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         text = (
             f"⚡ *تحليل إعادة التوازن*\n\n"
             f"🗂 المحفظة: *{portfolio_name}*\n"
-            f"💰 رأس المال المخصص: `${effective_total:,.2f}`\n"
-            f"🏦 إجمالي الحساب: `${total_usdt:,.2f}`\n"
+            f"💰 قيمة عملات المحفظة: `${effective_total:,.2f}`\n"
+            f"🏦 إجمالي الحساب الكلي: `${total_usdt:,.2f}`\n"
             f"🎯 حد الانحراف: `{threshold}%`\n\n"
             "━━━━━━━━━━━━━━━━━━━━━\n"
             "📊 *تقرير الانحراف*\n"
