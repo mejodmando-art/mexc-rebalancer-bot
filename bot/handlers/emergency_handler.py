@@ -156,6 +156,10 @@ def _select_text(selected: set, portfolio: dict) -> str:
 # ── Pick coins (initial load) ──────────────────────────────────────────────────
 
 async def emergency_pick_coin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    بيع بالتحديد — يجيب كل عملات الحساب الفعلية من MEXC
+    (مش بس اللي في المحفظة المضبوطة في البوت).
+    """
     query = update.callback_query
     await query.answer()
     user_id = update.effective_user.id
@@ -165,7 +169,7 @@ async def emergency_pick_coin_callback(update: Update, context: ContextTypes.DEF
         await query.answer("❌ يجب ربط MEXC API أولاً", show_alert=True)
         return
 
-    await query.edit_message_text("⏳ جاري جلب رصيدك من MEXC...")
+    await query.edit_message_text("⏳ جاري جلب كل عملاتك من MEXC...")
 
     client = MexcClient(settings["mexc_api_key"], settings["mexc_secret_key"])
     try:
@@ -182,6 +186,7 @@ async def emergency_pick_coin_callback(update: Update, context: ContextTypes.DEF
     locked  = _get_grid_locked_symbols(user_id)
     network = NETWORK_COINS
 
+    # كل العملات الموجودة في الحساب فعلاً — مش بس المحفظة المضبوطة
     coins = [
         sym for sym, data in portfolio.items()
         if sym != "USDT"
@@ -192,8 +197,7 @@ async def emergency_pick_coin_callback(update: Update, context: ContextTypes.DEF
 
     if not coins:
         await query.edit_message_text(
-            "⚠️ لا يوجد عملات متاحة للبيع.\n\n"
-            f"🔒 مستثنى (شبكات/محافظ): `{'، '.join(sorted(network & set(portfolio.keys())))}`",
+            "⚠️ لا يوجد عملات متاحة للبيع.",
             parse_mode="Markdown",
             reply_markup=back_to_main_kb(),
         )
@@ -204,6 +208,7 @@ async def emergency_pick_coin_callback(update: Update, context: ContextTypes.DEF
     context.user_data["_emg_portfolio"] = portfolio
     context.user_data["_emg_coins"]     = coins
     context.user_data["_emg_selected"]  = set()
+    context.user_data["_emg_source"]    = "pick"
 
     excluded = sorted((locked | network) & set(portfolio.keys()))
     excluded_note = f"\n\n🔒 مستثنى: `{'، '.join(excluded)}`" if excluded else ""
@@ -362,9 +367,36 @@ async def emergency_confirm_selected_callback(update: Update, context: ContextTy
         reply_markup=InlineKeyboardMarkup([
             [
                 InlineKeyboardButton(f"✅ تأكيد بيع {len(selected)} عملة", callback_data="emergency:exec_selected"),
-                InlineKeyboardButton("❌ إلغاء", callback_data="emergency:pick_coin"),
+                InlineKeyboardButton("◀️ تعديل", callback_data="emergency:back_to_select"),
             ]
         ]),
+    )
+
+
+# ── Back to select screen (without re-fetching from MEXC) ─────────────────────
+
+async def emergency_back_to_select_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    portfolio = context.user_data.get("_emg_portfolio")
+    coins     = context.user_data.get("_emg_coins")
+    selected  = context.user_data.get("_emg_selected", set())
+
+    if not portfolio or not coins:
+        # State lost — restart
+        await query.edit_message_text(
+            "⚠️ انتهت الجلسة، ابدأ من جديد.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("◀️ رجوع", callback_data="emergency:menu")]
+            ]),
+        )
+        return
+
+    await query.edit_message_text(
+        _select_text(selected, portfolio),
+        parse_mode="Markdown",
+        reply_markup=_build_select_kb(coins, selected, portfolio),
     )
 
 
@@ -436,19 +468,71 @@ async def emergency_exec_selected_callback(update: Update, context: ContextTypes
 # ── Sell All ───────────────────────────────────────────────────────────────────
 
 async def emergency_confirm_all_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    بيع الكل — يجيب كل عملات الحساب من MEXC ويفتح شاشة التحديد
+    بكلهم محددين تلقائياً، فيقدر المستخدم يشيل أي عملة قبل التنفيذ.
+    """
     query = update.callback_query
     await query.answer()
+    user_id = update.effective_user.id
+
+    settings = await db.get_settings(user_id)
+    if not settings or not settings.get("mexc_api_key"):
+        await query.answer("❌ يجب ربط MEXC API أولاً", show_alert=True)
+        return
+
+    await query.edit_message_text("⏳ جاري جلب كل عملاتك من MEXC...")
+
+    client = MexcClient(settings["mexc_api_key"], settings["mexc_secret_key"])
+    try:
+        portfolio, _ = await client.get_portfolio()
+    except Exception as e:
+        await query.edit_message_text(
+            f"❌ تعذّر جلب الرصيد: {str(e)[:80]}",
+            reply_markup=back_to_main_kb(),
+        )
+        return
+    finally:
+        await client.close()
+
+    locked  = _get_grid_locked_symbols(user_id)
+    network = NETWORK_COINS
+
+    coins = [
+        sym for sym, data in portfolio.items()
+        if sym != "USDT"
+        and data.get("value_usdt", 0) >= _MIN_VALUE_USD
+        and sym not in locked
+        and sym not in network
+    ]
+
+    if not coins:
+        await query.edit_message_text(
+            "⚠️ لا يوجد عملات متاحة للبيع.",
+            reply_markup=back_to_main_kb(),
+        )
+        return
+
+    coins.sort(key=lambda s: portfolio[s]["value_usdt"], reverse=True)
+
+    # كل العملات محددة تلقائياً
+    selected = set(coins)
+    context.user_data["_emg_portfolio"] = portfolio
+    context.user_data["_emg_coins"]     = coins
+    context.user_data["_emg_selected"]  = selected
+    context.user_data["_emg_source"]    = "all"  # للرجوع الصحيح
+
+    excluded = sorted((locked | network) & set(portfolio.keys()))
+    excluded_note = f"\n\n🔒 مستثنى: `{'، '.join(excluded)}`" if excluded else ""
+
+    total = sum(portfolio[s]["value_usdt"] for s in selected)
     await query.edit_message_text(
-        "💥 *تأكيد بيع الكل*\n\n"
-        "⚠️ سيتم بيع *جميع العملات* في حسابك بسعر السوق فوراً.\n\n"
-        "هذا الإجراء لا يمكن التراجع عنه.",
+        f"💥 *بيع الكل — {len(coins)} عملة*\n\n"
+        f"💰 الإجمالي: `${total:.2f} USDT`\n\n"
+        "كل العملات محددة ✅ — اضغط على أي عملة لإلغاء تحديدها قبل التنفيذ:"
+        + excluded_note,
         parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("💥 نعم، بيع الكل", callback_data="emergency:exec_all"),
-                InlineKeyboardButton("❌ إلغاء", callback_data="emergency:menu"),
-            ]
-        ]),
+        reply_markup=_build_select_kb(coins, selected, portfolio),
     )
 
 

@@ -1,8 +1,8 @@
 import time
 import ccxt.async_support as ccxt
 
-# Minimum USD value to consider an asset worth pricing
-_MIN_VALUE_THRESHOLD = 0.5
+# Minimum USD value to include an asset — filters out dust/cents positions
+_MIN_VALUE_THRESHOLD = 1.0
 
 # Cache markets for 10 minutes — the list rarely changes and fetch_markets()
 # returns thousands of records on every call without caching.

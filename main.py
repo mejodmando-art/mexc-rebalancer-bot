@@ -109,6 +109,7 @@ from bot.handlers.emergency_handler import (
     emergency_pick_whale_callback,
     emergency_toggle_callback,
     emergency_confirm_selected_callback,
+    emergency_back_to_select_callback,
     emergency_exec_selected_callback,
     emergency_confirm_all_callback,
     emergency_exec_all_callback,
@@ -345,6 +346,7 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(emergency_pick_whale_callback,        pattern="^emergency:pick_whale$"))
     app.add_handler(CallbackQueryHandler(emergency_toggle_callback,            pattern="^emergency:toggle:"))
     app.add_handler(CallbackQueryHandler(emergency_confirm_selected_callback,  pattern="^emergency:confirm_selected$"))
+    app.add_handler(CallbackQueryHandler(emergency_back_to_select_callback,    pattern="^emergency:back_to_select$"))
     app.add_handler(CallbackQueryHandler(emergency_exec_selected_callback,     pattern="^emergency:exec_selected$"))
     app.add_handler(CallbackQueryHandler(emergency_confirm_all_callback,       pattern="^emergency:confirm_all$"))
     app.add_handler(CallbackQueryHandler(emergency_exec_all_callback,          pattern="^emergency:exec_all$"))
