@@ -47,6 +47,7 @@ from bot.handlers.grid_handler import (
     build_grid_conv,
     grid_menu_callback,
     grid_detail_callback,
+    grid_live_callback,
     grid_stop_callback,
     run_grid_monitor,
 )
@@ -67,9 +68,10 @@ from bot.handlers.portfolio_manager import (
 from bot.handlers.emergency_handler import (
     emergency_menu_callback,
     emergency_pick_coin_callback,
-    emergency_confirm_one_callback,
+    emergency_toggle_callback,
+    emergency_confirm_selected_callback,
+    emergency_exec_selected_callback,
     emergency_confirm_all_callback,
-    emergency_exec_one_callback,
     emergency_exec_all_callback,
 )
 from bot.scheduler import start_scheduler
@@ -210,6 +212,7 @@ def build_app() -> Application:
     # ── Grid Bot ───────────────────────────────────────────────────────────────
     app.add_handler(CallbackQueryHandler(grid_menu_callback,   pattern="^grid:menu$"))
     app.add_handler(CallbackQueryHandler(grid_detail_callback, pattern="^grid_detail:\\d+$"))
+    app.add_handler(CallbackQueryHandler(grid_live_callback,   pattern="^grid_live:\\d+$"))
     app.add_handler(CallbackQueryHandler(grid_stop_callback,   pattern="^grid_stop:\\d+$"))
 
     # ── Portfolio Management ───────────────────────────────────────────────────
@@ -225,12 +228,13 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(portfolio_sell_exec_callback,      pattern="^portfolio_sell_exec:"))
 
     # ── Emergency Sell ─────────────────────────────────────────────────────────
-    app.add_handler(CallbackQueryHandler(emergency_menu_callback,         pattern="^emergency:menu$"))
-    app.add_handler(CallbackQueryHandler(emergency_pick_coin_callback,    pattern="^emergency:pick_coin$"))
-    app.add_handler(CallbackQueryHandler(emergency_confirm_one_callback,  pattern="^emergency:confirm_one:"))
-    app.add_handler(CallbackQueryHandler(emergency_confirm_all_callback,  pattern="^emergency:confirm_all$"))
-    app.add_handler(CallbackQueryHandler(emergency_exec_one_callback,     pattern="^emergency:exec_one:"))
-    app.add_handler(CallbackQueryHandler(emergency_exec_all_callback,     pattern="^emergency:exec_all$"))
+    app.add_handler(CallbackQueryHandler(emergency_menu_callback,              pattern="^emergency:menu$"))
+    app.add_handler(CallbackQueryHandler(emergency_pick_coin_callback,         pattern="^emergency:pick_coin$"))
+    app.add_handler(CallbackQueryHandler(emergency_toggle_callback,            pattern="^emergency:toggle:"))
+    app.add_handler(CallbackQueryHandler(emergency_confirm_selected_callback,  pattern="^emergency:confirm_selected$"))
+    app.add_handler(CallbackQueryHandler(emergency_exec_selected_callback,     pattern="^emergency:exec_selected$"))
+    app.add_handler(CallbackQueryHandler(emergency_confirm_all_callback,       pattern="^emergency:confirm_all$"))
+    app.add_handler(CallbackQueryHandler(emergency_exec_all_callback,          pattern="^emergency:exec_all$"))
 
     return app
 

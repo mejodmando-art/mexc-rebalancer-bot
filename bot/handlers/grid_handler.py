@@ -53,6 +53,7 @@ def grid_menu_kb(grids: list) -> InlineKeyboardMarkup:
 
 def grid_detail_kb(grid_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📡 متابعة حية", callback_data=f"grid_live:{grid_id}")],
         [InlineKeyboardButton("🛑 إيقاف الشبكة", callback_data=f"grid_stop:{grid_id}")],
         [InlineKeyboardButton("◀️ رجوع", callback_data="grid:menu")],
     ])
@@ -80,6 +81,95 @@ def _fmt_grid(g: dict) -> str:
 
 # ── Menu handlers ──────────────────────────────────────────────────────────────
 
+def _fmt_grid_live(g: dict, price: float) -> str:
+    """
+    Build a live status screen for a grid showing:
+    - Current price vs center/upper/lower
+    - Each order level: filled ✅ / open 🟡 / below price 🔵 / above price ⚪
+    - Estimated PnL from filled trades
+    """
+    symbol   = g["symbol"]
+    center   = g["center"]
+    upper    = g["upper"]
+    lower    = g["lower"]
+    step_pct = g.get("step_pct", 0)
+    trades   = g.get("total_trades", 0)
+    shifts   = g.get("shifts", 0)
+
+    # Price position indicator
+    if price >= upper:
+        pos_icon = "🔺 فوق الحد العلوي"
+    elif price <= lower:
+        pos_icon = "🔻 تحت الحد السفلي"
+    elif price >= center:
+        pos_icon = "🟢 فوق المركز"
+    else:
+        pos_icon = "🔵 تحت المركز"
+
+    pct_from_center = ((price - center) / center) * 100
+
+    header = (
+        f"📡 *{symbol}* — متابعة حية\n\n"
+        f"💰 السعر الحالي: `${price:.6g}`  ({pct_from_center:+.2f}%)\n"
+        f"🎯 المركز:        `${center:.6g}`\n"
+        f"⬆️ الحد العلوي:  `${upper:.6g}`\n"
+        f"⬇️ الحد السفلي:  `${lower:.6g}`\n"
+        f"📍 الموقع: {pos_icon}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+    )
+
+    # Collect all order levels with their status
+    buy_orders  = g.get("buy_orders", [])
+    sell_orders = g.get("sell_orders", [])
+
+    # Build unified list sorted by price descending (highest first = closest to sell side)
+    all_orders = []
+    for o in buy_orders:
+        all_orders.append({"price": o["price"], "side": "buy", "status": o.get("status", "open")})
+    for o in sell_orders:
+        all_orders.append({"price": o["price"], "side": "sell", "status": o.get("status", "open")})
+
+    all_orders.sort(key=lambda x: x["price"], reverse=True)
+
+    orders_text = "*الأوردرات:*\n"
+    filled_count = 0
+    open_count   = 0
+
+    for o in all_orders:
+        op    = o["price"]
+        side  = o["side"]
+        st    = o["status"]
+        dist  = ((op - price) / price) * 100
+
+        if st == "filled":
+            icon = "✅"
+            filled_count += 1
+        elif side == "sell":
+            icon = "⚪"   # sell limit above price — waiting
+            open_count += 1
+        else:
+            icon = "🔵"   # buy limit below price — waiting
+            open_count += 1
+
+        side_ar = "بيع" if side == "sell" else "شراء"
+        orders_text += f"{icon} `${op:.6g}`  {side_ar}  ({dist:+.2f}%)\n"
+
+    # Estimated PnL: each completed round-trip (buy+sell) earns step_pct
+    completed_pairs = trades // 2 if trades > 0 else 0
+    size_per_level  = g.get("order_size_usdt", 0) / max(g.get("steps", 1), 1)
+    est_pnl         = completed_pairs * size_per_level * (step_pct / 100)
+
+    footer = (
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"✅ مُنفَّذ: `{filled_count}` أوردر  |  🟡 مفتوح: `{open_count}`\n"
+        f"🔄 صفقات كاملة: `{trades}`\n"
+        f"💵 ربح تقديري: `${est_pnl:.3f} USDT`\n"
+        f"🔀 انتقالات: `{shifts}`"
+    )
+
+    return header + orders_text + footer
+
+
 async def grid_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -106,6 +196,47 @@ async def grid_detail_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         return
     await query.edit_message_text(
         _fmt_grid(grid), parse_mode="Markdown", reply_markup=grid_detail_kb(grid_id)
+    )
+
+
+async def grid_live_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Fetch current price and show live grid status."""
+    query = update.callback_query
+    await query.answer("⏳ جاري التحديث...")
+    user_id = update.effective_user.id
+    grid_id = int(query.data.split(":")[1])
+
+    grid = grid_monitor.active_grids.get(grid_id)
+    if not grid or grid.get("user_id") != user_id:
+        await query.edit_message_text(
+            "❌ الشبكة غير موجودة.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ رجوع", callback_data="grid:menu")]])
+        )
+        return
+
+    settings = await db.get_settings(user_id)
+    client   = MexcClient(settings["mexc_api_key"], settings["mexc_secret_key"])
+    try:
+        ticker = await client.exchange.fetch_ticker(grid["symbol"])
+        price  = float(ticker.get("last") or 0)
+    except Exception as e:
+        await query.answer(f"❌ تعذّر جلب السعر: {str(e)[:60]}", show_alert=True)
+        return
+    finally:
+        await client.close()
+
+    if price <= 0:
+        await query.answer("❌ السعر غير متاح", show_alert=True)
+        return
+
+    await query.edit_message_text(
+        _fmt_grid_live(grid, price),
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔄 تحديث", callback_data=f"grid_live:{grid_id}")],
+            [InlineKeyboardButton("🛑 إيقاف الشبكة", callback_data=f"grid_stop:{grid_id}")],
+            [InlineKeyboardButton("◀️ رجوع", callback_data=f"grid_detail:{grid_id}")],
+        ]),
     )
 
 
