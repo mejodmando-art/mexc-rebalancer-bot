@@ -22,6 +22,31 @@ from bot.database import db
 logger = logging.getLogger(__name__)
 
 
+async def _place_stop_loss(exchange, symbol: str, qty: float, stop_price: float) -> Dict[str, Any]:
+    """
+    Place a stop-loss sell order on MEXC Spot.
+
+    MEXC Spot requires STOP_LOSS_LIMIT (not stop-market). The limit price is
+    set 0.3% below the stop trigger so the order fills immediately when hit.
+    """
+    limit_price = round(stop_price * 0.997, 8)
+    try:
+        order = await exchange.create_order(
+            symbol,
+            "STOP_LOSS_LIMIT",
+            "sell",
+            qty,
+            limit_price,
+            params={"stopPrice": stop_price},
+        )
+        return order
+    except Exception as e:
+        logger.warning(f"WhaleMonitor: STOP_LOSS_LIMIT failed for {symbol}: {e} — trying limit fallback")
+
+    order = await exchange.create_limit_sell_order(symbol, qty, limit_price)
+    return order
+
+
 class WhaleTradeMonitor:
     def __init__(self):
         self.open_trades: Dict[str, Dict[str, Any]] = {}
@@ -169,9 +194,7 @@ class WhaleTradeMonitor:
         # New SL for remaining 40%
         sl_order = {}
         try:
-            sl_order = await exchange.createStopMarketOrder(
-                symbol, "sell", trade["qty_40pct"], trade["stop_loss"]
-            )
+            sl_order = await _place_stop_loss(exchange, symbol, trade["qty_40pct"], trade["stop_loss"])
             trade["sl_order_id"] = sl_order.get("id")
             logger.info(f"WhaleMonitor: {symbol} T1 filled — new SL @ {trade['stop_loss']:.6g}")
         except Exception as e:

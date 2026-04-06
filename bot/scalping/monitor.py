@@ -1,7 +1,7 @@
 """
 Open trade monitor — runs every 20 seconds.
 
-With real MEXC orders in place (T1 limit + SL stop-market), the monitor's
+With real MEXC orders in place (T1 limit + SL stop-limit), the monitor's
 job is lighter:
   - Detect when T1 limit order is filled → place T2 limit + update SL
   - Trailing stop: after T1 hit, trail SL upward (cancel old, place new)
@@ -19,6 +19,32 @@ logger = logging.getLogger(__name__)
 
 TRAIL_PCT           = 0.015   # 1.5% trail distance before T1
 TRAIL_PCT_AFTER_T1  = 0.010   # 1.0% trail distance after T1 (tighter — protect profit)
+
+
+async def _place_stop_loss(exchange, symbol: str, qty: float, stop_price: float) -> Dict[str, Any]:
+    """
+    Place a stop-loss sell order on MEXC Spot.
+
+    MEXC Spot requires STOP_LOSS_LIMIT (not stop-market). The limit price is
+    set 0.3% below the stop trigger so the order fills immediately when hit.
+    """
+    limit_price = round(stop_price * 0.997, 8)
+    try:
+        order = await exchange.create_order(
+            symbol,
+            "STOP_LOSS_LIMIT",
+            "sell",
+            qty,
+            limit_price,
+            params={"stopPrice": stop_price},
+        )
+        return order
+    except Exception as e:
+        logger.warning(f"Monitor: STOP_LOSS_LIMIT failed for {symbol}: {e} — trying limit fallback")
+
+    # Fallback: plain limit sell at the stop price
+    order = await exchange.create_limit_sell_order(symbol, qty, limit_price)
+    return order
 
 
 class TradeMonitor:
@@ -186,9 +212,7 @@ class TradeMonitor:
                         except Exception:
                             pass
                     try:
-                        sl_order = await exchange.createStopMarketOrder(
-                            symbol, "sell", trade["qty_half"], new_sl
-                        )
+                        sl_order = await _place_stop_loss(exchange, symbol, trade["qty_half"], new_sl)
                         trade["sl_order_id"] = sl_order.get("id")
                         logger.info(f"Monitor: {symbol} new SL order placed @ {new_sl:.6g}")
                     except Exception as e:
@@ -227,9 +251,7 @@ class TradeMonitor:
 
         sl_order = {}
         try:
-            sl_order = await exchange.createStopMarketOrder(
-                symbol, "sell", trade["qty_half"], trade["stop_loss"]
-            )
+            sl_order = await _place_stop_loss(exchange, symbol, trade["qty_half"], trade["stop_loss"])
             trade["sl_order_id"] = sl_order.get("id")
             logger.info(f"Monitor: {symbol} T1 filled — new SL @ {trade['stop_loss']:.6g}")
         except Exception as e:

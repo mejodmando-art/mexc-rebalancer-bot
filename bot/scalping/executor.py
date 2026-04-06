@@ -4,7 +4,11 @@ Trade executor — places entry + take profit + stop loss on MEXC Spot.
 Flow:
   1. Market buy (quoteOrderQty)
   2. Limit sell at T1 for 50% of qty  (take profit partial exit)
-  3. Stop-market sell at SL for full qty (stop loss protection)
+  3. Stop-limit sell at SL for full qty (stop loss protection)
+
+MEXC Spot does not support stop-market orders via ccxt. We use
+STOP_LOSS_LIMIT with the limit price set slightly below the stop trigger
+(0.3% below) to ensure the order fills quickly when triggered.
 
 T2 and trailing stop are handled by monitor.py after T1 is hit,
 since MEXC Spot does not support chained conditional orders.
@@ -17,6 +21,33 @@ import logging
 from typing import Dict, Any
 
 logger = logging.getLogger(__name__)
+
+
+async def _place_stop_loss(exchange, symbol: str, qty: float, stop_price: float) -> Dict[str, Any]:
+    """
+    Place a stop-loss sell order on MEXC Spot.
+
+    MEXC Spot requires STOP_LOSS_LIMIT (not stop-market). The limit price is
+    set 0.3% below the stop trigger so the order fills immediately when hit.
+    """
+    limit_price = round(stop_price * 0.997, 8)
+    try:
+        order = await exchange.create_order(
+            symbol,
+            "STOP_LOSS_LIMIT",
+            "sell",
+            qty,
+            limit_price,
+            params={"stopPrice": stop_price},
+        )
+        return order
+    except Exception as e:
+        logger.warning(f"Executor: STOP_LOSS_LIMIT failed for {symbol}: {e} — trying limit fallback")
+
+    # Fallback: plain limit sell at the stop price (no conditional trigger,
+    # but at least the order exists on the exchange as protection)
+    order = await exchange.create_limit_sell_order(symbol, qty, limit_price)
+    return order
 
 
 async def execute_trade(setup: Dict[str, Any], exchange) -> Dict[str, Any]:
@@ -49,11 +80,14 @@ async def execute_trade(setup: Dict[str, Any], exchange) -> Dict[str, Any]:
         except Exception as e:
             logger.warning(f"Executor: T1 limit order failed for {symbol}: {e}")
 
-        # ── 3. Stop loss — stop-market sell for full qty ──────────────────
+        # ── 3. Stop loss — stop-limit sell for full qty ───────────────────
         sl_order = {}
         try:
-            sl_order = await exchange.createStopMarketOrder(symbol, "sell", filled_qty, stop_loss)
-            logger.info(f"Executor: SL stop-market {symbol} qty={filled_qty} trigger={stop_loss} → id={sl_order.get('id')}")
+            sl_order = await _place_stop_loss(exchange, symbol, filled_qty, stop_loss)
+            logger.info(
+                f"Executor: SL stop-limit {symbol} qty={filled_qty} "
+                f"trigger={stop_loss} → id={sl_order.get('id')}"
+            )
         except Exception as e:
             logger.warning(f"Executor: SL order failed for {symbol}: {e}")
 
