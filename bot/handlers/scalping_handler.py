@@ -629,15 +629,69 @@ async def _send_signal(
         logger.error(f"Signal notify failed for {user_id}: {e}")
 
 
-# ── Manual sell — pick trade ──────────────────────────────────────────────────
+# ── Manual sell — multi-select ────────────────────────────────────────────────
+
+_SCALPING_SEL_KEY = "scalping_sell_selected"  # set of selected symbols in user_data
+
+
+def _scalping_sell_kb(trades: list, selected: set) -> InlineKeyboardMarkup:
+    """
+    Build the multi-select keyboard.
+    Each trade row is a toggle button: ☑ if selected, ☐ if not.
+    Bottom row: select-all / deselect-all + sell button + back.
+    """
+    buttons = []
+    for t in trades:
+        sym    = t["symbol"]
+        t1_hit = "✅" if t.get("t1_hit") else "⏳"
+        check  = "☑" if sym in selected else "☐"
+        buttons.append([
+            InlineKeyboardButton(
+                f"{check} {sym}  {t1_hit}",
+                callback_data=f"scalping:sell_toggle:{sym}",
+            )
+        ])
+
+    all_syms  = {t["symbol"] for t in trades}
+    all_sel   = all_syms == selected and len(selected) > 0
+    sel_count = len(selected)
+
+    # Select-all / deselect-all toggle
+    if all_sel:
+        toggle_btn = InlineKeyboardButton("☐ إلغاء تحديد الكل", callback_data="scalping:sell_selall:0")
+    else:
+        toggle_btn = InlineKeyboardButton("☑ تحديد الكل", callback_data="scalping:sell_selall:1")
+
+    sell_label = f"🔴 بيع المحدد ({sel_count})" if sel_count > 0 else "🔴 بيع المحدد"
+    sell_btn   = InlineKeyboardButton(sell_label, callback_data="scalping:sell_multi_confirm")
+
+    buttons.append([toggle_btn])
+    if sel_count > 0:
+        buttons.append([sell_btn])
+    buttons.append([InlineKeyboardButton("◀️ رجوع", callback_data="scalping:menu")])
+
+    return InlineKeyboardMarkup(buttons)
+
+
+def _scalping_sell_text(trades: list, selected: set) -> str:
+    count = len(selected)
+    hint  = f"محدد: *{count}* من {len(trades)}" if count > 0 else "لم تحدد أي صفقة بعد"
+    return (
+        "🔴 *بيع صفقات Scalping*\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        "اضغط على الصفقة لتحديدها أو إلغاء تحديدها.\n"
+        "✅ = هدف 1 تحقق  ·  ⏳ = لم يتحقق بعد\n\n"
+        f"{hint}"
+    )
+
 
 async def scalping_sell_pick_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show list of open scalping trades to pick one for manual sell."""
+    """Entry point: show multi-select list, reset selection."""
     query = update.callback_query
     await query.answer()
     user_id = update.effective_user.id
 
-    rows = await db.load_scalping_trades()
+    rows   = await db.load_scalping_trades()
     trades = [r for r in rows if r.get("user_id") == user_id and r.get("strategy") != "whale"]
 
     if not trades:
@@ -652,78 +706,105 @@ async def scalping_sell_pick_callback(update: Update, context: ContextTypes.DEFA
         )
         return
 
-    buttons = []
-    for t in trades:
-        sym = t["symbol"]
-        t1_mark = "✅" if t.get("t1_hit") else "⏳"
-        label = f"🔴 {sym}  {t1_mark}"
-        buttons.append([InlineKeyboardButton(label, callback_data=f"scalping:sell_confirm:{sym}")])
-    buttons.append([InlineKeyboardButton("◀️ رجوع", callback_data="scalping:menu")])
+    # Reset selection on every fresh open
+    context.user_data[_SCALPING_SEL_KEY] = set()
 
     await query.edit_message_text(
-        "🔴 *بيع صفقة يدوياً*\n\n"
-        "━━━━━━━━━━━━━━━━━━━━━\n"
-        "اختر الصفقة التي تريد إغلاقها:\n\n"
-        "✅ = هدف 1 تحقق  ·  ⏳ = لم يتحقق بعد",
+        _scalping_sell_text(trades, set()),
         parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup(buttons),
+        reply_markup=_scalping_sell_kb(trades, set()),
+    )
+
+
+async def scalping_sell_toggle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Toggle one symbol in the selection."""
+    query   = update.callback_query
+    await query.answer()
+    user_id = update.effective_user.id
+    symbol  = query.data.split(":", 2)[2]
+
+    selected: set = context.user_data.get(_SCALPING_SEL_KEY, set())
+    if symbol in selected:
+        selected.discard(symbol)
+    else:
+        selected.add(symbol)
+    context.user_data[_SCALPING_SEL_KEY] = selected
+
+    rows   = await db.load_scalping_trades()
+    trades = [r for r in rows if r.get("user_id") == user_id and r.get("strategy") != "whale"]
+
+    await query.edit_message_text(
+        _scalping_sell_text(trades, selected),
+        parse_mode="Markdown",
+        reply_markup=_scalping_sell_kb(trades, selected),
+    )
+
+
+async def scalping_sell_selall_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Select all or deselect all."""
+    query   = update.callback_query
+    await query.answer()
+    user_id = update.effective_user.id
+    select  = query.data.split(":")[-1] == "1"
+
+    rows   = await db.load_scalping_trades()
+    trades = [r for r in rows if r.get("user_id") == user_id and r.get("strategy") != "whale"]
+
+    selected = {t["symbol"] for t in trades} if select else set()
+    context.user_data[_SCALPING_SEL_KEY] = selected
+
+    await query.edit_message_text(
+        _scalping_sell_text(trades, selected),
+        parse_mode="Markdown",
+        reply_markup=_scalping_sell_kb(trades, selected),
     )
 
 
 async def scalping_sell_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show trade details and ask for sell confirmation."""
-    query = update.callback_query
+    """Show confirmation screen listing all selected symbols."""
+    query    = update.callback_query
     await query.answer()
-    user_id = update.effective_user.id
-    symbol = query.data.split(":", 2)[2]
+    user_id  = update.effective_user.id
+    selected: set = context.user_data.get(_SCALPING_SEL_KEY, set())
 
-    trade = trade_monitor.open_trades.get(symbol)
-    if not trade:
-        # Try loading from DB
-        rows = await db.load_scalping_trades()
-        for r in rows:
-            if r["symbol"] == symbol and r.get("user_id") == user_id:
-                trade = r
-                break
-
-    if not trade:
-        await query.answer("❌ الصفقة غير موجودة أو أُغلقت بالفعل", show_alert=True)
+    if not selected:
+        await query.answer("لم تحدد أي صفقة", show_alert=True)
         return
 
-    entry  = float(trade["entry_price"])
-    sl     = float(trade["stop_loss"])
-    t1     = float(trade["target1"])
-    t2     = float(trade["target2"])
-    t1_hit = bool(trade.get("t1_hit"))
-    qty    = float(trade.get("qty_half") if t1_hit else trade.get("qty", 0))
+    lines = "\n".join(f"  • `{s}`" for s in sorted(selected))
+    count = len(selected)
 
     await query.edit_message_text(
-        f"⚠️ *تأكيد بيع {symbol}*\n\n"
+        f"⚠️ *تأكيد البيع*\n\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
-        f"🟢 دخول : `${entry:.6g}`\n"
-        f"🎯 هدف 1: `${t1:.6g}`  {'✅ تحقق' if t1_hit else '⏳ لم يتحقق'}\n"
-        f"🏆 هدف 2: `${t2:.6g}`\n"
-        f"🛑 وقف  : `${sl:.6g}`\n\n"
-        f"📦 الكمية المتبقية: `{qty:.6g}`\n\n"
-        "سيتم إلغاء جميع الأوردرات المفتوحة وبيع الكمية بسعر السوق.",
+        f"سيتم إغلاق *{count}* صفقة بسعر السوق:\n\n"
+        f"{lines}\n\n"
+        "سيتم إلغاء جميع الأوردرات المفتوحة لكل صفقة قبل البيع.",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup([
             [
-                InlineKeyboardButton("✅ تأكيد البيع", callback_data=f"scalping:sell_exec:{symbol}"),
-                InlineKeyboardButton("❌ إلغاء", callback_data="scalping:sell_pick"),
+                InlineKeyboardButton("✅ تأكيد البيع", callback_data="scalping:sell_exec_multi"),
+                InlineKeyboardButton("❌ إلغاء",        callback_data="scalping:sell_pick"),
             ]
         ]),
     )
 
 
 async def scalping_sell_exec_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Execute manual market sell for a scalping trade."""
-    query = update.callback_query
+    """Execute market sell for all selected scalping trades."""
+    query    = update.callback_query
     await query.answer()
-    user_id = update.effective_user.id
-    symbol = query.data.split(":", 2)[2]
+    user_id  = update.effective_user.id
+    selected: set = context.user_data.get(_SCALPING_SEL_KEY, set())
 
-    await query.edit_message_text(f"⏳ جاري إغلاق صفقة `{symbol}`...", parse_mode="Markdown")
+    if not selected:
+        await query.answer("لم تحدد أي صفقة", show_alert=True)
+        return
+
+    await query.edit_message_text(
+        f"⏳ جاري إغلاق {len(selected)} صفقة...",
+        parse_mode="Markdown",
+    )
 
     settings = await db.get_settings(user_id)
     if not settings or not settings.get("mexc_api_key"):
@@ -735,79 +816,68 @@ async def scalping_sell_exec_callback(update: Update, context: ContextTypes.DEFA
         )
         return
 
-    trade = trade_monitor.open_trades.get(symbol)
-    if not trade:
-        rows = await db.load_scalping_trades()
-        for r in rows:
-            if r["symbol"] == symbol and r.get("user_id") == user_id:
-                trade = dict(r)
-                break
-
-    if not trade:
-        await query.edit_message_text(
-            f"❌ الصفقة `{symbol}` غير موجودة أو أُغلقت بالفعل.",
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("◀️ رجوع", callback_data="scalping:menu")]
-            ]),
-        )
-        return
+    rows = await db.load_scalping_trades()
+    trade_map = {
+        r["symbol"]: dict(r)
+        for r in rows
+        if r.get("user_id") == user_id and r["symbol"] in selected
+    }
+    # Also check in-memory monitor (may have fresher state)
+    for sym, t in trade_monitor.open_trades.items():
+        if sym in selected:
+            trade_map[sym] = t
 
     client = MexcClient(settings["mexc_api_key"], settings["mexc_secret_key"])
+    results = []
     try:
-        # Cancel all open orders first
-        await trade_monitor.cancel_all_orders(trade, client.exchange)
+        for symbol in sorted(selected):
+            trade = trade_map.get(symbol)
+            if not trade:
+                results.append(f"⚠️ `{symbol}` — غير موجودة")
+                continue
+            try:
+                await trade_monitor.cancel_all_orders(trade, client.exchange)
+                base      = symbol.replace("/USDT", "")
+                balance   = await client.exchange.fetch_balance()
+                free_qty  = float(balance.get("free", {}).get(base, 0) or 0)
 
-        # Determine remaining qty from actual balance
-        t1_hit = bool(trade.get("t1_hit"))
-        base = symbol.replace("/USDT", "")
-        balance = await client.exchange.fetch_balance()
-        free_qty = float(balance.get("free", {}).get(base, 0) or 0)
+                if free_qty < 1e-8:
+                    await trade_monitor.remove_trade(symbol)
+                    results.append(f"⚠️ `{symbol}` — رصيد صفر")
+                    continue
 
-        if free_qty < 1e-8:
-            await query.edit_message_text(
-                f"⚠️ *{symbol}* — رصيد صفر\n\nلا يوجد رصيد لبيعه. ربما أُغلقت الصفقة بالفعل.",
-                parse_mode="Markdown",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("◀️ رجوع", callback_data="scalping:menu")]
-                ]),
-            )
-            await trade_monitor.remove_trade(symbol)
-            return
+                sell_order = await client.exchange.create_market_sell_order(symbol, free_qty)
+                sell_price = float(
+                    sell_order.get("average") or sell_order.get("price") or trade["entry_price"]
+                )
+                entry   = float(trade["entry_price"])
+                pnl_pct = ((sell_price - entry) / entry) * 100
+                icon    = "🟢" if pnl_pct >= 0 else "🔴"
 
-        sell_order = await client.exchange.create_market_sell_order(symbol, free_qty)
-        sell_price = float(sell_order.get("average") or sell_order.get("price") or trade["entry_price"])
-        entry = float(trade["entry_price"])
-        pnl_pct = ((sell_price - entry) / entry) * 100
+                await trade_monitor.remove_trade(symbol)
+                results.append(f"{icon} `{symbol}` — `{pnl_pct:+.2f}%`  @ `${sell_price:.6g}`")
+                logger.info(
+                    f"Multi-sell {symbol} user={user_id}: qty={free_qty} @ {sell_price:.6g} pnl={pnl_pct:.2f}%"
+                )
+            except Exception as e:
+                logger.error(f"Multi-sell failed {symbol} user={user_id}: {e}")
+                results.append(f"❌ `{symbol}` — `{str(e)[:60]}`")
 
-        await trade_monitor.remove_trade(symbol)
-
-        pnl_icon = "🟢" if pnl_pct >= 0 else "🔴"
-        await query.edit_message_text(
-            f"✅ *{symbol}* — تم البيع اليدوي\n\n"
-            f"━━━━━━━━━━━━━━━━━━━━━\n"
-            f"💰 سعر البيع: `${sell_price:.6g}`\n"
-            f"🟢 سعر الدخول: `${entry:.6g}`\n"
-            f"{pnl_icon} الربح/الخسارة: `{pnl_pct:+.2f}%`\n"
-            f"📦 الكمية: `{free_qty:.6g}`",
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("◀️ رجوع للـ Scalping", callback_data="scalping:menu")]
-            ]),
-        )
-        logger.info(f"Manual sell {symbol} for user {user_id}: qty={free_qty} @ {sell_price:.6g} pnl={pnl_pct:.2f}%")
-
-    except Exception as e:
-        logger.error(f"Manual sell failed {symbol} for user {user_id}: {e}")
-        await query.edit_message_text(
-            f"❌ *فشل البيع*\n\n`{str(e)[:120]}`",
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("◀️ رجوع", callback_data="scalping:menu")]
-            ]),
-        )
     finally:
         await client.close()
+
+    context.user_data[_SCALPING_SEL_KEY] = set()
+
+    summary = "\n".join(results)
+    await query.edit_message_text(
+        f"📋 *نتائج البيع*\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"{summary}",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("◀️ رجوع للـ Scalping", callback_data="scalping:menu")]
+        ]),
+    )
 
 
 async def _send_orders_status(bot, user_id: int, setup: dict, result: dict) -> None:

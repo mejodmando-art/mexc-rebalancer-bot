@@ -359,12 +359,59 @@ async def whale_open_trades_callback(update: Update, context: ContextTypes.DEFAU
 
 # ── Manual sell — Whale ────────────────────────────────────────────────────────
 
+_WHALE_SEL_KEY = "whale_sell_selected"  # set of selected symbols in user_data
+
+
+def _whale_sell_kb(trades: list, selected: set) -> InlineKeyboardMarkup:
+    buttons = []
+    for t in trades:
+        sym    = t["symbol"]
+        t1_hit = "✅" if t.get("t1_hit") else "⏳"
+        check  = "☑" if sym in selected else "☐"
+        buttons.append([
+            InlineKeyboardButton(
+                f"{check} {sym}  {t1_hit}",
+                callback_data=f"whale:sell_toggle:{sym}",
+            )
+        ])
+
+    all_syms = {t["symbol"] for t in trades}
+    all_sel  = all_syms == selected and len(selected) > 0
+    sel_count = len(selected)
+
+    if all_sel:
+        toggle_btn = InlineKeyboardButton("☐ إلغاء تحديد الكل", callback_data="whale:sell_selall:0")
+    else:
+        toggle_btn = InlineKeyboardButton("☑ تحديد الكل", callback_data="whale:sell_selall:1")
+
+    sell_label = f"🔴 بيع المحدد ({sel_count})" if sel_count > 0 else "🔴 بيع المحدد"
+    sell_btn   = InlineKeyboardButton(sell_label, callback_data="whale:sell_multi_confirm")
+
+    buttons.append([toggle_btn])
+    if sel_count > 0:
+        buttons.append([sell_btn])
+    buttons.append([InlineKeyboardButton("◀️ رجوع", callback_data="whale:menu")])
+    return InlineKeyboardMarkup(buttons)
+
+
+def _whale_sell_text(trades: list, selected: set) -> str:
+    count = len(selected)
+    hint  = f"محدد: *{count}* من {len(trades)}" if count > 0 else "لم تحدد أي صفقة بعد"
+    return (
+        "🔴 *بيع صفقات Whale*\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        "اضغط على الصفقة لتحديدها أو إلغاء تحديدها.\n"
+        "✅ = هدف 1 تحقق  ·  ⏳ = لم يتحقق بعد\n\n"
+        f"{hint}"
+    )
+
+
 async def whale_sell_pick_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     user_id = update.effective_user.id
 
-    rows = await db.load_scalping_trades()
+    rows   = await db.load_scalping_trades()
     trades = [r for r in rows if r.get("user_id") == user_id and r.get("strategy") == "whale"]
 
     if not trades:
@@ -379,72 +426,98 @@ async def whale_sell_pick_callback(update: Update, context: ContextTypes.DEFAULT
         )
         return
 
-    buttons = []
-    for t in trades:
-        sym = t["symbol"]
-        t1_mark = "✅" if t.get("t1_hit") else "⏳"
-        buttons.append([InlineKeyboardButton(f"🔴 {sym}  {t1_mark}", callback_data=f"whale:sell_confirm:{sym}")])
-    buttons.append([InlineKeyboardButton("◀️ رجوع", callback_data="whale:menu")])
+    context.user_data[_WHALE_SEL_KEY] = set()
+    await query.edit_message_text(
+        _whale_sell_text(trades, set()),
+        parse_mode="Markdown",
+        reply_markup=_whale_sell_kb(trades, set()),
+    )
+
+
+async def whale_sell_toggle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query   = update.callback_query
+    await query.answer()
+    user_id = update.effective_user.id
+    symbol  = query.data.split(":", 2)[2]
+
+    selected: set = context.user_data.get(_WHALE_SEL_KEY, set())
+    if symbol in selected:
+        selected.discard(symbol)
+    else:
+        selected.add(symbol)
+    context.user_data[_WHALE_SEL_KEY] = selected
+
+    rows   = await db.load_scalping_trades()
+    trades = [r for r in rows if r.get("user_id") == user_id and r.get("strategy") == "whale"]
 
     await query.edit_message_text(
-        "🔴 *بيع صفقة Whale يدوياً*\n\n"
-        "━━━━━━━━━━━━━━━━━━━━━\n"
-        "اختر الصفقة التي تريد إغلاقها:\n\n"
-        "✅ = هدف 1 تحقق  ·  ⏳ = لم يتحقق بعد",
+        _whale_sell_text(trades, selected),
         parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup(buttons),
+        reply_markup=_whale_sell_kb(trades, selected),
+    )
+
+
+async def whale_sell_selall_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query   = update.callback_query
+    await query.answer()
+    user_id = update.effective_user.id
+    select  = query.data.split(":")[-1] == "1"
+
+    rows   = await db.load_scalping_trades()
+    trades = [r for r in rows if r.get("user_id") == user_id and r.get("strategy") == "whale"]
+
+    selected = {t["symbol"] for t in trades} if select else set()
+    context.user_data[_WHALE_SEL_KEY] = selected
+
+    await query.edit_message_text(
+        _whale_sell_text(trades, selected),
+        parse_mode="Markdown",
+        reply_markup=_whale_sell_kb(trades, selected),
     )
 
 
 async def whale_sell_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
+    query    = update.callback_query
     await query.answer()
-    user_id = update.effective_user.id
-    symbol = query.data.split(":", 2)[2]
+    selected: set = context.user_data.get(_WHALE_SEL_KEY, set())
 
-    trade = whale_monitor.open_trades.get(symbol)
-    if not trade:
-        rows = await db.load_scalping_trades()
-        for r in rows:
-            if r["symbol"] == symbol and r.get("user_id") == user_id:
-                trade = r
-                break
-
-    if not trade:
-        await query.answer("❌ الصفقة غير موجودة أو أُغلقت بالفعل", show_alert=True)
+    if not selected:
+        await query.answer("لم تحدد أي صفقة", show_alert=True)
         return
 
-    entry  = float(trade["entry_price"])
-    sl     = float(trade["stop_loss"])
-    t1     = float(trade["target1"])
-    t2     = float(trade["target2"])
-    t1_hit = bool(trade.get("t1_hit"))
+    lines = "\n".join(f"  • `{s}`" for s in sorted(selected))
+    count = len(selected)
 
     await query.edit_message_text(
-        f"⚠️ *تأكيد بيع {symbol} — Whale*\n\n"
+        f"⚠️ *تأكيد البيع — Whale*\n\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
-        f"🟢 دخول : `${entry:.6g}`\n"
-        f"🎯 هدف 1: `${t1:.6g}`  {'✅ تحقق' if t1_hit else '⏳ لم يتحقق'}\n"
-        f"🏆 هدف 2: `${t2:.6g}`\n"
-        f"🛑 وقف  : `${sl:.6g}`\n\n"
-        "سيتم إلغاء جميع الأوردرات وبيع الكمية بسعر السوق.",
+        f"سيتم إغلاق *{count}* صفقة بسعر السوق:\n\n"
+        f"{lines}\n\n"
+        "سيتم إلغاء جميع الأوردرات المفتوحة لكل صفقة قبل البيع.",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup([
             [
-                InlineKeyboardButton("✅ تأكيد البيع", callback_data=f"whale:sell_exec:{symbol}"),
-                InlineKeyboardButton("❌ إلغاء", callback_data="whale:sell_pick"),
+                InlineKeyboardButton("✅ تأكيد البيع", callback_data="whale:sell_exec_multi"),
+                InlineKeyboardButton("❌ إلغاء",        callback_data="whale:sell_pick"),
             ]
         ]),
     )
 
 
 async def whale_sell_exec_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
+    query    = update.callback_query
     await query.answer()
-    user_id = update.effective_user.id
-    symbol = query.data.split(":", 2)[2]
+    user_id  = update.effective_user.id
+    selected: set = context.user_data.get(_WHALE_SEL_KEY, set())
 
-    await query.edit_message_text(f"⏳ جاري إغلاق صفقة Whale `{symbol}`...", parse_mode="Markdown")
+    if not selected:
+        await query.answer("لم تحدد أي صفقة", show_alert=True)
+        return
+
+    await query.edit_message_text(
+        f"⏳ جاري إغلاق {len(selected)} صفقة Whale...",
+        parse_mode="Markdown",
+    )
 
     settings = await db.get_settings(user_id)
     if not settings or not settings.get("mexc_api_key"):
@@ -454,72 +527,71 @@ async def whale_sell_exec_callback(update: Update, context: ContextTypes.DEFAULT
         )
         return
 
-    trade = whale_monitor.open_trades.get(symbol)
-    if not trade:
-        rows = await db.load_scalping_trades()
-        for r in rows:
-            if r["symbol"] == symbol and r.get("user_id") == user_id:
-                trade = dict(r)
-                break
+    rows = await db.load_scalping_trades()
+    trade_map = {
+        r["symbol"]: dict(r)
+        for r in rows
+        if r.get("user_id") == user_id and r["symbol"] in selected
+    }
+    for sym, t in whale_monitor.open_trades.items():
+        if sym in selected:
+            trade_map[sym] = t
 
-    if not trade:
-        await query.edit_message_text(
-            f"❌ الصفقة `{symbol}` غير موجودة أو أُغلقت بالفعل.",
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ رجوع", callback_data="whale:menu")]]),
-        )
-        return
+    from bot.scalping.monitor import trade_monitor as scalping_monitor
 
-    client = MexcClient(settings["mexc_api_key"], settings["mexc_secret_key"])
+    client  = MexcClient(settings["mexc_api_key"], settings["mexc_secret_key"])
+    results = []
     try:
-        # Cancel all open orders
-        from bot.scalping.monitor import trade_monitor as scalping_monitor
-        await scalping_monitor.cancel_all_orders(trade, client.exchange)
+        for symbol in sorted(selected):
+            trade = trade_map.get(symbol)
+            if not trade:
+                results.append(f"⚠️ `{symbol}` — غير موجودة")
+                continue
+            try:
+                await scalping_monitor.cancel_all_orders(trade, client.exchange)
+                base     = symbol.replace("/USDT", "")
+                balance  = await client.exchange.fetch_balance()
+                free_qty = float(balance.get("free", {}).get(base, 0) or 0)
 
-        base = symbol.replace("/USDT", "")
-        balance = await client.exchange.fetch_balance()
-        free_qty = float(balance.get("free", {}).get(base, 0) or 0)
+                if free_qty < 1e-8:
+                    await whale_monitor.remove_trade(symbol)
+                    results.append(f"⚠️ `{symbol}` — رصيد صفر")
+                    continue
 
-        if free_qty < 1e-8:
-            await query.edit_message_text(
-                f"⚠️ *{symbol}* — رصيد صفر\n\nلا يوجد رصيد لبيعه.",
-                parse_mode="Markdown",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ رجوع", callback_data="whale:menu")]]),
-            )
-            await whale_monitor.remove_trade(symbol)
-            return
+                sell_order = await client.exchange.create_market_sell_order(symbol, free_qty)
+                sell_price = float(
+                    sell_order.get("average") or sell_order.get("price") or trade["entry_price"]
+                )
+                entry   = float(trade["entry_price"])
+                pnl_pct = ((sell_price - entry) / entry) * 100
+                icon    = "🟢" if pnl_pct >= 0 else "🔴"
 
-        sell_order = await client.exchange.create_market_sell_order(symbol, free_qty)
-        sell_price = float(sell_order.get("average") or sell_order.get("price") or trade["entry_price"])
-        entry = float(trade["entry_price"])
-        pnl_pct = ((sell_price - entry) / entry) * 100
-        pnl_icon = "🟢" if pnl_pct >= 0 else "🔴"
-
-        await whale_monitor.remove_trade(symbol)
-
-        await query.edit_message_text(
-            f"✅ *{symbol}* — تم البيع اليدوي (Whale)\n\n"
-            f"━━━━━━━━━━━━━━━━━━━━━\n"
-            f"💰 سعر البيع: `${sell_price:.6g}`\n"
-            f"🟢 سعر الدخول: `${entry:.6g}`\n"
-            f"{pnl_icon} الربح/الخسارة: `{pnl_pct:+.2f}%`\n"
-            f"📦 الكمية: `{free_qty:.6g}`",
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ رجوع لـ Whale", callback_data="whale:menu")]]),
-        )
-        logger.info(f"Whale manual sell {symbol} user {user_id}: qty={free_qty} @ {sell_price:.6g} pnl={pnl_pct:.2f}%")
-
-    except Exception as e:
-        logger.error(f"Whale manual sell failed {symbol} user {user_id}: {e}")
-        await query.edit_message_text(
-            f"❌ *فشل البيع*\n\n`{str(e)[:120]}`",
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ رجوع", callback_data="whale:menu")]]),
-        )
+                await whale_monitor.remove_trade(symbol)
+                results.append(f"{icon} `{symbol}` — `{pnl_pct:+.2f}%`  @ `${sell_price:.6g}`")
+                logger.info(
+                    f"Whale multi-sell {symbol} user={user_id}: qty={free_qty} @ {sell_price:.6g} pnl={pnl_pct:.2f}%"
+                )
+            except Exception as e:
+                logger.error(f"Whale multi-sell failed {symbol} user={user_id}: {e}")
+                results.append(f"❌ `{symbol}` — `{str(e)[:60]}`")
     finally:
         await client.close()
 
+    context.user_data[_WHALE_SEL_KEY] = set()
 
+    summary = "\n".join(results)
+    await query.edit_message_text(
+        f"📋 *نتائج البيع — Whale*\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"{summary}",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("◀️ رجوع لـ Whale", callback_data="whale:menu")]
+        ]),
+    )
+
+
+# ── kept for backward compat (old callback pattern no longer triggered) ────────
 # ── Scanner job (every 5 min) ──────────────────────────────────────────────────
 
 async def run_whale_scan(app) -> None:

@@ -35,6 +35,8 @@ from bot.handlers.scalping_handler import (
     scalping_settings_callback,
     scalping_size_command,
     scalping_sell_pick_callback,
+    scalping_sell_toggle_callback,
+    scalping_sell_selall_callback,
     scalping_sell_confirm_callback,
     scalping_sell_exec_callback,
     scalping_set_size_callback,
@@ -52,6 +54,8 @@ from bot.handlers.whale_handler import (
     whale_settings_callback,
     whale_size_command,
     whale_sell_pick_callback,
+    whale_sell_toggle_callback,
+    whale_sell_selall_callback,
     whale_sell_confirm_callback,
     whale_sell_exec_callback,
     whale_set_size_callback,
@@ -285,8 +289,10 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(scalping_open_trades_callback, pattern="^scalping:open_trades$"))
     app.add_handler(CallbackQueryHandler(scalping_settings_callback,    pattern="^scalping:settings$"))
     app.add_handler(CallbackQueryHandler(scalping_sell_pick_callback,       pattern="^scalping:sell_pick$"))
-    app.add_handler(CallbackQueryHandler(scalping_sell_confirm_callback,    pattern="^scalping:sell_confirm:"))
-    app.add_handler(CallbackQueryHandler(scalping_sell_exec_callback,       pattern="^scalping:sell_exec:"))
+    app.add_handler(CallbackQueryHandler(scalping_sell_toggle_callback,     pattern="^scalping:sell_toggle:"))
+    app.add_handler(CallbackQueryHandler(scalping_sell_selall_callback,     pattern="^scalping:sell_selall:"))
+    app.add_handler(CallbackQueryHandler(scalping_sell_confirm_callback,    pattern="^scalping:sell_multi_confirm$"))
+    app.add_handler(CallbackQueryHandler(scalping_sell_exec_callback,       pattern="^scalping:sell_exec_multi$"))
     app.add_handler(CallbackQueryHandler(scalping_set_size_callback,        pattern="^scalping:set_size$"))
     app.add_handler(CallbackQueryHandler(scalping_set_max_trades_callback,  pattern="^scalping:set_max_trades$"))
     app.add_handler(CallbackQueryHandler(scalping_set_daily_limit_callback, pattern="^scalping:set_daily_limit$"))
@@ -298,8 +304,10 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(whale_open_trades_callback,    pattern="^whale:open_trades$"))
     app.add_handler(CallbackQueryHandler(whale_settings_callback,       pattern="^whale:settings$"))
     app.add_handler(CallbackQueryHandler(whale_sell_pick_callback,      pattern="^whale:sell_pick$"))
-    app.add_handler(CallbackQueryHandler(whale_sell_confirm_callback,   pattern="^whale:sell_confirm:"))
-    app.add_handler(CallbackQueryHandler(whale_sell_exec_callback,      pattern="^whale:sell_exec:"))
+    app.add_handler(CallbackQueryHandler(whale_sell_toggle_callback,    pattern="^whale:sell_toggle:"))
+    app.add_handler(CallbackQueryHandler(whale_sell_selall_callback,    pattern="^whale:sell_selall:"))
+    app.add_handler(CallbackQueryHandler(whale_sell_confirm_callback,   pattern="^whale:sell_multi_confirm$"))
+    app.add_handler(CallbackQueryHandler(whale_sell_exec_callback,      pattern="^whale:sell_exec_multi$"))
     app.add_handler(CallbackQueryHandler(whale_set_size_callback,       pattern="^whale:set_size$"))
     app.add_handler(CallbackQueryHandler(whale_set_max_trades_callback, pattern="^whale:set_max_trades$"))
     app.add_handler(CallbackQueryHandler(whale_set_daily_limit_callback,pattern="^whale:set_daily_limit$"))
