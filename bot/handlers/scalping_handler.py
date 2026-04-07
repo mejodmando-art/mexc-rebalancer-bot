@@ -439,9 +439,11 @@ async def run_scalping_scan(app) -> None:
                 )
                 continue
 
+            remaining_slots = max_trades - len(user_open_symbols)
             try:
                 setups = await asyncio.wait_for(
-                    scan(client.exchange, user_open_symbols, trade_size),
+                    scan(client.exchange, user_open_symbols, trade_size,
+                         max_setups=remaining_slots),
                     timeout=120,
                 )
             except asyncio.TimeoutError:

@@ -9,7 +9,10 @@ Uses 200 trades instead of 500 — enough signal for short-term whale
 detection while being faster to fetch and more relevant to current price action.
 """
 
+import logging
 from typing import Dict, Any
+
+logger = logging.getLogger(__name__)
 
 
 async def get_cvd(symbol: str, exchange) -> Dict[str, Any]:
@@ -56,5 +59,6 @@ async def get_cvd(symbol: str, exchange) -> Dict[str, Any]:
 
         return {"cvd": round(cvd, 6), "trend": trend}
 
-    except Exception:
+    except Exception as e:
+        logger.debug(f"CVD: {symbol} failed: {e}")
         return {"cvd": 0.0, "trend": "neutral"}

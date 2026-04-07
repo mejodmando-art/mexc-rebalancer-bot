@@ -8,8 +8,11 @@ Fallback: if no classic sweep is found, accepts a strong bullish rejection
 candle near the zone low (wick-to-body ratio >= 2x) as a valid sweep signal.
 """
 
+import logging
 from typing import Dict, Any
 
+
+logger = logging.getLogger(__name__)
 
 async def detect_sweep(symbol: str, exchange, liquidity_low: float) -> Dict[str, Any]:
     """
@@ -70,7 +73,8 @@ async def detect_sweep(symbol: str, exchange, liquidity_low: float) -> Dict[str,
 
         return _empty_result()
 
-    except Exception:
+    except Exception as e:
+        logger.debug(f"Sweep: {symbol} failed: {e}")
         return _empty_result()
 
 

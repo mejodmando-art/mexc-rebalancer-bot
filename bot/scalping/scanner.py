@@ -21,7 +21,6 @@ logger = logging.getLogger(__name__)
 MIN_VOLUME_24H  = 200_000   # $200K minimum 24h volume
 MAX_SPREAD_PCT  = 0.5       # 0.5% maximum spread
 MIN_VOLATILITY  = 0.3       # minimum 24h price range % — flat coins not worth scalping
-MAX_SETUPS      = 5         # cap signals per scan
 
 
 async def get_top_symbols(
@@ -33,10 +32,18 @@ async def get_top_symbols(
       prices  — dict {symbol: last_price} reused by scan() to avoid extra API calls
     """
     try:
-        tickers = await exchange.fetch_tickers()
+        # Fetch only USDT spot markets — avoids downloading thousands of
+        # futures/other-quote pairs that MEXC returns with no-arg fetch_tickers().
+        # We load the market list (cached by ccxt) to build the symbol list first.
+        await exchange.load_markets()
+        usdt_symbols = [
+            sym for sym, m in exchange.markets.items()
+            if sym.endswith("/USDT") and m.get("spot") and m.get("active")
+        ]
+        tickers = await exchange.fetch_tickers(usdt_symbols)
         usdt_pairs = {
             sym: t for sym, t in tickers.items()
-            if sym.endswith("/USDT") and t.get("quoteVolume")
+            if t.get("quoteVolume")
         }
 
         valid = []
@@ -80,6 +87,7 @@ async def scan(
     exchange,
     open_symbols: set,
     trade_size_usdt: float = 10.0,
+    max_setups: int = 5,
 ) -> List[Dict[str, Any]]:
     """
     Full confluence scan across top symbols.
@@ -88,9 +96,10 @@ async def scan(
         exchange:        ccxt async exchange instance (already authenticated)
         open_symbols:    set of symbols that already have an open trade
         trade_size_usdt: USDT amount per trade
+        max_setups:      maximum setups to return (per-user, not global)
 
     Returns:
-        List of valid setups (capped at MAX_SETUPS per scan).
+        List of valid setups (capped at max_setups per scan).
     """
     symbols, ticker_prices = await get_top_symbols(exchange)
     logger.info(f"Scanner: checking {len(symbols)} symbols")
@@ -100,7 +109,7 @@ async def scan(
     setups = []
 
     for symbol in symbols:
-        if len(setups) >= MAX_SETUPS:
+        if len(setups) >= max_setups:
             break
 
         if symbol in open_symbols:

@@ -85,15 +85,15 @@ async def _do_rebalance(app, user_id: int, portfolio_id: int = None, auto: bool 
 
         trades, _ = calculate_trades(portfolio, effective_total, allocations, threshold)
 
-        now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-
-        # Update last_rebalance_at on the portfolio (per-portfolio tracking)
-        await db.update_portfolio(portfolio_id, last_rebalance_at=now_str)
-
         if not trades:
             return
 
         results = await client.execute_rebalance(trades)
+
+        # Update timestamp AFTER execution so a crash mid-trade doesn't silently
+        # skip the next scheduled cycle.
+        now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        await db.update_portfolio(portfolio_id, last_rebalance_at=now_str)
         ok  = sum(1 for r in results if r.get("status") == "ok")
         err = sum(1 for r in results if r.get("status") == "error")
         traded = sum(
@@ -106,14 +106,14 @@ async def _do_rebalance(app, user_id: int, portfolio_id: int = None, auto: bool 
         await db.add_history(user_id, now_str, summary, traded,
                              1 if err == 0 else 0, portfolio_id=portfolio_id)
 
-        msg = (
-            f"{'🤖 توازن تلقائي' if auto else '⚖️ إعادة التوازن'}\n\n"
-            f"✅ {ok} صفقة ناجحة\n"
-            + (f"❌ {err} خطأ\n" if err else "")
-            + f"💵 إجمالي: ${traded:.2f}\n"
-            f"🕐 {now_str}"
-        )
-        await app.bot.send_message(user_id, msg)
+        label = "🤖 توازن تلقائي" if auto else "⚖️ إعادة التوازن"
+        lines = [f"{label}\n"]
+        lines.append(f"✅ {ok} صفقة ناجحة")
+        if err:
+            lines.append(f"❌ {err} خطأ")
+        lines.append(f"💵 إجمالي: `${traded:.2f}`")
+        lines.append(f"🕐 {now_str}")
+        await app.bot.send_message(user_id, "\n".join(lines), parse_mode="Markdown")
     finally:
         await client.close()
 

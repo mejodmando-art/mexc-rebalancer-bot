@@ -178,7 +178,10 @@ class GridMonitor:
             await self._shift_grid(grid, exchange, bot, price, direction="down")
             shifted = True
 
-        if (changed or shifted) and not shifted:
+        # Save order state whenever orders changed OR grid shifted.
+        # Previously this was `(changed or shifted) and not shifted` which
+        # silently skipped saving filled-order status when a shift also occurred.
+        if changed or shifted:
             try:
                 await db.update_grid(grid)
             except Exception as e:

@@ -1,10 +1,16 @@
 from typing import List, Dict, Tuple
 
+# Minimum trade size in USDT — orders below this are skipped to avoid
+# exchange minimums and excessive fees on tiny rebalances.
+MIN_TRADE_USDT = 5.0
+
+
 def calculate_trades(
     portfolio: dict,
     total_usdt: float,
     allocations: list,
     threshold: float = 5.0,
+    min_trade_usdt: float = MIN_TRADE_USDT,
 ) -> Tuple[List[Dict], List[Dict]]:
     """
     Returns (trades_needed, drift_report)
@@ -38,7 +44,7 @@ def calculate_trades(
         if needs_action:
             target_val = (target_pct / 100) * total_usdt
             diff_usdt = abs(target_val - current_val)
-            if diff_usdt >= 5:  # min $5 trade
+            if diff_usdt >= min_trade_usdt:
                 trades.append({
                     "symbol": sym,
                     "action": "sell" if drift > 0 else "buy",

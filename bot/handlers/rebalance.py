@@ -178,6 +178,15 @@ async def rebalance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
         await query.edit_message_text("⏳ جاري تنفيذ الصفقات...")
         settings = await db.get_settings(user_id)
+
+        # Guard: user may have deleted API keys between check and execute
+        if not settings or not settings.get("mexc_api_key"):
+            await query.edit_message_text(
+                "❌ مفاتيح API غير موجودة. أضفها من الإعدادات أولاً.",
+                reply_markup=main_menu_kb(),
+            )
+            return
+
         client = MexcClient(settings["mexc_api_key"], settings["mexc_secret_key"])
 
         try:

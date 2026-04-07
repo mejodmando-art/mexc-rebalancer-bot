@@ -11,6 +11,7 @@ Cached fields per symbol:
   qty_step     — quantity precision step (lot size)
 """
 
+import asyncio
 import time
 import logging
 from typing import Dict, Any, Optional
@@ -22,6 +23,7 @@ _CACHE_TTL = 1800.0
 
 _cache: Dict[str, Dict[str, float]] = {}
 _cache_ts: float = 0.0
+_refresh_lock = asyncio.Lock()  # prevents concurrent fetch_markets() calls
 
 
 def _parse_limits(market: dict) -> Dict[str, float]:
@@ -59,7 +61,10 @@ async def get_limits(symbol: str, exchange) -> Dict[str, float]:
 
     now = time.monotonic()
     if now - _cache_ts > _CACHE_TTL or symbol not in _cache:
-        await _refresh(exchange)
+        async with _refresh_lock:
+            # Re-check inside lock — another coroutine may have refreshed already
+            if time.monotonic() - _cache_ts > _CACHE_TTL or symbol not in _cache:
+                await _refresh(exchange)
 
     return _cache.get(symbol, {"min_qty": 0.0, "min_notional": 0.0, "qty_step": 0.0})
 

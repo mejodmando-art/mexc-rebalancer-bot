@@ -44,16 +44,26 @@ async def _sell_portfolio_pct(
 ) -> List[str]:
     """
     Sell sell_pct% of each coin in the portfolio at market price.
+    Fetches balance once for all coins instead of once per coin.
     Returns a list of result lines for the notification message.
     """
     quote = quote or config.quote_currency or "USDT"
     results = []
+
+    # Single balance fetch for all coins
+    try:
+        balance = await exchange.fetch_balance()
+        free_balances = balance.get("free", {})
+    except Exception as e:
+        return [f"❌ تعذّر جلب الرصيد: {str(e)[:80]}"]
+
     for a in allocations:
         sym  = a["symbol"]
+        if sym == quote:
+            continue
         pair = f"{sym}/{quote}"
         try:
-            balance = await exchange.fetch_balance()
-            qty_total = float(balance.get("free", {}).get(sym, 0) or 0)
+            qty_total   = float(free_balances.get(sym, 0) or 0)
             qty_to_sell = round(qty_total * (sell_pct / 100.0), 8)
             if qty_to_sell <= 0:
                 results.append(f"⏭ `{sym}`: رصيد صفر")
