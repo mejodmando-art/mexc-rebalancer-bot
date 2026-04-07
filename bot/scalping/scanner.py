@@ -9,11 +9,12 @@ and returns a list of valid trade setups.
 import logging
 from typing import List, Dict, Any
 
-from bot.scalping.liquidity import get_liquidity_zones
-from bot.scalping.cvd      import get_cvd
-from bot.scalping.sweep    import detect_sweep
-from bot.scalping.entry    import confirm_entry
-from bot.scalping.risk     import calculate_risk
+from bot.scalping.liquidity     import get_liquidity_zones
+from bot.scalping.cvd           import get_cvd
+from bot.scalping.sweep         import detect_sweep
+from bot.scalping.entry         import confirm_entry
+from bot.scalping.risk          import calculate_risk
+from bot.scalping.market_limits import get_limits, check_order_viable
 
 logger = logging.getLogger(__name__)
 
@@ -23,8 +24,14 @@ MIN_VOLATILITY  = 0.3       # minimum 24h price range % — flat coins not worth
 MAX_SETUPS      = 5         # cap signals per scan
 
 
-async def get_top_symbols(exchange, limit: int = 200) -> List[str]:
-    """Return top symbols by 24h quote volume, filtered by spread and volatility."""
+async def get_top_symbols(
+    exchange, limit: int = 200
+) -> tuple:
+    """
+    Return (symbols, prices) where:
+      symbols — top USDT pairs by 24h volume, filtered by spread and volatility
+      prices  — dict {symbol: last_price} reused by scan() to avoid extra API calls
+    """
     try:
         tickers = await exchange.fetch_tickers()
         usdt_pairs = {
@@ -33,6 +40,7 @@ async def get_top_symbols(exchange, limit: int = 200) -> List[str]:
         }
 
         valid = []
+        prices: Dict[str, float] = {}
         for sym, t in usdt_pairs.items():
             volume = float(t.get("quoteVolume") or 0)
             if volume < MIN_VOLUME_24H:
@@ -55,14 +63,17 @@ async def get_top_symbols(exchange, limit: int = 200) -> List[str]:
                 if volatility < MIN_VOLATILITY:
                     continue
 
+            last = float(t.get("last") or t.get("close") or 0)
+            prices[sym] = last
             valid.append((sym, volume))
 
         valid.sort(key=lambda x: x[1], reverse=True)
-        return [sym for sym, _ in valid[:limit]]
+        top = [sym for sym, _ in valid[:limit]]
+        return top, prices
 
     except Exception as e:
         logger.error(f"Scanner: failed to fetch symbols: {e}")
-        return []
+        return [], {}
 
 
 async def scan(
@@ -81,10 +92,11 @@ async def scan(
     Returns:
         List of valid setups (capped at MAX_SETUPS per scan).
     """
-    symbols = await get_top_symbols(exchange)
+    symbols, ticker_prices = await get_top_symbols(exchange)
     logger.info(f"Scanner: checking {len(symbols)} symbols")
 
     passed_liq = passed_cvd = passed_sweep = passed_entry = 0
+    skipped_limits = 0
     setups = []
 
     for symbol in symbols:
@@ -95,6 +107,25 @@ async def scan(
             continue
 
         try:
+            # ── Step 0: Exchange minimums pre-check ───────────────────────
+            # Reject symbols where the half-qty T1/SL orders would fall below
+            # MEXC's minimum notional/qty before running any expensive API calls.
+            # Reuses the price already fetched by get_top_symbols() — no extra
+            # API call needed here.
+            limits    = await get_limits(symbol, exchange)
+            mid_price = ticker_prices.get(symbol, 0.0)
+
+            if mid_price > 0 and (limits["min_notional"] > 0 or limits["min_qty"] > 0):
+                est_qty      = trade_size_usdt / mid_price
+                est_half_qty = (est_qty * 0.999) / 2  # mirrors executor's safe_qty / 2
+
+                # The tightest constraint is the half-qty order (T1 / SL)
+                err = check_order_viable(symbol, est_half_qty, mid_price, limits, "half-qty")
+                if err:
+                    logger.debug(f"Scanner: {symbol} — skipped (limits): {err}")
+                    skipped_limits += 1
+                    continue
+
             # ── Step 1: 1H Liquidity Zone ──────────────────────────────────
             liq = await get_liquidity_zones(symbol, exchange)
             if not liq["near_zone"] or liq["side"] != "buy":
@@ -156,7 +187,7 @@ async def scan(
             continue
 
     logger.info(
-        f"Scanner: done — liq={passed_liq} cvd={passed_cvd} "
+        f"Scanner: done — skipped_limits={skipped_limits} liq={passed_liq} cvd={passed_cvd} "
         f"sweep={passed_sweep} entry={passed_entry} setups={len(setups)}"
     )
     return setups
