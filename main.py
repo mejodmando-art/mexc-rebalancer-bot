@@ -28,44 +28,13 @@ from bot.handlers.settings import (
     SET_THRESHOLD, SET_INTERVAL,
     SET_ALLOC_COINS, SET_ALLOC_MODE, SET_ALLOC_CUSTOM,
 )
-from bot.handlers.scalping_handler import (
-    scalping_menu_callback,
-    scalping_toggle_callback,
-    scalping_open_trades_callback,
-    scalping_settings_callback,
-    scalping_size_command,
-    scalping_sell_pick_callback,
-    scalping_sell_toggle_callback,
-    scalping_sell_selall_callback,
-    scalping_sell_confirm_callback,
-    scalping_sell_exec_callback,
-    scalping_set_size_callback,
-    scalping_set_max_trades_callback,
-    scalping_set_daily_limit_callback,
-    scalping_set_trail_pct_callback,
-    scalping_setting_input,
-    run_scalping_scan,
-    run_scalping_monitor,
+from bot.handlers.momentum_handler import (
+    momentum_callback,
+    momentum_setting_input,
+    momentum_cancel,
+    run_momentum_scan,
 )
-from bot.handlers.whale_handler import (
-    whale_menu_callback,
-    whale_toggle_callback,
-    whale_open_trades_callback,
-    whale_settings_callback,
-    whale_size_command,
-    whale_sell_pick_callback,
-    whale_sell_toggle_callback,
-    whale_sell_selall_callback,
-    whale_sell_confirm_callback,
-    whale_sell_exec_callback,
-    whale_set_size_callback,
-    whale_set_max_trades_callback,
-    whale_set_daily_limit_callback,
-    whale_setting_input,
-    run_whale_scan,
-    run_whale_monitor,
-)
-from bot.scalping.whale_monitor import whale_monitor, WhaleTradeMonitor
+from bot.momentum.monitor import momentum_monitor
 from bot.handlers.grid_handler import (
     build_grid_conv,
     grid_menu_callback,
@@ -109,8 +78,8 @@ from bot.portfolio_monitor import run_portfolio_monitor
 from bot.handlers.emergency_handler import (
     emergency_menu_callback,
     emergency_pick_coin_callback,
-    emergency_pick_scalping_callback,
-    emergency_pick_whale_callback,
+    emergency_pick_momentum_callback,
+
     emergency_toggle_callback,
     emergency_confirm_selected_callback,
     emergency_back_to_select_callback,
@@ -119,7 +88,7 @@ from bot.handlers.emergency_handler import (
     emergency_exec_all_callback,
 )
 from bot.scheduler import start_scheduler
-from bot.scalping.monitor import trade_monitor
+
 
 class _RedactTokenFilter(logging.Filter):
     """Remove the Telegram bot token from log records."""
@@ -266,8 +235,7 @@ def build_app() -> Application:
     app.add_handler(CommandHandler("start", start_handler))
     app.add_handler(CommandHandler("help", help_handler))
     app.add_handler(CommandHandler("menu", menu_command))
-    app.add_handler(CommandHandler("scalping_size", scalping_size_command))
-    app.add_handler(CommandHandler("whale_size", whale_size_command))
+
 
     # ── Navigation ─────────────────────────────────────────────────────────────
     app.add_handler(CallbackQueryHandler(handle_menu_callback, pattern="^menu:"))
@@ -283,34 +251,8 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(del_alloc_callback,    pattern="^del_alloc:"))
     app.add_handler(CallbackQueryHandler(clear_allocs_callback, pattern="^clear_allocs"))
 
-    # ── Scalping ───────────────────────────────────────────────────────────────
-    app.add_handler(CallbackQueryHandler(scalping_menu_callback,        pattern="^scalping:menu$"))
-    app.add_handler(CallbackQueryHandler(scalping_toggle_callback,      pattern="^scalping:toggle$"))
-    app.add_handler(CallbackQueryHandler(scalping_open_trades_callback, pattern="^scalping:open_trades$"))
-    app.add_handler(CallbackQueryHandler(scalping_settings_callback,    pattern="^scalping:settings$"))
-    app.add_handler(CallbackQueryHandler(scalping_sell_pick_callback,       pattern="^scalping:sell_pick$"))
-    app.add_handler(CallbackQueryHandler(scalping_sell_toggle_callback,     pattern="^scalping:sell_toggle:"))
-    app.add_handler(CallbackQueryHandler(scalping_sell_selall_callback,     pattern="^scalping:sell_selall:"))
-    app.add_handler(CallbackQueryHandler(scalping_sell_confirm_callback,    pattern="^scalping:sell_multi_confirm$"))
-    app.add_handler(CallbackQueryHandler(scalping_sell_exec_callback,       pattern="^scalping:sell_exec_multi$"))
-    app.add_handler(CallbackQueryHandler(scalping_set_size_callback,        pattern="^scalping:set_size$"))
-    app.add_handler(CallbackQueryHandler(scalping_set_max_trades_callback,  pattern="^scalping:set_max_trades$"))
-    app.add_handler(CallbackQueryHandler(scalping_set_daily_limit_callback, pattern="^scalping:set_daily_limit$"))
-    app.add_handler(CallbackQueryHandler(scalping_set_trail_pct_callback,   pattern="^scalping:set_trail_pct$"))
-
-    # ── Whale Order Flow ───────────────────────────────────────────────────────
-    app.add_handler(CallbackQueryHandler(whale_menu_callback,           pattern="^whale:menu$"))
-    app.add_handler(CallbackQueryHandler(whale_toggle_callback,         pattern="^whale:toggle$"))
-    app.add_handler(CallbackQueryHandler(whale_open_trades_callback,    pattern="^whale:open_trades$"))
-    app.add_handler(CallbackQueryHandler(whale_settings_callback,       pattern="^whale:settings$"))
-    app.add_handler(CallbackQueryHandler(whale_sell_pick_callback,      pattern="^whale:sell_pick$"))
-    app.add_handler(CallbackQueryHandler(whale_sell_toggle_callback,    pattern="^whale:sell_toggle:"))
-    app.add_handler(CallbackQueryHandler(whale_sell_selall_callback,    pattern="^whale:sell_selall:"))
-    app.add_handler(CallbackQueryHandler(whale_sell_confirm_callback,   pattern="^whale:sell_multi_confirm$"))
-    app.add_handler(CallbackQueryHandler(whale_sell_exec_callback,      pattern="^whale:sell_exec_multi$"))
-    app.add_handler(CallbackQueryHandler(whale_set_size_callback,       pattern="^whale:set_size$"))
-    app.add_handler(CallbackQueryHandler(whale_set_max_trades_callback, pattern="^whale:set_max_trades$"))
-    app.add_handler(CallbackQueryHandler(whale_set_daily_limit_callback,pattern="^whale:set_daily_limit$"))
+    # ── Momentum Breakout ──────────────────────────────────────────────────────
+    app.add_handler(CallbackQueryHandler(momentum_callback, pattern="^momentum:"))
 
     # ── Grid Bot ───────────────────────────────────────────────────────────────
     app.add_handler(CallbackQueryHandler(grid_menu_callback,   pattern="^grid:menu$"))
@@ -335,12 +277,10 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(portfolio_rebalance_sell_callback, pattern="^portfolio_rebalance_sell:"))
     app.add_handler(CallbackQueryHandler(portfolio_sell_exec_callback,      pattern="^portfolio_sell_exec:"))
 
-    # ── Settings text input (scalping + whale inline settings) ────────────────
+    # ── Momentum inline settings text input ───────────────────────────────────
     async def _settings_text_router(update, context):
-        if "_scalping_setting" in context.user_data:
-            await scalping_setting_input(update, context)
-        elif "_whale_setting" in context.user_data:
-            await whale_setting_input(update, context)
+        if "_momentum_setting" in context.user_data:
+            await momentum_setting_input(update, context)
 
     app.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND & filters.UpdateType.MESSAGE,
@@ -350,8 +290,8 @@ def build_app() -> Application:
     # ── Emergency Sell ─────────────────────────────────────────────────────────
     app.add_handler(CallbackQueryHandler(emergency_menu_callback,              pattern="^emergency:menu$"))
     app.add_handler(CallbackQueryHandler(emergency_pick_coin_callback,         pattern="^emergency:pick_coin$"))
-    app.add_handler(CallbackQueryHandler(emergency_pick_scalping_callback,     pattern="^emergency:pick_scalping$"))
-    app.add_handler(CallbackQueryHandler(emergency_pick_whale_callback,        pattern="^emergency:pick_whale$"))
+    app.add_handler(CallbackQueryHandler(emergency_pick_momentum_callback,     pattern="^emergency:pick_momentum$"))
+
     app.add_handler(CallbackQueryHandler(emergency_toggle_callback,            pattern="^emergency:toggle:"))
     app.add_handler(CallbackQueryHandler(emergency_confirm_selected_callback,  pattern="^emergency:confirm_selected$"))
     app.add_handler(CallbackQueryHandler(emergency_back_to_select_callback,    pattern="^emergency:back_to_select$"))
@@ -364,46 +304,27 @@ def build_app() -> Application:
 
 async def main():
     await db.init()
-    await trade_monitor.load_from_db()
-    await whale_monitor.load_from_db()
+    await momentum_monitor.restore_from_db()
     await grid_monitor.load_from_db()
     app = build_app()
     scheduler = await start_scheduler(app)
 
 
-    # Smart Liquidity Flow jobs
+    # Momentum Breakout jobs
     scheduler.add_job(
-        run_scalping_scan,
+        run_momentum_scan,
         trigger="interval",
-        minutes=15,
+        minutes=10,
         args=[app],
-        id="scalping_scan",
+        id="momentum_scan",
         replace_existing=True,
     )
     scheduler.add_job(
-        run_scalping_monitor,
+        momentum_monitor.tick,
         trigger="interval",
-        seconds=20,
+        seconds=60,
         args=[app],
-        id="scalping_monitor",
-        replace_existing=True,
-    )
-
-    # Whale Order Flow jobs
-    scheduler.add_job(
-        run_whale_scan,
-        trigger="interval",
-        minutes=5,
-        args=[app],
-        id="whale_scan",
-        replace_existing=True,
-    )
-    scheduler.add_job(
-        run_whale_monitor,
-        trigger="interval",
-        seconds=30,
-        args=[app],
-        id="whale_monitor",
+        id="momentum_monitor",
         replace_existing=True,
     )
 

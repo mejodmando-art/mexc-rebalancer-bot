@@ -15,8 +15,7 @@ def main_menu_kb() -> InlineKeyboardMarkup:
             InlineKeyboardButton("📋 السجل",           callback_data="history"),
         ],
         [
-            InlineKeyboardButton("⚡ Scalping",        callback_data="scalping:menu"),
-            InlineKeyboardButton("🐋 Whale",           callback_data="whale:menu"),
+            InlineKeyboardButton("⚡ Momentum",        callback_data="momentum:menu"),
             InlineKeyboardButton("🔲 Grid",            callback_data="grid:menu"),
         ],
         [
@@ -230,4 +229,27 @@ def grid_detail_kb(grid_id: int) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("📡 متابعة حية",   callback_data=f"grid_live:{grid_id}")],
         [InlineKeyboardButton("🛑 إيقاف الشبكة", callback_data=f"grid_stop:{grid_id}")],
         [InlineKeyboardButton("◀️ رجوع",         callback_data="grid:menu")],
+    ])
+
+
+# ── Momentum ───────────────────────────────────────────────────────────────────
+
+def momentum_menu_kb(enabled: bool) -> InlineKeyboardMarkup:
+    toggle = "🔴 إيقاف Momentum" if enabled else "🟢 تشغيل Momentum"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(toggle,                    callback_data="momentum:toggle")],
+        [InlineKeyboardButton("📊 الصفقات المفتوحة",    callback_data="momentum:trades")],
+        [InlineKeyboardButton("🔴 إغلاق صفقة",          callback_data="momentum:sell_pick")],
+        [InlineKeyboardButton("⚙️ الإعدادات",           callback_data="momentum:settings")],
+        [InlineKeyboardButton("◀️ رجوع",                callback_data="menu:main")],
+    ])
+
+
+def momentum_settings_kb(trade_size: float, max_trades: int, daily_loss: float) -> InlineKeyboardMarkup:
+    loss_str = f"${daily_loss:.0f}" if daily_loss > 0 else "غير محدد"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"💵 حجم الصفقة: ${trade_size:.0f}",      callback_data="momentum:set_size")],
+        [InlineKeyboardButton(f"📊 أقصى صفقات: {max_trades}",           callback_data="momentum:set_max")],
+        [InlineKeyboardButton(f"🛑 حد الخسارة اليومي: {loss_str}",      callback_data="momentum:set_loss")],
+        [InlineKeyboardButton("◀️ رجوع",                                 callback_data="momentum:menu")],
     ])

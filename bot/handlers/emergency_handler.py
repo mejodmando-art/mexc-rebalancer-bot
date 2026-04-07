@@ -19,8 +19,7 @@ from bot.database import db
 from bot.mexc_client import MexcClient
 from bot.keyboards import back_to_main_kb
 from bot.grid.monitor import grid_monitor
-from bot.scalping.monitor import trade_monitor
-from bot.scalping.whale_monitor import whale_monitor
+from bot.momentum.monitor import momentum_monitor
 
 logger = logging.getLogger(__name__)
 
@@ -53,20 +52,9 @@ def _get_grid_locked_symbols(user_id: int) -> set:
     return locked
 
 
-def _get_scalping_symbols(user_id: int) -> set:
-    """Return symbols with open scalping trades for this user."""
-    return {
-        sym for sym, t in trade_monitor.open_trades.items()
-        if t.get("user_id") == user_id
-    }
-
-
-def _get_whale_symbols(user_id: int) -> set:
-    """Return symbols with open whale trades for this user."""
-    return {
-        sym for sym, t in whale_monitor.open_trades.items()
-        if t.get("user_id") == user_id
-    }
+def _get_momentum_symbols(user_id: int) -> set:
+    """Return symbols with open momentum trades for this user."""
+    return momentum_monitor.open_symbols_for(user_id)
 
 
 # ── Menu ───────────────────────────────────────────────────────────────────────
@@ -79,15 +67,11 @@ async def emergency_menu_callback(update: Update, context: ContextTypes.DEFAULT_
     context.user_data.pop("_emg_selected", None)
     context.user_data.pop("_emg_portfolio", None)
 
-    scalping_count = len(_get_scalping_symbols(user_id))
-    whale_count    = len(_get_whale_symbols(user_id))
-
-    scalping_label = f"⚡ بيع صفقات Scalping ({scalping_count})" if scalping_count else "⚡ Scalping — لا توجد صفقات"
-    whale_label    = f"🐋 بيع صفقات Whale ({whale_count})"       if whale_count    else "🐋 Whale — لا توجد صفقات"
+    momentum_count = len(_get_momentum_symbols(user_id))
+    momentum_label = f"⚡ بيع صفقات Momentum ({momentum_count})" if momentum_count else "⚡ Momentum — لا توجد صفقات"
 
     buttons = [
-        [InlineKeyboardButton(scalping_label, callback_data="emergency:pick_scalping")],
-        [InlineKeyboardButton(whale_label,    callback_data="emergency:pick_whale")],
+        [InlineKeyboardButton(momentum_label, callback_data="emergency:pick_momentum")],
         [InlineKeyboardButton("🔴 اختار عملات أخرى للبيع", callback_data="emergency:pick_coin")],
         [InlineKeyboardButton("💥 بيع الكل", callback_data="emergency:confirm_all")],
         [InlineKeyboardButton("◀️ القائمة الرئيسية", callback_data="menu:main")],
@@ -220,60 +204,16 @@ async def emergency_pick_coin_callback(update: Update, context: ContextTypes.DEF
     )
 
 
-# ── Pick scalping trades ───────────────────────────────────────────────────────
+# ── Pick momentum trades ───────────────────────────────────────────────────────
 
-async def emergency_pick_scalping_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def emergency_pick_momentum_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     user_id = update.effective_user.id
 
-    symbols = _get_scalping_symbols(user_id)
+    symbols = _get_momentum_symbols(user_id)
     if not symbols:
-        await query.answer("⚠️ لا توجد صفقات Scalping مفتوحة", show_alert=True)
-        return
-
-    settings = await db.get_settings(user_id)
-    if not settings or not settings.get("mexc_api_key"):
-        await query.answer("❌ يجب ربط MEXC API أولاً", show_alert=True)
-        return
-
-    await query.edit_message_text("⏳ جاري جلب رصيدك من MEXC...")
-    client = MexcClient(settings["mexc_api_key"], settings["mexc_secret_key"])
-    try:
-        portfolio, _ = await client.get_portfolio()
-    except Exception as e:
-        await query.edit_message_text(f"❌ تعذّر جلب الرصيد: {str(e)[:80]}", reply_markup=back_to_main_kb())
-        return
-    finally:
-        await client.close()
-
-    # فلتر العملات اللي عندها صفقة scalping فعلاً
-    coins = [sym.split("/")[0] for sym in symbols if sym.split("/")[0] in portfolio]
-    coins.sort(key=lambda s: portfolio.get(s, {}).get("value_usdt", 0), reverse=True)
-
-    context.user_data["_emg_portfolio"] = portfolio
-    context.user_data["_emg_coins"]     = coins
-    context.user_data["_emg_selected"]  = set(coins)  # محدد كلهم تلقائياً
-
-    await query.edit_message_text(
-        f"⚡ *بيع صفقات Scalping*\n\n"
-        f"عدد الصفقات: *{len(coins)}*\n"
-        "كل الصفقات محددة — اضغط على أي عملة لإلغاء تحديدها:",
-        parse_mode="Markdown",
-        reply_markup=_build_select_kb(coins, set(coins), portfolio),
-    )
-
-
-# ── Pick whale trades ──────────────────────────────────────────────────────────
-
-async def emergency_pick_whale_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    user_id = update.effective_user.id
-
-    symbols = _get_whale_symbols(user_id)
-    if not symbols:
-        await query.answer("⚠️ لا توجد صفقات Whale مفتوحة", show_alert=True)
+        await query.answer("⚠️ لا توجد صفقات Momentum مفتوحة", show_alert=True)
         return
 
     settings = await db.get_settings(user_id)
@@ -296,10 +236,10 @@ async def emergency_pick_whale_callback(update: Update, context: ContextTypes.DE
 
     context.user_data["_emg_portfolio"] = portfolio
     context.user_data["_emg_coins"]     = coins
-    context.user_data["_emg_selected"]  = set(coins)  # محدد كلهم تلقائياً
+    context.user_data["_emg_selected"]  = set(coins)
 
     await query.edit_message_text(
-        f"🐋 *بيع صفقات Whale*\n\n"
+        f"⚡ *بيع صفقات Momentum*\n\n"
         f"عدد الصفقات: *{len(coins)}*\n"
         "كل الصفقات محددة — اضغط على أي عملة لإلغاء تحديدها:",
         parse_mode="Markdown",
@@ -433,12 +373,8 @@ async def emergency_exec_selected_callback(update: Update, context: ContextTypes
                 order = await client.exchange.create_market_sell_order(pair, qty)
                 cost  = float(order.get("cost") or 0)
                 results.append(f"🔴 `{sym}` — `${cost:.2f}` ✅")
-                # Remove from scalping/whale monitors if tracked
-                scalping_key = f"{sym}/USDT"
-                if scalping_key in trade_monitor.open_trades:
-                    await trade_monitor.remove_trade(scalping_key)
-                if scalping_key in whale_monitor.open_trades:
-                    await whale_monitor.remove_trade(scalping_key)
+                # Remove from momentum monitor if tracked
+                momentum_monitor.remove_trade(sym)
             except Exception as e:
                 results.append(f"❌ `{sym}`: {str(e)[:60]}")
     except Exception as e:
@@ -567,11 +503,9 @@ async def emergency_exec_all_callback(update: Update, context: ContextTypes.DEFA
                 order = await client.exchange.create_market_sell_order(pair, qty)
                 cost  = float(order.get("cost") or 0)
                 results.append(f"🔴 `{sym}` — `${cost:.2f}` ✅")
-                # Remove from scalping/whale monitors if tracked
-                if pair in trade_monitor.open_trades:
-                    await trade_monitor.remove_trade(pair)
-                if pair in whale_monitor.open_trades:
-                    await whale_monitor.remove_trade(pair)
+                # Remove from momentum monitor if tracked
+                base = pair.split("/")[0]
+                momentum_monitor.remove_trade(base)
             except Exception as e:
                 results.append(f"❌ `{sym}`: {str(e)[:60]}")
     except Exception as e:
