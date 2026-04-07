@@ -19,25 +19,25 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 
     elif action == "settings":
         settings = await db.get_settings(user_id)
-        auto_on = bool(settings.get("auto_enabled")) if settings else False
-        has_api = bool(settings.get("mexc_api_key")) if settings else False
-        threshold = settings.get("threshold", 5.0) if settings else 5.0
-        interval = settings.get("auto_interval_hours", 24) if settings else 24
-        allocs = await db.get_allocations(user_id)
+        auto_on   = bool(settings.get("auto_enabled"))   if settings else False
+        has_api   = bool(settings.get("mexc_api_key"))   if settings else False
+        threshold = settings.get("threshold", 5.0)       if settings else 5.0
+        interval  = settings.get("auto_interval_hours", 24) if settings else 24
+        allocs    = await db.get_allocations(user_id)
 
-        portfolio_id = await db.get_active_portfolio_id(user_id)
-        portfolio_name = ""
+        portfolio_id   = await db.get_active_portfolio_id(user_id)
+        portfolio_line = ""
         if portfolio_id:
             p = await db.get_portfolio(portfolio_id)
             if p:
-                portfolio_name = f"\n🗂 المحفظة النشطة: *{p['name']}*"
+                portfolio_line = f"\n🗂 المحفظة النشطة: *{p['name']}*"
 
-        api_status = "✅ API مربوطة" if has_api else "❌ API غير مربوطة"
-        alloc_status = f"📊 {len(allocs)} عملة محددة" if allocs else "📊 لا يوجد توزيع بعد"
-        auto_status = f"🟢 تلقائي كل {interval} ساعة" if auto_on else "🔴 التوازن التلقائي معطل"
+        api_status   = "✅ API مربوطة"                        if has_api  else "❌ API غير مربوطة"
+        alloc_status = f"📊 {len(allocs)} عملة محددة"         if allocs   else "📊 لا يوجد توزيع بعد"
+        auto_status  = f"🟢 تلقائي كل {interval} ساعة"        if auto_on  else "🔴 التوازن التلقائي معطل"
 
         text = (
-            f"🛠 *الإعدادات*{portfolio_name}\n\n"
+            f"⚙️ *الإعدادات*{portfolio_line}\n\n"
             "━━━━━━━━━━━━━━━━━━━━━\n"
             f"  {api_status}\n"
             f"  {alloc_status}\n"

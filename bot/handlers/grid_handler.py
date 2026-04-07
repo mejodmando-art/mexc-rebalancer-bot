@@ -22,6 +22,7 @@ from telegram.ext import (
 )
 
 from bot.database import db
+from bot.keyboards import main_menu_kb, grid_menu_kb, grid_detail_kb
 from bot.mexc_client import MexcClient
 from bot.grid.engine import calculate_grid_levels, place_grid_orders
 from bot.grid.monitor import grid_monitor
@@ -35,28 +36,6 @@ logger = logging.getLogger(__name__)
 ) = range(8)
 
 TEXT = filters.TEXT & ~filters.COMMAND
-
-
-# ── Menu ───────────────────────────────────────────────────────────────────────
-
-def grid_menu_kb(grids: list) -> InlineKeyboardMarkup:
-    buttons = []
-    for g in grids:
-        buttons.append([InlineKeyboardButton(
-            f"📊 {g['symbol']}  ·  {g['steps']} خطوة  ·  ${g['order_size_usdt']:.0f}",
-            callback_data=f"grid_detail:{g['id']}"
-        )])
-    buttons.append([InlineKeyboardButton("➕ شبكة جديدة", callback_data="grid_new")])
-    buttons.append([InlineKeyboardButton("◀️ القائمة الرئيسية", callback_data="menu:main")])
-    return InlineKeyboardMarkup(buttons)
-
-
-def grid_detail_kb(grid_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📡 متابعة حية", callback_data=f"grid_live:{grid_id}")],
-        [InlineKeyboardButton("🛑 إيقاف الشبكة", callback_data=f"grid_stop:{grid_id}")],
-        [InlineKeyboardButton("◀️ رجوع", callback_data="grid:menu")],
-    ])
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
