@@ -43,18 +43,22 @@ TEXT = filters.TEXT & ~filters.COMMAND
 def _fmt_grid(g: dict) -> str:
     tp_line = f"🎯 Take Profit: `${g['take_profit']:.6g}`\n" if g.get("take_profit") else ""
     sl_line = f"🛑 Stop Loss:   `${g['stop_loss']:.6g}`\n"  if g.get("stop_loss")   else ""
+    trades  = g.get("total_trades", 0)
+    shifts  = g.get("shifts", 0)
     return (
-        f"📊 *{g['symbol']}*\n\n"
-        f"السعر المركزي: `${g['center']:.6g}`\n"
-        f"الحد العلوي:   `${g['upper']:.6g}`  (`+{g['upper_pct']}%`)\n"
-        f"الحد السفلي:   `${g['lower']:.6g}`  (`-{g['lower_pct']}%`)\n"
-        f"عدد الخطوات:  `{g['steps']}`\n"
-        f"حجم الشبكة:   `${g['order_size_usdt']:.0f} USDT`\n"
-        f"ربح كل خطوة:  `{g['step_pct']:.3f}%`\n"
+        f"🔲 *Grid Bot — {g['symbol']}*\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"💰 المركز:    `${g['center']:.6g}`\n"
+        f"📈 الحد العلوي: `${g['upper']:.6g}`  \\(`+{g['upper_pct']}%`\\)\n"
+        f"📉 الحد السفلي: `${g['lower']:.6g}`  \\(`-{g['lower_pct']}%`\\)\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🔢 الخطوات:   `{g['steps']}`\n"
+        f"💵 حجم الشبكة: `${g['order_size_usdt']:.0f} USDT`\n"
+        f"📊 ربح/خطوة:  `{g['step_pct']:.3f}%`\n"
         f"{tp_line}{sl_line}"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
-        f"صفقات منفذة:  `{g.get('total_trades', 0)}`\n"
-        f"انتقالات:      `{g.get('shifts', 0)}`"
+        f"🔄 صفقات منفذة: `{trades}`\n"
+        f"↔️ انتقالات:    `{shifts}`"
     )
 
 
@@ -224,11 +228,14 @@ async def grid_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.answer()
     user_id = update.effective_user.id
     grids = await db.load_user_grids(user_id)
+    status_line = f"🟢 *{len(grids)} شبكة نشطة*" if grids else "⬜ لا توجد شبكات نشطة"
     text = (
-        "🔲 *Grid Bot*\n\n"
+        "🔲 *Grid Bot*\n"
         "━━━━━━━━━━━━━━━━━━━━━\n"
-        f"شبكات نشطة: *{len(grids)}*\n"
-        "━━━━━━━━━━━━━━━━━━━━━"
+        f"{status_line}\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        "يضع أوامر شراء وبيع تلقائياً في نطاق سعري\n"
+        "ويجني الربح من تذبذب السعر"
     )
     await query.edit_message_text(text, parse_mode="Markdown", reply_markup=grid_menu_kb(grids))
 

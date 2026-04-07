@@ -49,19 +49,45 @@ async def portfolio_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     portfolio_name = portfolio_info.get("name", "") if portfolio_info else ""
 
-    text = f"💼 *{portfolio_name or 'محفظتي'}*\n"
-    text += f"💵 الإجمالي: *${total_usdt:,.2f} USDT*\n"
-    text += "━━━━━━━━━━━━━━━━━━━━━\n\n"
-
     rows = sorted(portfolio.items(), key=lambda x: x[1]["value_usdt"], reverse=True)
 
-    for sym, data in rows:
-        val = data["value_usdt"]
-        if sym == "USDT":
-            text += f"💵 USDT  —  *${val:,.2f}*\n"
-        else:
-            text += f"🔸 {sym}  —  *${val:,.2f}*\n"
+    # Build allocation map for drift display
+    alloc_map = {a["symbol"]: a["target_percentage"] for a in allocations}
 
-    text += "\n━━━━━━━━━━━━━━━━━━━━━"
+    text = (
+        f"💼 *{portfolio_name or 'محفظتي'}*\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"💵 الإجمالي: *${total_usdt:,.2f} USDT*\n"
+    )
+    if capital > 0:
+        text += f"🎯 رأس المال: *${capital:,.2f} USDT*\n"
+    text += "━━━━━━━━━━━━━━━━━━━━━\n\n"
+
+    for sym, data in rows:
+        val  = data["value_usdt"]
+        pct  = (val / effective_total * 100) if effective_total > 0 else 0
+        tgt  = alloc_map.get(sym)
+
+        if sym == "USDT":
+            bar = _pct_bar(pct)
+            text += f"💵 *USDT*\n"
+            text += f"   `${val:>10,.2f}`  {bar}  `{pct:.1f}%`\n\n"
+        else:
+            bar = _pct_bar(pct)
+            drift_str = ""
+            if tgt is not None:
+                drift = pct - tgt
+                drift_str = f"  `{drift:+.1f}%`" if abs(drift) >= 0.5 else ""
+            text += f"🔹 *{sym}*\n"
+            text += f"   `${val:>10,.2f}`  {bar}  `{pct:.1f}%`{drift_str}\n\n"
+
+    text += "━━━━━━━━━━━━━━━━━━━━━"
 
     await query.edit_message_text(text, parse_mode="Markdown", reply_markup=main_menu_kb())
+
+
+def _pct_bar(pct: float, width: int = 8) -> str:
+    """Return a compact visual bar for a percentage (0–100)."""
+    filled = round(pct / 100 * width)
+    filled = max(0, min(width, filled))
+    return "█" * filled + "░" * (width - filled)

@@ -11,13 +11,19 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     await update.message.reply_text(
-        f"أهلاً *{user.first_name}* 👋\n\n"
-        "━━━━━━━━━━━━━━━━━━━━━\n"
-        "💰 المحفظة  ·  ⚖️ إعادة التوازن\n"
-        "🗂 محافظ متعددة  ·  🚨 بيع طوارئ\n"
-        "⚡ Scalping  ·  🐋 Whale  ·  🔲 Grid\n"
-        "━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "ابدأ بربط مفاتيح MEXC API من ⚙️ *الإعدادات*",
+        f"👋 أهلاً *{user.first_name}*\n\n"
+        "┌─────────────────────┐\n"
+        "│  🤖 *MEXC Rebalancer Bot*  │\n"
+        "└─────────────────────┘\n\n"
+        "💼 *إدارة المحفظة*\n"
+        "  ├ عرض الرصيد وإعادة التوازن\n"
+        "  └ محافظ متعددة مستقلة\n\n"
+        "📈 *استراتيجيات التداول*\n"
+        "  ├ ⚡ Momentum Breakout\n"
+        "  └ 🔲 Grid Bot\n\n"
+        "🚨 *بيع طوارئ فوري*\n\n"
+        "─────────────────────\n"
+        "ابدأ بربط مفاتيح MEXC من ⚙️ *الإعدادات*",
         parse_mode="Markdown",
         reply_markup=main_menu_kb(),
     )
@@ -26,14 +32,28 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "📖 *دليل الاستخدام*\n\n"
-        "*إضافة العملات:*\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        "⚙️ *الإعداد الأولي*\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        "1️⃣ الإعدادات ← ربط مفاتيح MEXC API\n"
+        "2️⃣ محافظي ← إنشاء محفظة وتحديد رأس المال\n"
+        "3️⃣ إضافة العملات بنسبها المستهدفة\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        "🪙 *إضافة العملات*\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
         "أرسل الرموز: `BTC ETH SOL USDT`\n"
         "أو بالنسب مباشرة:\n"
-        "`BTC=40` `ETH=30` `SOL=20` `USDT=10`\n\n"
-        "*طرق التوزيع:*\n"
+        "`BTC=40 ETH=30 SOL=20 USDT=10`\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        "📊 *طرق التوزيع*\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
         "⚖️ متساوٍ  ·  📈 حسب السوق  ·  ✏️ يدوي\n\n"
-        "*المحافظ المتعددة:*\n"
-        "من 🗂 محافظي — لكل محفظة رأس مال وتوزيع مستقل\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        "⚡ *Momentum Breakout*\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        "يبحث كل 10 دقائق عن اختراقات حجم قوية\n"
+        "T1: +2% يبيع 50% ويحرك SL للـ Breakeven\n"
+        "T2: +4% يبيع الباقي\n\n"
         "`/cancel` — إلغاء أي عملية جارية",
         parse_mode="Markdown",
         reply_markup=main_menu_kb(),

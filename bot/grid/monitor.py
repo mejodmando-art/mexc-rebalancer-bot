@@ -225,13 +225,16 @@ class GridMonitor:
             logger.error(f"GridMonitor: failed to save shifted grid: {e}")
 
         arrow = "⬆️" if direction == "up" else "⬇️"
+        dir_ar = "للأعلى" if direction == "up" else "للأسفل"
         await self._notify(
             bot, user_id,
-            f"{arrow} *{symbol}* — الشبكة انتقلت {direction}\n\n"
-            f"السعر الحالي: `${new_center:.6g}`\n"
-            f"الحد الجديد العلوي: `${new_grid['upper']:.6g}`\n"
-            f"الحد الجديد السفلي: `${new_grid['lower']:.6g}`\n"
-            f"عدد الانتقالات: `{grid['shifts']}`"
+            f"{arrow} *Grid Bot — انتقال الشبكة {dir_ar}*\n"
+            f"━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🔹 *{symbol}*\n"
+            f"💰 السعر الحالي: `${new_center:.6g}`\n"
+            f"📈 الحد العلوي: `${new_grid['upper']:.6g}`\n"
+            f"📉 الحد السفلي: `${new_grid['lower']:.6g}`\n"
+            f"🔄 عدد الانتقالات: `{grid['shifts']}`"
         )
 
     async def _close_grid(self, grid: Dict, exchange, bot, price: float, reason: str) -> None:
@@ -255,10 +258,12 @@ class GridMonitor:
 
         await self._notify(
             bot, user_id,
-            f"{icon} *{symbol}* — الشبكة أُغلقت ({reason_ar})\n\n"
-            f"السعر: `${price:.6g}`\n"
-            f"إجمالي الصفقات المنفذة: `{trades}`\n"
-            f"عدد انتقالات الشبكة: `{shifts}`"
+            f"{icon} *Grid Bot — إغلاق الشبكة \\({reason_ar}\\)*\n"
+            f"━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🔹 *{symbol}*\n"
+            f"💰 السعر: `${price:.6g}`\n"
+            f"📊 الصفقات المنفذة: `{trades}`\n"
+            f"🔄 الانتقالات: `{shifts}`"
         )
 
     async def _notify(self, bot, user_id: int, text: str) -> None:

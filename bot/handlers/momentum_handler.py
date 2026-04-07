@@ -55,26 +55,33 @@ async def momentum_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         trades = momentum_monitor.open_trades_for(user_id)
         if not trades:
             await query.edit_message_text(
-                "📊 *Momentum — الصفقات المفتوحة*\n\nلا توجد صفقات مفتوحة حالياً.",
+                "📊 *Momentum — الصفقات المفتوحة*\n"
+                "━━━━━━━━━━━━━━━━━━━━━\n\n"
+                "لا توجد صفقات مفتوحة حالياً.\n\n"
+                "_سيبدأ البوت بالبحث تلقائياً عند تفعيله_",
                 parse_mode="Markdown",
                 reply_markup=momentum_menu_kb(False),
             )
             return
         lines = []
         for t in trades:
-            entry = float(t["entry_price"])
-            sl    = float(t["stop_loss"])
-            t1    = float(t["target1"])
-            t2    = float(t["target2"])
+            entry  = float(t["entry_price"])
+            sl     = float(t["stop_loss"])
+            t1     = float(t["target1"])
+            t2     = float(t["target2"])
             t1_hit = "✅" if t.get("t1_hit") else "⬜"
+            vol    = float(t.get("volume_ratio", 0))
             lines.append(
-                f"📈 `{t['symbol']}`\n"
-                f"  دخول: `${entry:.6g}`  ·  SL: `${sl:.6g}`\n"
-                f"  T1: `${t1:.6g}` {t1_hit}  ·  T2: `${t2:.6g}`\n"
-                f"  🕐 {t.get('opened_at', '')}"
+                f"🔹 *{t['symbol']}*\n"
+                f"  💰 دخول: `${entry:.6g}`\n"
+                f"  🛑 SL: `${sl:.6g}`\n"
+                f"  🎯 T1: `${t1:.6g}` {t1_hit}  🏆 T2: `${t2:.6g}`\n"
+                f"  📊 حجم: `{vol:.1f}x`  🕐 `{t.get('opened_at', '')}`"
             )
         await query.edit_message_text(
-            f"📊 *Momentum — {len(trades)} صفقة مفتوحة*\n\n" + "\n\n".join(lines),
+            f"📊 *Momentum — {len(trades)} صفقة مفتوحة*\n"
+            f"━━━━━━━━━━━━━━━━━━━━━\n\n"
+            + "\n\n".join(lines),
             parse_mode="Markdown",
             reply_markup=momentum_menu_kb(True),
         )
@@ -140,18 +147,31 @@ async def momentum_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def _show_menu(query, user_id: int) -> None:
-    settings  = await db.get_settings(user_id) or {}
-    enabled   = bool(settings.get("momentum_enabled"))
-    trades    = momentum_monitor.open_trades_for(user_id)
+    settings   = await db.get_settings(user_id) or {}
+    enabled    = bool(settings.get("momentum_enabled"))
+    trades     = momentum_monitor.open_trades_for(user_id)
     trade_size = float(settings.get("momentum_trade_size", 20.0))
     max_trades = int(settings.get("momentum_max_trades", 3))
+    daily_loss = float(settings.get("momentum_daily_loss", 0.0))
 
-    status = "🟢 يعمل" if enabled else "🔴 متوقف"
+    status_icon = "🟢" if enabled else "🔴"
+    status_text = "يعمل — يبحث كل 10 دقائق" if enabled else "متوقف"
+
+    slots_used = len(trades)
+    slots_bar  = "🟩" * slots_used + "⬜" * (max_trades - slots_used)
+
+    loss_line = f"\n🛑 حد الخسارة اليومي: *${daily_loss:.0f}*" if daily_loss > 0 else ""
+
     await query.edit_message_text(
-        f"⚡ *Momentum Breakout*\n\n"
-        f"الحالة: {status}\n"
-        f"الصفقات المفتوحة: *{len(trades)}* / {max_trades}\n"
-        f"حجم الصفقة: *${trade_size:.0f}*",
+        f"⚡ *Momentum Breakout*\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"{status_icon} الحالة: *{status_text}*\n"
+        f"📊 الصفقات: {slots_bar} *{slots_used}/{max_trades}*\n"
+        f"💵 حجم الصفقة: *${trade_size:.0f}*{loss_line}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🎯 T1: +2% → بيع 50% + SL للـ Breakeven\n"
+        f"🏆 T2: +4% → بيع الباقي\n"
+        f"⏰ إغلاق تلقائي بعد ساعتين",
         parse_mode="Markdown",
         reply_markup=momentum_menu_kb(enabled),
     )
@@ -170,8 +190,9 @@ async def _show_settings(query, user_id: int) -> None:
 
 
 async def _manual_sell(query, user_id: int, symbol: str) -> None:
-    trade = momentum_monitor._trades.get(symbol)
-    if not trade or trade["user_id"] != user_id:
+    trades = momentum_monitor.open_trades_for(user_id)
+    trade = next((t for t in trades if t["symbol"] == symbol), None)
+    if not trade:
         await query.edit_message_text("الصفقة غير موجودة.", reply_markup=back_to_main_kb())
         return
 

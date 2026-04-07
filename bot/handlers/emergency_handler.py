@@ -68,18 +68,23 @@ async def emergency_menu_callback(update: Update, context: ContextTypes.DEFAULT_
     context.user_data.pop("_emg_portfolio", None)
 
     momentum_count = len(_get_momentum_symbols(user_id))
-    momentum_label = f"⚡ بيع صفقات Momentum ({momentum_count})" if momentum_count else "⚡ Momentum — لا توجد صفقات"
+    momentum_label = (
+        f"⚡ بيع صفقات Momentum ({momentum_count} صفقة)"
+        if momentum_count else
+        "⚡ Momentum — لا توجد صفقات مفتوحة"
+    )
 
     buttons = [
         [InlineKeyboardButton(momentum_label, callback_data="emergency:pick_momentum")],
-        [InlineKeyboardButton("🔴 اختار عملات أخرى للبيع", callback_data="emergency:pick_coin")],
-        [InlineKeyboardButton("💥 بيع الكل", callback_data="emergency:confirm_all")],
-        [InlineKeyboardButton("◀️ القائمة الرئيسية", callback_data="menu:main")],
+        [InlineKeyboardButton("🪙 اختيار عملات للبيع", callback_data="emergency:pick_coin")],
+        [InlineKeyboardButton("💥 بيع الكل فوراً", callback_data="emergency:confirm_all")],
+        [InlineKeyboardButton("◀️ رجوع", callback_data="menu:main")],
     ]
 
     await query.edit_message_text(
-        "🚨 *بيع طوارئ*\n\n"
-        "⚠️ سيتم تنفيذ البيع *فوراً* بسعر السوق الحالي.\n\n"
+        "🚨 *بيع طوارئ*\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        "⚠️ سيتم تنفيذ البيع *فوراً* بسعر السوق\n\n"
         "اختر نوع البيع:",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(buttons),

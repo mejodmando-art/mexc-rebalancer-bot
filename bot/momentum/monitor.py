@@ -69,6 +69,7 @@ class MomentumMonitor:
             settings = await db.get_settings(user_id)
             if not settings or not settings.get("mexc_api_key"):
                 continue
+            exchange = None
             try:
                 import ccxt.async_support as ccxt
                 exchange = ccxt.mexc({
@@ -93,10 +94,11 @@ class MomentumMonitor:
             except Exception as e:
                 logger.error(f"MomentumMonitor: exchange init failed user={user_id}: {e}")
             finally:
-                try:
-                    await exchange.close()
-                except Exception:
-                    pass
+                if exchange is not None:
+                    try:
+                        await exchange.close()
+                    except Exception:
+                        pass
 
     async def _check_trade(self, app, exchange, trade: dict, tickers: dict, user_id: int) -> None:
         symbol     = trade["symbol"]
@@ -177,12 +179,14 @@ class MomentumMonitor:
         pnl_usdt = qty_half * (price - entry)
         await _notify(
             app, user_id,
-            f"🎯 *Momentum — الهدف 1*\n\n"
-            f"📈 `{symbol}`\n"
-            f"💰 بيع 50% بسعر `${price:.6g}`\n"
-            f"📊 ربح: `+{pnl_pct:.2f}%`  (`+${pnl_usdt:.2f}`)\n"
-            f"🔒 SL تحرّك لـ Breakeven\n"
-            f"🕐 {now_str}"
+            f"🎯 *Momentum — الهدف 1 ✅*\n"
+            f"━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🔹 *{symbol}*\n"
+            f"💰 بيع 50% @ `${price:.6g}`\n"
+            f"📈 ربح: `+{pnl_pct:.2f}%`  \\(`+${pnl_usdt:.2f}`\\)\n"
+            f"🔒 SL → Breakeven `${new_sl:.6g}`\n"
+            f"⏳ الباقي يستهدف T2 \\(+4%\\)\n"
+            f"🕐 `{now_str}`"
         )
 
     async def _close_trade(self, app, exchange, trade: dict, price: float,
@@ -202,14 +206,24 @@ class MomentumMonitor:
         self.remove_trade(symbol)
         await db.delete_momentum_trade(symbol)
 
+        # Record loss in history so daily loss guard works correctly
+        if pnl_usdt < 0:
+            await db.add_history(
+                user_id, now_str,
+                f"momentum_loss:{symbol}",
+                abs(pnl_usdt), success=0,
+            )
+
         sign = "+" if pnl_usdt >= 0 else ""
+        result_icon = "✅" if pnl_usdt >= 0 else "❌"
         await _notify(
             app, user_id,
-            f"{'✅' if pnl_usdt >= 0 else '❌'} *Momentum — {reason}*\n\n"
-            f"📈 `{symbol}`\n"
-            f"💰 بيع بسعر `${price:.6g}`\n"
-            f"📊 نتيجة: `{sign}{pnl_pct:.2f}%`  (`{sign}${pnl_usdt:.2f}`)\n"
-            f"🕐 {now_str}"
+            f"{result_icon} *Momentum — {reason}*\n"
+            f"━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🔹 *{symbol}*\n"
+            f"💰 بيع @ `${price:.6g}`\n"
+            f"📊 النتيجة: `{sign}{pnl_pct:.2f}%`  \\(`{sign}${pnl_usdt:.2f}`\\)\n"
+            f"🕐 `{now_str}`"
         )
 
 
