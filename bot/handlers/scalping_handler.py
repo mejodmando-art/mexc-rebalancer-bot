@@ -142,9 +142,12 @@ async def scalping_open_trades_callback(update: Update, context: ContextTypes.DE
             free = balance.get("free", {})
             stale = []
             for t in trades:
-                base = t["symbol"].replace("/USDT", "")
-                qty  = float(free.get(base, 0) or 0)
-                if qty < 1e-6:
+                base       = t["symbol"].replace("/USDT", "")
+                qty        = float(free.get(base, 0) or 0)
+                entry      = float(t.get("entry_price") or 0)
+                value_usdt = qty * entry if entry > 0 else 0.0
+                # Treat as stale if position value is below $1
+                if value_usdt < 1.0:
                     stale.append(t["symbol"])
             # Auto-clean stale trades from DB and memory
             for sym in stale:
@@ -488,6 +491,17 @@ async def run_scalping_scan(app) -> None:
 
             for setup in setups:
                 symbol = setup["symbol"]
+
+                # Re-check open count before every execution — the count grows
+                # as trades are added inside this loop, so the pre-scan check
+                # alone is not enough to enforce the limit accurately.
+                current_open = len(trade_monitor.open_symbols_for(user_id))
+                if current_open >= max_trades:
+                    logger.info(
+                        f"Scalping: max_trades={max_trades} reached mid-loop "
+                        f"(open={current_open}), stopping execution for user {user_id}"
+                    )
+                    break
 
                 # Per-trade balance check — notify with symbol name
                 if usdt_balance < trade_size:
@@ -841,9 +855,16 @@ async def scalping_sell_exec_callback(update: Update, context: ContextTypes.DEFA
                 balance   = await client.exchange.fetch_balance()
                 free_qty  = float(balance.get("free", {}).get(base, 0) or 0)
 
-                if free_qty < 1e-8:
+                # Get current price to evaluate position value
+                try:
+                    ticker     = await client.exchange.fetch_ticker(symbol)
+                    cur_price  = float(ticker.get("last") or ticker.get("close") or trade["entry_price"])
+                except Exception:
+                    cur_price  = float(trade["entry_price"])
+
+                if free_qty * cur_price < 1.0:
                     await trade_monitor.remove_trade(symbol)
-                    results.append(f"⚠️ `{symbol}` — رصيد صفر")
+                    results.append(f"⚠️ `{symbol}` — قيمة أقل من $1، تم تجاهلها")
                     continue
 
                 sell_order = await client.exchange.create_market_sell_order(symbol, free_qty)
