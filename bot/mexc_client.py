@@ -1,3 +1,4 @@
+import asyncio
 import time
 import ccxt.async_support as ccxt
 
@@ -9,6 +10,7 @@ _MIN_VALUE_THRESHOLD = 1.0
 _MARKETS_CACHE: dict = {}          # symbol → min_qty
 _MARKETS_CACHE_TS: float = 0.0
 _MARKETS_CACHE_TTL: float = 600.0  # seconds
+_MARKETS_LOCK = asyncio.Lock()     # prevents thundering-herd on cache refresh
 
 class MexcClient:
     def __init__(self, api_key: str, secret: str, quote: str = "USDT"):
@@ -94,12 +96,15 @@ class MexcClient:
         try:
             global _MARKETS_CACHE, _MARKETS_CACHE_TS
             if time.monotonic() - _MARKETS_CACHE_TS > _MARKETS_CACHE_TTL:
-                markets = await self.exchange.fetch_markets()
-                _MARKETS_CACHE = {
-                    m["symbol"]: m.get("limits", {}).get("amount", {}).get("min", 0) or 0
-                    for m in markets
-                }
-                _MARKETS_CACHE_TS = time.monotonic()
+                async with _MARKETS_LOCK:
+                    # Re-check inside lock — another coroutine may have refreshed already
+                    if time.monotonic() - _MARKETS_CACHE_TS > _MARKETS_CACHE_TTL:
+                        markets = await self.exchange.fetch_markets()
+                        _MARKETS_CACHE = {
+                            m["symbol"]: m.get("limits", {}).get("amount", {}).get("min", 0) or 0
+                            for m in markets
+                        }
+                        _MARKETS_CACHE_TS = time.monotonic()
             min_qty_map = _MARKETS_CACHE
         except Exception:
             min_qty_map = _MARKETS_CACHE or {}

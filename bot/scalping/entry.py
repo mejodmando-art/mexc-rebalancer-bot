@@ -13,8 +13,11 @@ Relaxed from strict full-engulf to 50% overlap to catch more valid entries
 without sacrificing directional bias.
 """
 
+import logging
 from typing import Dict, Any
 
+
+logger = logging.getLogger(__name__)
 
 async def confirm_entry(symbol: str, exchange) -> Dict[str, Any]:
     """
@@ -62,5 +65,6 @@ async def confirm_entry(symbol: str, exchange) -> Dict[str, Any]:
 
         return {"confirmed": False, "entry_price": 0.0}
 
-    except Exception:
+    except Exception as e:
+        logger.debug(f"Entry: {symbol} failed: {e}")
         return {"confirmed": False, "entry_price": 0.0}

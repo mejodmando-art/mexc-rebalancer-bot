@@ -139,7 +139,7 @@ logger = logging.getLogger(__name__)
 
 
 def build_app() -> Application:
-    app = Application.builder().token(config.TELEGRAM_BOT_TOKEN).build()
+    app = Application.builder().token(config.telegram_token).build()
 
     TEXT = filters.TEXT & ~filters.COMMAND
 

@@ -11,14 +11,13 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     await update.message.reply_text(
-        f"*أهلاً {user.first_name}* 👋\n\n"
-        "🤖 *MEXC Trade Bot*\n\n"
-        "📌 *إدارة المحفظة*\n"
-        "  💰 عرض الرصيد · ⚖️ إعادة التوازن\n"
-        "  🗂 محافظ متعددة · 🚨 بيع طوارئ\n\n"
-        "📌 *الاستراتيجيات*\n"
-        "  ⚡ Scalping · 🐋 Whale · 🔲 Grid\n\n"
-        "⚙️ ابدأ بربط مفاتيح MEXC API من *الإعدادات*",
+        f"أهلاً *{user.first_name}* 👋\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        "💰 المحفظة  ·  ⚖️ إعادة التوازن\n"
+        "🗂 محافظ متعددة  ·  🚨 بيع طوارئ\n"
+        "⚡ Scalping  ·  🐋 Whale  ·  🔲 Grid\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "ابدأ بربط مفاتيح MEXC API من ⚙️ *الإعدادات*",
         parse_mode="Markdown",
         reply_markup=main_menu_kb(),
     )
@@ -27,24 +26,15 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "📖 *دليل الاستخدام*\n\n"
-        "━━━━━━━━━━━━━━━━━━━━━\n"
-        "➕ *إضافة العملات*\n"
-        "━━━━━━━━━━━━━━━━━━━━━\n"
-        "أرسل الرموز هكذا: `BTC ETH SOL USDT`\n"
-        "ثم اختر طريقة التوزيع:\n"
-        "  ⚖️ *متساوٍ* — 100% ÷ عدد العملات\n"
-        "  📈 *حسب السوق* — بناءً على حجم التداول\n"
-        "  ✏️ *يدوي* — تحدد النسبة بنفسك\n\n"
-        "━━━━━━━━━━━━━━━━━━━━━\n"
-        "📌 *أو أرسل مباشرة بالنسب:*\n"
-        "━━━━━━━━━━━━━━━━━━━━━\n"
-        "`BTC=40`\n`ETH=30`\n`SOL=20`\n`USDT=10`\n\n"
-        "━━━━━━━━━━━━━━━━━━━━━\n"
-        "🗂 *المحافظ المتعددة*\n"
-        "━━━━━━━━━━━━━━━━━━━━━\n"
-        "من زر 🗂 محافظي أنشئ محافظ منفصلة\n"
-        "لكل محفظة رأس مال وتوزيع مستقل\n\n"
-        "❌ `/cancel` — إلغاء أي عملية جارية",
+        "*إضافة العملات:*\n"
+        "أرسل الرموز: `BTC ETH SOL USDT`\n"
+        "أو بالنسب مباشرة:\n"
+        "`BTC=40` `ETH=30` `SOL=20` `USDT=10`\n\n"
+        "*طرق التوزيع:*\n"
+        "⚖️ متساوٍ  ·  📈 حسب السوق  ·  ✏️ يدوي\n\n"
+        "*المحافظ المتعددة:*\n"
+        "من 🗂 محافظي — لكل محفظة رأس مال وتوزيع مستقل\n\n"
+        "`/cancel` — إلغاء أي عملية جارية",
         parse_mode="Markdown",
         reply_markup=main_menu_kb(),
     )

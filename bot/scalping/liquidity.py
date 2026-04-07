@@ -8,11 +8,14 @@ Using 1H instead of 4H gives more frequent, actionable zones that price
 actually revisits. Proximity threshold is 5% to catch approaches early.
 """
 
+import logging
 from typing import Dict, Any
 
 _LOOKBACK       = 100   # 100 × 1H ≈ 4 days — wider context for reliable zones
 _PROXIMITY_PCT  = 0.03  # price within 3% of zone boundary
 
+
+logger = logging.getLogger(__name__)
 
 async def get_liquidity_zones(symbol: str, exchange) -> Dict[str, Any]:
     """
@@ -59,7 +62,8 @@ async def get_liquidity_zones(symbol: str, exchange) -> Dict[str, Any]:
             "side":      side,
         }
 
-    except Exception:
+    except Exception as e:
+        logger.debug(f"Liquidity: {symbol} failed: {e}")
         return _empty_result()
 
 
