@@ -6,6 +6,7 @@ from bot.keyboards import (
     portfolios_list_kb, portfolio_actions_kb,
     portfolio_delete_confirm_kb, main_menu_kb, back_to_main_kb,
     portfolio_sell_one_kb, portfolio_sell_confirm_kb,
+    rebalance_confirm_kb, rebalance_dry_kb,
 )
 
 # Conversation states
@@ -28,13 +29,23 @@ async def portfolios_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     if not portfolios:
         portfolios = await db.get_portfolios(user_id)
 
-    text = "📁 *محافظك*\n\n"
     if not portfolios:
-        text += "لا يوجد محافظ بعد. أنشئ محفظتك الأولى!"
+        text = (
+            "🗂️ *محافظي*\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "لا يوجد محافظ بعد.\n"
+            "اضغط ➕ لإنشاء محفظتك الأولى!"
+        )
     else:
-        for p in portfolios:
-            mark = "✅ نشطة" if p["id"] == active_id else ""
-            text += f"• *{p['name']}* — ${p['capital_usdt']:,.0f} USDT {mark}\n"
+        total_capital = sum(p["capital_usdt"] for p in portfolios)
+        text = (
+            f"🗂️ *محافظي*\n"
+            f"━━━━━━━━━━━━━━━━━━━━━\n"
+            f"📊 عدد المحافظ: *{len(portfolios)}*\n"
+            f"💰 إجمالي رأس المال: *${total_capital:,.0f} USDT*\n"
+            f"━━━━━━━━━━━━━━━━━━━━━\n"
+            f"اختر محفظة للإدارة:"
+        )
 
     await query.edit_message_text(
         text, parse_mode="Markdown",
@@ -97,6 +108,112 @@ async def portfolio_detail_callback(update: Update, context: ContextTypes.DEFAUL
         text, parse_mode="Markdown",
         reply_markup=portfolio_actions_kb(portfolio_id, p["id"] == active_id, bool(p.get("auto_enabled")))
     )
+
+
+async def portfolio_rebalance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """إعادة التوازن مباشرة من داخل شاشة المحفظة."""
+    from bot.mexc_client import MexcClient
+    from bot.rebalancer import calculate_trades
+    from bot.keyboards import rebalance_confirm_kb, back_to_main_kb
+    import time as _time
+
+    query = update.callback_query
+    await query.answer()
+    user_id = update.effective_user.id
+    portfolio_id = int(query.data.split(":")[1])
+
+    p = await db.get_portfolio(portfolio_id)
+    if not p or p["user_id"] != user_id:
+        await query.answer("❌ محفظة غير موجودة", show_alert=True)
+        return
+
+    await query.edit_message_text("⏳ جاري تحليل المحفظة...")
+
+    settings = await db.get_settings(user_id)
+    if not settings or not settings.get("mexc_api_key"):
+        await query.edit_message_text(
+            "❌ يجب ربط مفاتيح MEXC API أولاً.",
+            reply_markup=back_to_main_kb()
+        )
+        return
+
+    allocations = await db.get_portfolio_allocations(portfolio_id)
+    if not allocations:
+        await query.edit_message_text(
+            f"❌ لا يوجد توزيع في محفظة *{p.get('name', '')}*.\n"
+            "اذهب إلى 🪙 إضافة / تعديل عملات.",
+            parse_mode="Markdown",
+            reply_markup=portfolio_actions_kb(portfolio_id, True, bool(p.get("auto_enabled")))
+        )
+        return
+
+    total_pct = sum(a["target_percentage"] for a in allocations)
+    if abs(total_pct - 100) > 1.0:
+        await query.edit_message_text(
+            f"⚠️ *التوزيع غير صحيح*\n\n"
+            f"المجموع الحالي: `{total_pct:.1f}%` — يجب أن يكون 100%",
+            parse_mode="Markdown",
+            reply_markup=portfolio_actions_kb(portfolio_id, True, bool(p.get("auto_enabled")))
+        )
+        return
+
+    client = MexcClient(settings["mexc_api_key"], settings["mexc_secret_key"])
+    try:
+        portfolio, total_usdt = await asyncio.wait_for(client.get_portfolio(), timeout=20)
+    except asyncio.TimeoutError:
+        await query.edit_message_text("❌ انتهت المهلة — MEXC لم يستجب.", reply_markup=back_to_main_kb())
+        return
+    except Exception as e:
+        await query.edit_message_text(f"❌ خطأ: {str(e)[:100]}", reply_markup=back_to_main_kb())
+        return
+    finally:
+        await client.close()
+
+    capital = float(p.get("capital_usdt") or 0)
+    alloc_symbols = {a["symbol"] for a in allocations}
+    portfolio_value = sum(portfolio.get(sym, {}).get("value_usdt", 0.0) for sym in alloc_symbols)
+    usdt_in_account = portfolio.get("USDT", {}).get("value_usdt", 0.0)
+    effective_total = min(capital, portfolio_value + usdt_in_account) if capital > 0 else portfolio_value + usdt_in_account
+    if effective_total < 1.0:
+        effective_total = min(capital, total_usdt) if capital > 0 else total_usdt
+
+    threshold = float(p.get("threshold") or settings.get("threshold") or 5.0)
+    trades, drift_report = calculate_trades(portfolio, effective_total, allocations, threshold)
+
+    context.user_data["_pending_trades"]       = trades
+    context.user_data["_pending_portfolio_id"] = portfolio_id
+    context.user_data["_pending_total"]        = effective_total
+    context.user_data["_pending_ts"]           = _time.monotonic()
+
+    text = (
+        f"⚖️ *إعادة التوازن — {p.get('name', '')}*\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"💰 قيمة المحفظة: `${effective_total:,.2f}`\n"
+        f"🎯 حد الانحراف: `{threshold}%`\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+    )
+    for d in drift_report:
+        if d["needs_action"]:
+            arrow = "🔴" if d["drift_pct"] > 0 else "🟢"
+            action_label = "بيع" if d["drift_pct"] > 0 else "شراء"
+            text += f"{arrow} `{d['symbol']:<6}` `{d['current_pct']:.1f}%`→`{d['target_pct']:.1f}%` `{d['drift_pct']:+.1f}%` ← {action_label}\n"
+        else:
+            text += f"✅ `{d['symbol']:<6}` `{d['current_pct']:.1f}%`→`{d['target_pct']:.1f}%` `{d['drift_pct']:+.1f}%`\n"
+
+    if not trades:
+        text += "\n━━━━━━━━━━━━━━━━━━━━━\n✅ *المحفظة متوازنة*"
+        from bot.keyboards import rebalance_dry_kb
+        await query.edit_message_text(text, parse_mode="Markdown", reply_markup=rebalance_dry_kb())
+        return
+
+    total_trade = sum(t["usdt_amount"] for t in trades)
+    text += f"━━━━━━━━━━━━━━━━━━━━━\n💡 *{len(trades)} صفقة مطلوبة*\n"
+    for t in trades:
+        emoji = "🔴 بيع" if t["action"] == "sell" else "🟢 شراء"
+        text += f"{emoji}  `{t['symbol']}`  `${t['usdt_amount']:.2f}`\n"
+    text += f"━━━━━━━━━━━━━━━━━━━━━\n💵 الإجمالي: `${total_trade:.2f}`"
+
+    await query.edit_message_text(text, parse_mode="Markdown", reply_markup=rebalance_confirm_kb())
 
 
 async def switch_portfolio_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):

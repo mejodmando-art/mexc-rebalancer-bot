@@ -42,6 +42,10 @@ from bot.handlers.grid_handler import (
     grid_live_callback,
     grid_stop_callback,
     run_grid_monitor,
+    grid_edit_tpsl_callback, grid_edit_tpsl_input,
+    grid_edit_range_callback, grid_edit_range_input,
+    grid_add_funds_callback, grid_add_funds_input,
+    grid_remove_funds_callback, grid_remove_funds_input,
 )
 from bot.grid.monitor import grid_monitor
 from bot.handlers.portfolio_manager import (
@@ -67,6 +71,7 @@ from bot.handlers.portfolio_manager import (
     tp1_value_input, tp1_sell_input,
     tp2_value_input, tp2_sell_input,
     sl_value_input,
+    portfolio_rebalance_callback,
     CREATE_NAME, CREATE_CAPITAL, EDIT_NAME, EDIT_CAPITAL,
     PORTFOLIO_SET_THRESHOLD, PORTFOLIO_SET_INTERVAL,
     TP_TP1_TYPE, TP_TP1_VALUE, TP_TP1_SELL,
@@ -255,14 +260,19 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(momentum_callback, pattern="^momentum:"))
 
     # ── Grid Bot ───────────────────────────────────────────────────────────────
-    app.add_handler(CallbackQueryHandler(grid_menu_callback,   pattern="^grid:menu$"))
-    app.add_handler(CallbackQueryHandler(grid_detail_callback, pattern="^grid_detail:\\d+$"))
-    app.add_handler(CallbackQueryHandler(grid_live_callback,   pattern="^grid_live:\\d+$"))
-    app.add_handler(CallbackQueryHandler(grid_stop_callback,   pattern="^grid_stop:\\d+$"))
+    app.add_handler(CallbackQueryHandler(grid_menu_callback,         pattern="^grid:menu$"))
+    app.add_handler(CallbackQueryHandler(grid_detail_callback,       pattern="^grid_detail:\\d+$"))
+    app.add_handler(CallbackQueryHandler(grid_live_callback,         pattern="^grid_live:\\d+$"))
+    app.add_handler(CallbackQueryHandler(grid_stop_callback,         pattern="^grid_stop:\\d+$"))
+    app.add_handler(CallbackQueryHandler(grid_edit_tpsl_callback,    pattern="^grid_edit_tpsl:\\d+$"))
+    app.add_handler(CallbackQueryHandler(grid_edit_range_callback,   pattern="^grid_edit_range:\\d+$"))
+    app.add_handler(CallbackQueryHandler(grid_add_funds_callback,    pattern="^grid_add_funds:\\d+$"))
+    app.add_handler(CallbackQueryHandler(grid_remove_funds_callback, pattern="^grid_remove_funds:\\d+$"))
 
     # ── Portfolio Management ───────────────────────────────────────────────────
     app.add_handler(CallbackQueryHandler(portfolios_callback,               pattern="^portfolios$"))
     app.add_handler(CallbackQueryHandler(portfolio_detail_callback,         pattern="^portfolio:\\d+$"))
+    app.add_handler(CallbackQueryHandler(portfolio_rebalance_callback,      pattern="^pf_rebalance:"))
     app.add_handler(CallbackQueryHandler(switch_portfolio_callback,         pattern="^portfolio_switch:"))
     app.add_handler(CallbackQueryHandler(delete_portfolio_callback,         pattern="^portfolio_delete:\\d+$"))
     app.add_handler(CallbackQueryHandler(delete_portfolio_confirm_callback, pattern="^portfolio_delete_confirm:"))
@@ -277,14 +287,23 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(portfolio_rebalance_sell_callback, pattern="^portfolio_rebalance_sell:"))
     app.add_handler(CallbackQueryHandler(portfolio_sell_exec_callback,      pattern="^portfolio_sell_exec:"))
 
-    # ── Momentum inline settings text input ───────────────────────────────────
-    async def _settings_text_router(update, context):
-        if "_momentum_setting" in context.user_data:
+    # ── Inline text input router ───────────────────────────────────────────────
+    async def _text_router(update, context):
+        ud = context.user_data
+        if "_momentum_setting" in ud:
             await momentum_setting_input(update, context)
+        elif "_grid_edit_tpsl" in ud:
+            await grid_edit_tpsl_input(update, context)
+        elif "_grid_edit_range" in ud:
+            await grid_edit_range_input(update, context)
+        elif "_grid_add_funds" in ud:
+            await grid_add_funds_input(update, context)
+        elif "_grid_remove_funds" in ud:
+            await grid_remove_funds_input(update, context)
 
     app.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND & filters.UpdateType.MESSAGE,
-        _settings_text_router,
+        _text_router,
     ))
 
     # ── Emergency Sell ─────────────────────────────────────────────────────────

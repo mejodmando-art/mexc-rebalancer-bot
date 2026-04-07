@@ -12,18 +12,14 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         f"👋 أهلاً *{user.first_name}*\n\n"
-        "┌─────────────────────┐\n"
-        "│  🤖 *MEXC Rebalancer Bot*  │\n"
-        "└─────────────────────┘\n\n"
-        "💼 *إدارة المحفظة*\n"
-        "  ├ عرض الرصيد وإعادة التوازن\n"
-        "  └ محافظ متعددة مستقلة\n\n"
-        "📈 *استراتيجيات التداول*\n"
-        "  ├ ⚡ Momentum Breakout\n"
-        "  └ 🔲 Grid Bot\n\n"
-        "🚨 *بيع طوارئ فوري*\n\n"
-        "─────────────────────\n"
-        "ابدأ بربط مفاتيح MEXC من ⚙️ *الإعدادات*",
+        "🤖 *MEXC Rebalancer Bot*\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "🗂️ *محافظي* — إدارة المحافظ وإعادة التوازن\n"
+        "⚡ *Momentum* — استراتيجية الاختراق التلقائي\n"
+        "🔲 *Grid Bot* — شبكة أوامر تلقائية\n"
+        "⚙️ *الإعدادات* — ربط MEXC API\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        "ابدأ من ⚙️ *الإعدادات* لربط مفاتيح MEXC",
         parse_mode="Markdown",
         reply_markup=main_menu_kb(),
     )

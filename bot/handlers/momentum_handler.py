@@ -112,14 +112,20 @@ async def momentum_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _manual_sell(query, user_id, symbol)
 
     elif action == "settings":
-        await _show_settings(query, user_id)
+        # الإعدادات مدمجة في القائمة الرئيسية
+        await _show_menu(query, user_id)
 
     elif action == "set_size":
         settings = await db.get_settings(user_id) or {}
         current  = settings.get("momentum_trade_size", 20.0)
         context.user_data["_momentum_setting"] = "size"
         await query.edit_message_text(
-            f"💵 *حجم الصفقة*\n\nالحالي: `${current:.0f}`\n\nأرسل القيمة الجديدة بالدولار (مثال: `25`):",
+            f"💵 *حجم الصفقة*\n"
+            f"━━━━━━━━━━━━━━━━━━━━━\n"
+            f"الحالي: `${current:.0f}`\n\n"
+            f"أرسل القيمة الجديدة بالدولار:\n"
+            f"مثال: `25`\n\n"
+            f"`/cancel` للإلغاء",
             parse_mode="Markdown",
         )
         return SET_SIZE
@@ -129,7 +135,11 @@ async def momentum_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         current  = settings.get("momentum_max_trades", 3)
         context.user_data["_momentum_setting"] = "max"
         await query.edit_message_text(
-            f"📊 *أقصى صفقات مفتوحة*\n\nالحالي: `{current}`\n\nأرسل الرقم الجديد (1 إلى 10):",
+            f"📊 *أقصى صفقات مفتوحة*\n"
+            f"━━━━━━━━━━━━━━━━━━━━━\n"
+            f"الحالي: `{current}`\n\n"
+            f"أرسل الرقم الجديد \\(1 إلى 10\\):\n\n"
+            f"`/cancel` للإلغاء",
             parse_mode="Markdown",
         )
         return SET_MAX
@@ -138,9 +148,13 @@ async def momentum_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         settings = await db.get_settings(user_id) or {}
         current  = settings.get("momentum_daily_loss", 0.0)
         context.user_data["_momentum_setting"] = "loss"
+        current_str = "غير محدد" if not current else f"${current:.0f}"
         await query.edit_message_text(
-            f"🛑 *حد الخسارة اليومي*\n\nالحالي: `{'غير محدد' if not current else f'${current:.0f}'}`\n\n"
-            "أرسل القيمة بالدولار (0 = غير محدد):",
+            f"🛑 *حد الخسارة اليومي*\n"
+            f"━━━━━━━━━━━━━━━━━━━━━\n"
+            f"الحالي: `{current_str}`\n\n"
+            f"أرسل القيمة بالدولار \\(0 = غير محدد\\):\n\n"
+            f"`/cancel` للإلغاء",
             parse_mode="Markdown",
         )
         return SET_LOSS
@@ -173,20 +187,9 @@ async def _show_menu(query, user_id: int) -> None:
         f"🏆 T2: +4% → بيع الباقي\n"
         f"⏰ إغلاق تلقائي بعد ساعتين",
         parse_mode="Markdown",
-        reply_markup=momentum_menu_kb(enabled),
+        reply_markup=momentum_menu_kb(enabled, trade_size, max_trades, daily_loss),
     )
 
-
-async def _show_settings(query, user_id: int) -> None:
-    settings   = await db.get_settings(user_id) or {}
-    trade_size = float(settings.get("momentum_trade_size", 20.0))
-    max_trades = int(settings.get("momentum_max_trades", 3))
-    daily_loss = float(settings.get("momentum_daily_loss", 0.0))
-    await query.edit_message_text(
-        "⚙️ *إعدادات Momentum*",
-        parse_mode="Markdown",
-        reply_markup=momentum_settings_kb(trade_size, max_trades, daily_loss),
-    )
 
 
 async def _manual_sell(query, user_id: int, symbol: str) -> None:
@@ -258,30 +261,36 @@ async def momentum_setting_input(update: Update, context: ContextTypes.DEFAULT_T
         await update.message.reply_text("❌ أرسل رقماً صحيحاً.", reply_markup=back_to_main_kb())
         return ConversationHandler.END
 
+    from bot.keyboards import momentum_menu_kb as _mkb
+    back_kb = InlineKeyboardMarkup([[InlineKeyboardButton("◀️ رجوع", callback_data="momentum:menu")]])
+
     if setting == "size":
         if val < 5:
-            await update.message.reply_text("❌ الحد الأدنى $5.", reply_markup=back_to_main_kb())
+            await update.message.reply_text("❌ الحد الأدنى $5.", reply_markup=back_kb)
             return ConversationHandler.END
         await db.update_settings(user_id, momentum_trade_size=val)
         await update.message.reply_text(
-            f"✅ حجم الصفقة: `${val:.0f}`", parse_mode="Markdown", reply_markup=back_to_main_kb()
+            f"✅ *تم الحفظ*\n💵 حجم الصفقة: `${val:.0f}`",
+            parse_mode="Markdown", reply_markup=back_kb
         )
 
     elif setting == "max":
         val = int(val)
         if not 1 <= val <= 10:
-            await update.message.reply_text("❌ أدخل رقماً بين 1 و 10.", reply_markup=back_to_main_kb())
+            await update.message.reply_text("❌ أدخل رقماً بين 1 و 10.", reply_markup=back_kb)
             return ConversationHandler.END
         await db.update_settings(user_id, momentum_max_trades=val)
         await update.message.reply_text(
-            f"✅ أقصى صفقات: `{val}`", parse_mode="Markdown", reply_markup=back_to_main_kb()
+            f"✅ *تم الحفظ*\n📊 أقصى صفقات: `{val}`",
+            parse_mode="Markdown", reply_markup=back_kb
         )
 
     elif setting == "loss":
         await db.update_settings(user_id, momentum_daily_loss=val)
         label = f"${val:.0f}" if val > 0 else "غير محدد"
         await update.message.reply_text(
-            f"✅ حد الخسارة اليومي: `{label}`", parse_mode="Markdown", reply_markup=back_to_main_kb()
+            f"✅ *تم الحفظ*\n🛑 حد الخسارة اليومي: `{label}`",
+            parse_mode="Markdown", reply_markup=back_kb
         )
 
     context.user_data.pop("_momentum_setting", None)
