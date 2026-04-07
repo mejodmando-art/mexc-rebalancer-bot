@@ -106,18 +106,40 @@ class _SQLiteConn:
         await self._conn.commit()
 
 
+# ── Locked SQLite connection (serialises writes) ───────────────────────────────
+
+class _LockedSQLiteConn(_SQLiteConn):
+    """Wraps _SQLiteConn with an asyncio.Lock to prevent concurrent SQLite writes."""
+
+    def __init__(self, path: str, lock: asyncio.Lock):
+        super().__init__(path)
+        self._lock = lock
+
+    async def __aenter__(self):
+        await self._lock.acquire()
+        return await super().__aenter__()
+
+    async def __aexit__(self, *args):
+        try:
+            await super().__aexit__(*args)
+        finally:
+            self._lock.release()
+
+
 # ── Database class ─────────────────────────────────────────────────────────────
 
 class Database:
     def __init__(self):
         self._path = config.database_path
-        self._lock = asyncio.Lock()
+        self._write_lock = asyncio.Lock()  # serialise SQLite writes
         self._pool = None  # PostgreSQL only
 
     def _conn(self):
         if _USE_PG:
             return _PGConn(self._pool)
-        return _SQLiteConn(self._path)
+        # All SQLite access goes through the write lock — WAL mode allows
+        # concurrent reads but Python's aiosqlite is single-connection anyway.
+        return _LockedSQLiteConn(self._path, self._write_lock)
 
     # ── Init / migrations ──────────────────────────────────────────────────────
 

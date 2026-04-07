@@ -4,7 +4,7 @@
 
 **بوت تيليجرام لإدارة المحفظة والتداول على منصة MEXC**
 
-[![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
+[![Python](https://img.shields.io/badge/Python-3.12+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
 [![Telegram](https://img.shields.io/badge/Telegram-Bot-26A5E4?style=flat-square&logo=telegram&logoColor=white)](https://core.telegram.org/bots)
 [![Railway](https://img.shields.io/badge/Deploy-Railway-0B0D0E?style=flat-square&logo=railway&logoColor=white)](https://railway.app)
 
@@ -93,6 +93,24 @@ USDT=10
 على Railway، البيانات **تُحذف عند كل إعادة تشغيل** — أضف PostgreSQL للحفظ الدائم.
 
 ---
+
+---
+
+## 🗂 هيكل المشروع
+
+```
+main.py                  — نقطة الدخول وتسجيل الـ handlers
+bot/
+  config.py              — إعدادات البيئة
+  database.py            — طبقة البيانات (SQLite / PostgreSQL)
+  mexc_client.py         — تغليف ccxt لـ MEXC
+  rebalancer.py          — حساب الصفقات المطلوبة
+  scheduler.py           — التوازن التلقائي المجدول
+  portfolio_monitor.py   — مراقبة TP/SL للمحافظ
+  handlers/              — معالجات أوامر التيليجرام
+  scalping/              — استراتيجية Scalping
+  grid/                  — استراتيجية Grid
+```
 
 <div align="center">
   <sub>Built with python-telegram-bot · ccxt · Railway</sub>
