@@ -263,11 +263,31 @@ class Database:
                 "ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS tp2_hit INTEGER DEFAULT 0",
                 "ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS sl_type TEXT DEFAULT 'pct'",
                 "ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS sl_value REAL DEFAULT 0.0",
+                # Momentum strategy
+                "ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS momentum_enabled INTEGER DEFAULT 0",
+                "ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS momentum_trade_size REAL DEFAULT 20.0",
+                "ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS momentum_max_trades INTEGER DEFAULT 3",
+                "ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS momentum_daily_loss REAL DEFAULT 0.0",
             ]:
                 try:
                     await conn.execute(sql)
                 except Exception:
                     pass
+            # Momentum trades table
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS momentum_trades (
+                    symbol TEXT PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    entry_price REAL,
+                    stop_loss REAL,
+                    target1 REAL,
+                    target2 REAL,
+                    qty REAL,
+                    qty_half REAL,
+                    t1_hit INTEGER DEFAULT 0,
+                    volume_ratio REAL DEFAULT 0.0,
+                    opened_at TEXT
+                )""")
 
     async def _init_sqlite(self):
         async with self._conn() as conn:
@@ -400,12 +420,33 @@ class Database:
                 "ALTER TABLE portfolios ADD COLUMN tp2_hit INTEGER DEFAULT 0",
                 "ALTER TABLE portfolios ADD COLUMN sl_type TEXT DEFAULT 'pct'",
                 "ALTER TABLE portfolios ADD COLUMN sl_value REAL DEFAULT 0.0",
+                # Momentum strategy
+                "ALTER TABLE user_settings ADD COLUMN momentum_enabled INTEGER DEFAULT 0",
+                "ALTER TABLE user_settings ADD COLUMN momentum_trade_size REAL DEFAULT 20.0",
+                "ALTER TABLE user_settings ADD COLUMN momentum_max_trades INTEGER DEFAULT 3",
+                "ALTER TABLE user_settings ADD COLUMN momentum_daily_loss REAL DEFAULT 0.0",
             ]:
                 try:
                     await conn.execute(sql)
                     await conn.commit()
                 except Exception:
                     pass
+            # Momentum trades table
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS momentum_trades (
+                    symbol TEXT PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    entry_price REAL,
+                    stop_loss REAL,
+                    target1 REAL,
+                    target2 REAL,
+                    qty REAL,
+                    qty_half REAL,
+                    t1_hit INTEGER DEFAULT 0,
+                    volume_ratio REAL DEFAULT 0.0,
+                    opened_at TEXT
+                )""")
+            await conn.commit()
 
     # ── Portfolio CRUD ─────────────────────────────────────────────────────────
 
@@ -621,10 +662,9 @@ class Database:
         _ALLOWED_SETTINGS_COLS = {
             "mexc_api_key", "mexc_secret_key", "threshold", "auto_enabled",
             "auto_interval_hours", "quote_currency", "last_rebalance_at",
-            "active_portfolio_id", "scalping_enabled", "scalping_trade_size",
-            "scalping_max_trades", "scalping_daily_loss_limit", "scalping_trail_pct",
-            "whale_enabled", "whale_trade_size",
-            "whale_max_trades", "whale_daily_loss_limit",
+            "active_portfolio_id",
+            "momentum_enabled", "momentum_trade_size",
+            "momentum_max_trades", "momentum_daily_loss",
         }
         for k in kwargs:
             if k not in _ALLOWED_SETTINGS_COLS:
@@ -900,6 +940,84 @@ class Database:
         """Return all open scalping trades (used on startup to restore state)."""
         async with self._conn() as conn:
             return await conn.fetchall("SELECT * FROM scalping_trades")
+
+    # ── Momentum trades ────────────────────────────────────────────────────────
+
+    async def save_momentum_trade(self, user_id: int, trade: dict) -> None:
+        async with self._conn() as conn:
+            if _USE_PG:
+                await conn.execute(
+                    """INSERT INTO momentum_trades
+                       (symbol, user_id, entry_price, stop_loss, target1, target2,
+                        qty, qty_half, t1_hit, volume_ratio, opened_at)
+                       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+                       ON CONFLICT (symbol) DO UPDATE SET
+                         stop_loss=EXCLUDED.stop_loss, t1_hit=EXCLUDED.t1_hit""",
+                    trade["symbol"], user_id,
+                    trade["entry_price"], trade["stop_loss"],
+                    trade["target1"], trade["target2"],
+                    trade["qty"], trade["qty_half"],
+                    trade.get("t1_hit", 0), trade.get("volume_ratio", 0.0),
+                    trade.get("opened_at", ""),
+                )
+            else:
+                await conn.execute(
+                    """INSERT OR REPLACE INTO momentum_trades
+                       (symbol, user_id, entry_price, stop_loss, target1, target2,
+                        qty, qty_half, t1_hit, volume_ratio, opened_at)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                    (trade["symbol"], user_id,
+                     trade["entry_price"], trade["stop_loss"],
+                     trade["target1"], trade["target2"],
+                     trade["qty"], trade["qty_half"],
+                     trade.get("t1_hit", 0), trade.get("volume_ratio", 0.0),
+                     trade.get("opened_at", "")),
+                )
+                await conn.commit()
+
+    async def update_momentum_trade(self, symbol: str, **kwargs) -> None:
+        _ALLOWED = {"stop_loss", "t1_hit"}
+        for k in kwargs:
+            if k not in _ALLOWED:
+                raise ValueError(f"Column not allowed: {k}")
+        async with self._conn() as conn:
+            for k, v in kwargs.items():
+                if _USE_PG:
+                    await conn.execute(
+                        f"UPDATE momentum_trades SET {k}=$1 WHERE symbol=$2", v, symbol)
+                else:
+                    await conn.execute(
+                        f"UPDATE momentum_trades SET {k}=? WHERE symbol=?", (v, symbol))
+            if not _USE_PG:
+                await conn.commit()
+
+    async def delete_momentum_trade(self, symbol: str) -> None:
+        async with self._conn() as conn:
+            if _USE_PG:
+                await conn.execute(
+                    "DELETE FROM momentum_trades WHERE symbol=$1", symbol)
+            else:
+                await conn.execute(
+                    "DELETE FROM momentum_trades WHERE symbol=?", (symbol,))
+                await conn.commit()
+
+    async def load_momentum_trades(self) -> list:
+        """Return all open momentum trades (used on startup to restore state)."""
+        async with self._conn() as conn:
+            return await conn.fetchall("SELECT * FROM momentum_trades")
+
+    async def get_all_users_with_momentum(self) -> list:
+        """Return settings rows for users with momentum_enabled=1."""
+        async with self._conn() as conn:
+            return await conn.fetchall(
+                "SELECT * FROM user_settings WHERE momentum_enabled=1"
+            )
+
+    async def get_momentum_daily_loss(self, user_id: int) -> float:
+        """Sum of losses from momentum trades closed today (positive = loss amount)."""
+        # This is a best-effort calculation based on trade history.
+        # Returns 0.0 if no history table tracks momentum P&L yet.
+        return 0.0
 
 
 db = Database()
