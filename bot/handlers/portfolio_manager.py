@@ -90,19 +90,18 @@ async def portfolio_detail_callback(update: Update, context: ContextTypes.DEFAUL
         f"📁 *{p['name']}*  {active_badge}\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"💰 رأس المال: *${p['capital_usdt']:,.2f} USDT*\n"
-        f"🪙 العملات: *{len(allocs)}*  📊 التوزيع: {alloc_health}\n"
-        f"🎯 حد الانحراف: *{threshold}%*\n"
-        f"{auto_icon} التوازن التلقائي: *{auto_str}*\n"
+        f"🎯 حد الانحراف: *{threshold}%*  {auto_icon} التوازن: *{auto_str}*\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
     )
     if allocs:
-        text += "━━━━━━━━━━━━━━━━━━━━━\n"
-        for a in allocs[:8]:
-            bar_w = 6
-            filled = round(a["target_percentage"] / 100 * bar_w)
-            bar = "█" * filled + "░" * (bar_w - filled)
-            text += f"  `{a['symbol']:<6}` `{bar}` `{a['target_percentage']:.1f}%`\n"
-        if len(allocs) > 8:
-            text += f"  _... و {len(allocs)-8} عملات أخرى_\n"
+        text += f"🪙 *العملات \\({len(allocs)}\\)*\n\n"
+        for a in allocs:
+            pct = a["target_percentage"]
+            capital_val = p["capital_usdt"] * pct / 100 if p["capital_usdt"] > 0 else 0
+            capital_str = f"  `${capital_val:,.1f}`" if capital_val > 0 else ""
+            text += f"  *{a['symbol']}*  `{pct:.1f}%`{capital_str}\n"
+    else:
+        text += "⚠️ لا يوجد توزيع — اضغط 🪙 لإضافة عملات\n"
 
     await query.edit_message_text(
         text, parse_mode="Markdown",

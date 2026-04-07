@@ -6,13 +6,10 @@ from typing import List, Dict
 
 def main_menu_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🗂️  محافظي",     callback_data="portfolios")],
         [
-            InlineKeyboardButton("🗂️ محافظي",           callback_data="portfolios"),
-            InlineKeyboardButton("⚡ Momentum",         callback_data="momentum:menu"),
-        ],
-        [
-            InlineKeyboardButton("🔲 Grid Bot",         callback_data="grid:menu"),
-            InlineKeyboardButton("⚙️ الإعدادات",        callback_data="menu:settings"),
+            InlineKeyboardButton("⚡  Momentum", callback_data="momentum:menu"),
+            InlineKeyboardButton("🔲  Grid Bot", callback_data="grid:menu"),
         ],
     ])
 
@@ -93,7 +90,8 @@ def portfolios_list_kb(portfolios: List[Dict], active_id: int) -> InlineKeyboard
         label = f"{icon}  {p['name']}  ·  {capital} USDT"
         buttons.append([InlineKeyboardButton(label, callback_data=f"portfolio:{p['id']}")])
     buttons.append([InlineKeyboardButton("➕  إنشاء محفظة جديدة", callback_data="portfolio_new")])
-    buttons.append([InlineKeyboardButton("◀️  رجوع", callback_data="menu:main")])
+    buttons.append([InlineKeyboardButton("🔑  مفاتيح MEXC API",   callback_data="settings:set_api")])
+    buttons.append([InlineKeyboardButton("◀️  رجوع",              callback_data="menu:main")])
     return InlineKeyboardMarkup(buttons)
 
 

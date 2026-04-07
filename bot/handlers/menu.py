@@ -12,9 +12,7 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 
     if action == "main":
         await query.edit_message_text(
-            "🏠 *القائمة الرئيسية*\n"
-            "━━━━━━━━━━━━━━━━━━━━━\n"
-            "🗂️ محافظي  ·  ⚡ Momentum  ·  🔲 Grid Bot",
+            "🏠 *القائمة الرئيسية*",
             parse_mode="Markdown",
             reply_markup=main_menu_kb(),
         )

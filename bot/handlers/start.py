@@ -16,10 +16,9 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "━━━━━━━━━━━━━━━━━━━━━\n\n"
         "🗂️ *محافظي* — إدارة المحافظ وإعادة التوازن\n"
         "⚡ *Momentum* — استراتيجية الاختراق التلقائي\n"
-        "🔲 *Grid Bot* — شبكة أوامر تلقائية\n"
-        "⚙️ *الإعدادات* — ربط MEXC API\n\n"
+        "🔲 *Grid Bot* — شبكة أوامر تلقائية\n\n"
         "━━━━━━━━━━━━━━━━━━━━━\n"
-        "ابدأ من ⚙️ *الإعدادات* لربط مفاتيح MEXC",
+        "ابدأ من 🗂️ *محافظي* ← 🔑 مفاتيح MEXC API",
         parse_mode="Markdown",
         reply_markup=main_menu_kb(),
     )
