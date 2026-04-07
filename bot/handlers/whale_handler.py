@@ -11,6 +11,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
 from bot.database import db
+from bot.keyboards import main_menu_kb, whale_menu_kb, whale_settings_kb
 from bot.mexc_client import MexcClient
 from bot.scalping.whale_scanner import whale_scan
 from bot.scalping.whale_monitor import whale_monitor
@@ -20,19 +21,6 @@ logger = logging.getLogger(__name__)
 
 _MIN_TRADE_SIZE = 5.0
 _MAX_TRADE_SIZE = 10_000.0
-
-
-# ── Keyboards ──────────────────────────────────────────────────────────────────
-
-def whale_menu_kb(enabled: bool) -> InlineKeyboardMarkup:
-    toggle = "🔴 إيقاف Whale Strategy" if enabled else "🟢 تشغيل Whale Strategy"
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(toggle, callback_data="whale:toggle")],
-        [InlineKeyboardButton("📊 الصفقات المفتوحة", callback_data="whale:open_trades")],
-        [InlineKeyboardButton("🔴 بيع صفقة", callback_data="whale:sell_pick")],
-        [InlineKeyboardButton("⚙️ إعدادات Whale", callback_data="whale:settings")],
-        [InlineKeyboardButton("◀️ القائمة الرئيسية", callback_data="menu:main")],
-    ])
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -110,22 +98,12 @@ async def whale_settings_callback(update: Update, context: ContextTypes.DEFAULT_
 
     max_trades  = int(settings.get("whale_max_trades", 3))
     daily_limit = float(settings.get("whale_daily_loss_limit", 0))
-    daily_line  = f"`${daily_limit:.0f} USDT`" if daily_limit > 0 else "`غير محدد`"
 
     await query.edit_message_text(
-        "⚙️ *إعدادات Whale Order Flow*\n\n"
-        "━━━━━━━━━━━━━━━━━━━━━\n"
-        f"  💰 حجم الصفقة: `${s['trade_size']:.0f} USDT`\n"
-        f"  📊 أقصى صفقات متزامنة: `{max_trades}`\n"
-        f"  🛑 حد الخسارة اليومي: {daily_line}\n"
-        "━━━━━━━━━━━━━━━━━━━━━",
+        "⚙️ *إعدادات Whale*\n\n"
+        "اضغط على أي إعداد لتغييره:",
         parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("💰 تغيير حجم الصفقة",   callback_data="whale:set_size")],
-            [InlineKeyboardButton("📊 أقصى صفقات متزامنة", callback_data="whale:set_max_trades")],
-            [InlineKeyboardButton("🛑 حد الخسارة اليومي",  callback_data="whale:set_daily_limit")],
-            [InlineKeyboardButton("◀️ رجوع", callback_data="whale:menu")],
-        ]),
+        reply_markup=whale_settings_kb(s["trade_size"], max_trades, daily_limit),
     )
 
 

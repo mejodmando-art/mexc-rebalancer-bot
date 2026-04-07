@@ -13,7 +13,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
 from bot.database import db
-from bot.keyboards import main_menu_kb
+from bot.keyboards import main_menu_kb, scalping_menu_kb, scalping_settings_kb
 from bot.mexc_client import MexcClient
 from bot.scalping.scanner import scan
 from bot.scalping.executor import execute_trade
@@ -25,17 +25,6 @@ _MAX_TRADE_SIZE = 10_000.0
 logger = logging.getLogger(__name__)
 
 # ── Keyboards ──────────────────────────────────────────────────────────────────
-
-def scalping_menu_kb(enabled: bool) -> InlineKeyboardMarkup:
-    toggle_label = "🔴 إيقاف الـ Scalping" if enabled else "🟢 تشغيل الـ Scalping"
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(toggle_label, callback_data="scalping:toggle")],
-        [InlineKeyboardButton("📊 الصفقات المفتوحة", callback_data="scalping:open_trades")],
-        [InlineKeyboardButton("🔴 بيع صفقة", callback_data="scalping:sell_pick")],
-        [InlineKeyboardButton("⚙️ إعدادات الـ Scalping", callback_data="scalping:settings")],
-        [InlineKeyboardButton("◀️ القائمة الرئيسية", callback_data="menu:main")],
-    ])
-
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -202,24 +191,11 @@ async def scalping_settings_callback(update: Update, context: ContextTypes.DEFAU
     daily_limit = float(settings.get("scalping_daily_loss_limit", 0))
     trail_pct   = float(settings.get("scalping_trail_pct", 1.5))
 
-    daily_line = f"`${daily_limit:.0f} USDT`" if daily_limit > 0 else "`غير محدد`"
-
     await query.edit_message_text(
-        "⚙️ *إعدادات الـ Scalping*\n\n"
-        "━━━━━━━━━━━━━━━━━━━━━\n"
-        f"  💰 حجم الصفقة: `${sc['trade_size']:.0f} USDT`\n"
-        f"  📊 أقصى صفقات متزامنة: `{max_trades}`\n"
-        f"  🛑 حد الخسارة اليومي: {daily_line}\n"
-        f"  📉 نسبة الـ Trailing Stop: `{trail_pct:.1f}%`\n"
-        "━━━━━━━━━━━━━━━━━━━━━",
+        "⚙️ *إعدادات Scalping*\n\n"
+        "اضغط على أي إعداد لتغييره:",
         parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("💰 تغيير حجم الصفقة",        callback_data="scalping:set_size")],
-            [InlineKeyboardButton("📊 أقصى صفقات متزامنة",      callback_data="scalping:set_max_trades")],
-            [InlineKeyboardButton("🛑 حد الخسارة اليومي",       callback_data="scalping:set_daily_limit")],
-            [InlineKeyboardButton("📉 نسبة Trailing Stop",      callback_data="scalping:set_trail_pct")],
-            [InlineKeyboardButton("◀️ رجوع", callback_data="scalping:menu")],
-        ]),
+        reply_markup=scalping_settings_kb(sc["trade_size"], max_trades, daily_limit, trail_pct),
     )
 
 

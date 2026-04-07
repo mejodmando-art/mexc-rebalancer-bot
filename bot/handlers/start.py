@@ -1,8 +1,7 @@
 from telegram import Update
 from telegram.ext import ContextTypes
 from bot.config import config
-from bot.keyboards import main_menu_kb, settings_kb
-from bot.database import db
+from bot.keyboards import main_menu_kb
 
 
 async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -13,18 +12,12 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         f"*أهلاً {user.first_name}* 👋\n\n"
-        "┌─────────────────────┐\n"
-        "│   🤖 MEXC Trade Bot  │\n"
-        "└─────────────────────┘\n\n"
-        "📌 *الاستراتيجيات المتاحة:*\n"
-        "  ⚡ *Scalping* — Smart Liquidity Flow\n"
-        "  🐋 *Whale* — Order Flow Strategy\n"
-        "  🔲 *Grid Bot* — شبكة أوردرات تلقائية\n\n"
-        "📌 *إدارة المحفظة:*\n"
-        "  💰 عرض الرصيد الحالي\n"
-        "  ⚖️ إعادة توازن تلقائية ويدوية\n"
-        "  🗂 محافظ متعددة برأس مال مستقل\n"
-        "  🚨 بيع طوارئ فوري\n\n"
+        "🤖 *MEXC Trade Bot*\n\n"
+        "📌 *إدارة المحفظة*\n"
+        "  💰 عرض الرصيد · ⚖️ إعادة التوازن\n"
+        "  🗂 محافظ متعددة · 🚨 بيع طوارئ\n\n"
+        "📌 *الاستراتيجيات*\n"
+        "  ⚡ Scalping · 🐋 Whale · 🔲 Grid\n\n"
         "⚙️ ابدأ بربط مفاتيح MEXC API من *الإعدادات*",
         parse_mode="Markdown",
         reply_markup=main_menu_kb(),
