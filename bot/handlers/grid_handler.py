@@ -698,6 +698,293 @@ async def grid_cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     return ConversationHandler.END
 
 
+# ── تعديل TP/SL ────────────────────────────────────────────────────────────────
+
+async def grid_edit_tpsl_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = update.effective_user.id
+    grid_id = int(query.data.split(":")[1])
+    grid = grid_monitor.active_grids.get(grid_id)
+    if not grid or grid.get("user_id") != user_id:
+        await query.answer("❌ الشبكة غير موجودة", show_alert=True)
+        return
+
+    tp = f"`${grid['take_profit']:.6g}`" if grid.get("take_profit") else "بدون"
+    sl = f"`${grid['stop_loss']:.6g}`"   if grid.get("stop_loss")   else "بدون"
+    center = grid.get("center", 0)
+
+    await query.edit_message_text(
+        f"🎯 *تعديل TP/SL — {grid['symbol']}*\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"السعر المركزي: `${center:.6g}`\n"
+        f"Take Profit الحالي: {tp}\n"
+        f"Stop Loss الحالي: {sl}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"أرسل بالصيغة:\n"
+        f"`TP=5 SL=3` (نسبة مئوية)\n"
+        f"أو `TP=0 SL=0` لإلغائهما\n\n"
+        f"`/cancel` للإلغاء",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("◀️ رجوع", callback_data=f"grid_detail:{grid_id}")
+        ]]),
+    )
+    context.user_data["_grid_edit_tpsl"] = grid_id
+
+
+async def grid_edit_tpsl_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    grid_id = context.user_data.get("_grid_edit_tpsl")
+    if not grid_id:
+        return
+    grid = grid_monitor.active_grids.get(grid_id)
+    if not grid:
+        return
+
+    text = update.message.text.strip().upper()
+    import re
+    tp_match = re.search(r"TP=(\d+\.?\d*)", text)
+    sl_match = re.search(r"SL=(\d+\.?\d*)", text)
+
+    if not tp_match and not sl_match:
+        await update.message.reply_text("❌ الصيغة غير صحيحة. مثال: `TP=5 SL=3`", parse_mode="Markdown")
+        return
+
+    center = float(grid.get("center", 0))
+    if tp_match:
+        tp_pct = float(tp_match.group(1))
+        grid["take_profit"] = round(center * (1 + tp_pct / 100), 8) if tp_pct > 0 else None
+    if sl_match:
+        sl_pct = float(sl_match.group(1))
+        grid["stop_loss"] = round(center * (1 - sl_pct / 100), 8) if sl_pct > 0 else None
+
+    await db.update_grid(grid)
+    context.user_data.pop("_grid_edit_tpsl", None)
+
+    tp_str = f"`${grid['take_profit']:.6g}`" if grid.get("take_profit") else "بدون"
+    sl_str = f"`${grid['stop_loss']:.6g}`"   if grid.get("stop_loss")   else "بدون"
+    await update.message.reply_text(
+        f"✅ *تم تحديث TP/SL*\n\n"
+        f"🎯 Take Profit: {tp_str}\n"
+        f"🛑 Stop Loss: {sl_str}",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("◀️ رجوع للشبكة", callback_data=f"grid_detail:{grid_id}")
+        ]]),
+    )
+
+
+# ── تعديل نطاق السلّم ──────────────────────────────────────────────────────────
+
+async def grid_edit_range_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = update.effective_user.id
+    grid_id = int(query.data.split(":")[1])
+    grid = grid_monitor.active_grids.get(grid_id)
+    if not grid or grid.get("user_id") != user_id:
+        await query.answer("❌ الشبكة غير موجودة", show_alert=True)
+        return
+
+    await query.edit_message_text(
+        f"📐 *تعديل نطاق السلّم — {grid['symbol']}*\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"النطاق الحالي: `+{grid['upper_pct']}%` / `-{grid['lower_pct']}%`\n"
+        f"الخطوات: `{grid['steps']}`\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"أرسل بالصيغة:\n"
+        f"`UP=10 DOWN=10 STEPS=20`\n\n"
+        f"⚠️ سيتم إلغاء الأوردرات الحالية وإعادة وضعها\n\n"
+        f"`/cancel` للإلغاء",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("◀️ رجوع", callback_data=f"grid_detail:{grid_id}")
+        ]]),
+    )
+    context.user_data["_grid_edit_range"] = grid_id
+
+
+async def grid_edit_range_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    grid_id = context.user_data.get("_grid_edit_range")
+    if not grid_id:
+        return
+    grid = grid_monitor.active_grids.get(grid_id)
+    if not grid:
+        return
+
+    text = update.message.text.strip().upper()
+    import re
+    up_m    = re.search(r"UP=(\d+\.?\d*)", text)
+    down_m  = re.search(r"DOWN=(\d+\.?\d*)", text)
+    steps_m = re.search(r"STEPS=(\d+)", text)
+
+    if not any([up_m, down_m, steps_m]):
+        await update.message.reply_text("❌ الصيغة غير صحيحة. مثال: `UP=10 DOWN=10 STEPS=20`", parse_mode="Markdown")
+        return
+
+    settings = await db.get_settings(grid["user_id"])
+    client = MexcClient(settings["mexc_api_key"], settings["mexc_secret_key"])
+    try:
+        from bot.grid.engine import calculate_grid_levels, place_grid_orders, cancel_all_grid_orders
+
+        if up_m:    grid["upper_pct"] = float(up_m.group(1))
+        if down_m:  grid["lower_pct"] = float(down_m.group(1))
+        if steps_m: grid["steps"]     = int(steps_m.group(1))
+
+        ticker = await client.exchange.fetch_ticker(grid["symbol"])
+        center = float(ticker.get("last") or grid["center"])
+        grid["center"] = center
+
+        all_orders = grid.get("buy_orders", []) + grid.get("sell_orders", [])
+        await cancel_all_grid_orders(client.exchange, grid["symbol"],
+                                     [o for o in all_orders if o["status"] == "open"])
+
+        new_grid = calculate_grid_levels(center, grid["upper_pct"], grid["lower_pct"], grid["steps"])
+        grid["upper"] = new_grid["upper"]
+        grid["lower"] = new_grid["lower"]
+        grid["step_pct"] = new_grid["step_pct"]
+
+        result = await place_grid_orders(client.exchange, grid["symbol"], new_grid, grid["order_size_usdt"])
+        grid["buy_orders"]  = result["buy_orders"]
+        grid["sell_orders"] = result["sell_orders"]
+
+        await db.update_grid(grid)
+        context.user_data.pop("_grid_edit_range", None)
+
+        await update.message.reply_text(
+            f"✅ *تم تحديث السلّم*\n\n"
+            f"📈 العلوي: `${new_grid['upper']:.6g}` \\(`+{grid['upper_pct']}%`\\)\n"
+            f"📉 السفلي: `${new_grid['lower']:.6g}` \\(`-{grid['lower_pct']}%`\\)\n"
+            f"🔢 الخطوات: `{grid['steps']}`\n"
+            f"📊 ربح/خطوة: `{new_grid['step_pct']:.3f}%`",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("◀️ رجوع للشبكة", callback_data=f"grid_detail:{grid_id}")
+            ]]),
+        )
+    except Exception as e:
+        await update.message.reply_text(f"❌ خطأ: {str(e)[:100]}")
+    finally:
+        await client.close()
+
+
+# ── إضافة / سحب رصيد ──────────────────────────────────────────────────────────
+
+async def grid_add_funds_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = update.effective_user.id
+    grid_id = int(query.data.split(":")[1])
+    grid = grid_monitor.active_grids.get(grid_id)
+    if not grid or grid.get("user_id") != user_id:
+        await query.answer("❌ الشبكة غير موجودة", show_alert=True)
+        return
+
+    await query.edit_message_text(
+        f"➕ *إضافة رصيد — {grid['symbol']}*\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"الحجم الحالي: `${grid['order_size_usdt']:.0f} USDT`\n\n"
+        f"أرسل المبلغ الإضافي بالـ USDT:\n"
+        f"مثال: `50`\n\n"
+        f"`/cancel` للإلغاء",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("◀️ رجوع", callback_data=f"grid_detail:{grid_id}")
+        ]]),
+    )
+    context.user_data["_grid_add_funds"] = grid_id
+
+
+async def grid_add_funds_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    grid_id = context.user_data.get("_grid_add_funds")
+    if not grid_id:
+        return
+    grid = grid_monitor.active_grids.get(grid_id)
+    if not grid:
+        return
+
+    try:
+        amount = float(update.message.text.strip())
+        if amount <= 0:
+            raise ValueError
+    except ValueError:
+        await update.message.reply_text("❌ أدخل مبلغاً صحيحاً أكبر من صفر")
+        return
+
+    grid["order_size_usdt"] = round(grid["order_size_usdt"] + amount, 2)
+    await db.update_grid(grid)
+    context.user_data.pop("_grid_add_funds", None)
+
+    await update.message.reply_text(
+        f"✅ *تم إضافة الرصيد*\n\n"
+        f"💵 الحجم الجديد: `${grid['order_size_usdt']:.0f} USDT`",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("◀️ رجوع للشبكة", callback_data=f"grid_detail:{grid_id}")
+        ]]),
+    )
+
+
+async def grid_remove_funds_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = update.effective_user.id
+    grid_id = int(query.data.split(":")[1])
+    grid = grid_monitor.active_grids.get(grid_id)
+    if not grid or grid.get("user_id") != user_id:
+        await query.answer("❌ الشبكة غير موجودة", show_alert=True)
+        return
+
+    await query.edit_message_text(
+        f"➖ *سحب رصيد — {grid['symbol']}*\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"الحجم الحالي: `${grid['order_size_usdt']:.0f} USDT`\n\n"
+        f"أرسل المبلغ المراد سحبه:\n"
+        f"مثال: `20`\n\n"
+        f"`/cancel` للإلغاء",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("◀️ رجوع", callback_data=f"grid_detail:{grid_id}")
+        ]]),
+    )
+    context.user_data["_grid_remove_funds"] = grid_id
+
+
+async def grid_remove_funds_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    grid_id = context.user_data.get("_grid_remove_funds")
+    if not grid_id:
+        return
+    grid = grid_monitor.active_grids.get(grid_id)
+    if not grid:
+        return
+
+    try:
+        amount = float(update.message.text.strip())
+        if amount <= 0:
+            raise ValueError
+    except ValueError:
+        await update.message.reply_text("❌ أدخل مبلغاً صحيحاً أكبر من صفر")
+        return
+
+    new_size = round(grid["order_size_usdt"] - amount, 2)
+    if new_size < 10:
+        await update.message.reply_text("❌ الحد الأدنى للحجم هو $10 USDT")
+        return
+
+    grid["order_size_usdt"] = new_size
+    await db.update_grid(grid)
+    context.user_data.pop("_grid_remove_funds", None)
+
+    await update.message.reply_text(
+        f"✅ *تم سحب الرصيد*\n\n"
+        f"💵 الحجم الجديد: `${grid['order_size_usdt']:.0f} USDT`",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("◀️ رجوع للشبكة", callback_data=f"grid_detail:{grid_id}")
+        ]]),
+    )
+
+
 async def grid_cancel_conv(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     await update.message.reply_text("❌ تم الإلغاء.")
