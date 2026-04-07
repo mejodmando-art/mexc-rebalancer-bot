@@ -107,12 +107,15 @@ async def _do_rebalance(app, user_id: int, portfolio_id: int = None, auto: bool 
                              1 if err == 0 else 0, portfolio_id=portfolio_id)
 
         label = "🤖 توازن تلقائي" if auto else "⚖️ إعادة التوازن"
-        lines = [f"{label}\n"]
-        lines.append(f"✅ {ok} صفقة ناجحة")
+        lines = [
+            f"{label}",
+            "━━━━━━━━━━━━━━━━━━━━━",
+            f"✅ ناجح: *{ok}* صفقة",
+        ]
         if err:
-            lines.append(f"❌ {err} خطأ")
+            lines.append(f"❌ خطأ: *{err}*")
         lines.append(f"💵 إجمالي: `${traded:.2f}`")
-        lines.append(f"🕐 {now_str}")
+        lines.append(f"🕐 `{now_str}`")
         await app.bot.send_message(user_id, "\n".join(lines), parse_mode="Markdown")
     finally:
         await client.close()

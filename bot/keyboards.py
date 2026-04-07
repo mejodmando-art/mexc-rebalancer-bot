@@ -7,20 +7,20 @@ from typing import List, Dict
 def main_menu_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("💰 المحفظة",        callback_data="balance"),
-            InlineKeyboardButton("⚖️ إعادة التوازن",  callback_data="rebalance:check"),
+            InlineKeyboardButton("💼 المحفظة",         callback_data="balance"),
+            InlineKeyboardButton("⚖️ إعادة التوازن",   callback_data="rebalance:check"),
         ],
         [
-            InlineKeyboardButton("🗂 محافظي",          callback_data="portfolios"),
-            InlineKeyboardButton("📋 السجل",           callback_data="history"),
+            InlineKeyboardButton("🗂 محافظي",           callback_data="portfolios"),
+            InlineKeyboardButton("📋 السجل",            callback_data="history"),
         ],
         [
-            InlineKeyboardButton("⚡ Momentum",        callback_data="momentum:menu"),
-            InlineKeyboardButton("🔲 Grid",            callback_data="grid:menu"),
+            InlineKeyboardButton("⚡ Momentum",         callback_data="momentum:menu"),
+            InlineKeyboardButton("🔲 Grid Bot",         callback_data="grid:menu"),
         ],
         [
-            InlineKeyboardButton("🚨 بيع طوارئ",       callback_data="emergency:menu"),
-            InlineKeyboardButton("⚙️ الإعدادات",       callback_data="menu:settings"),
+            InlineKeyboardButton("🚨 بيع طوارئ",        callback_data="emergency:menu"),
+            InlineKeyboardButton("⚙️ الإعدادات",        callback_data="menu:settings"),
         ],
     ])
 
@@ -158,54 +158,6 @@ def portfolio_delete_confirm_kb(portfolio_id: int) -> InlineKeyboardMarkup:
             InlineKeyboardButton("⚠️ نعم، احذف", callback_data=f"portfolio_delete_confirm:{portfolio_id}"),
             InlineKeyboardButton("✖️ إلغاء",      callback_data=f"portfolio:{portfolio_id}"),
         ]
-    ])
-
-
-# ── Scalping ───────────────────────────────────────────────────────────────────
-
-def scalping_menu_kb(enabled: bool) -> InlineKeyboardMarkup:
-    toggle = "🔴 إيقاف Scalping" if enabled else "🟢 تشغيل Scalping"
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(toggle,                    callback_data="scalping:toggle")],
-        [InlineKeyboardButton("📊 الصفقات المفتوحة",    callback_data="scalping:open_trades")],
-        [InlineKeyboardButton("🔴 بيع صفقة",            callback_data="scalping:sell_pick")],
-        [InlineKeyboardButton("⚙️ الإعدادات",           callback_data="scalping:settings")],
-        [InlineKeyboardButton("◀️ رجوع",                callback_data="menu:main")],
-    ])
-
-
-def scalping_settings_kb(trade_size: float, max_trades: int,
-                          daily_limit: float, trail_pct: float) -> InlineKeyboardMarkup:
-    daily_str = f"${daily_limit:.0f}" if daily_limit > 0 else "غير محدد"
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"💵 حجم الصفقة: ${trade_size:.0f}",      callback_data="scalping:set_size")],
-        [InlineKeyboardButton(f"📊 أقصى صفقات: {max_trades}",           callback_data="scalping:set_max_trades")],
-        [InlineKeyboardButton(f"🛑 حد الخسارة اليومي: {daily_str}",     callback_data="scalping:set_daily_limit")],
-        [InlineKeyboardButton(f"📉 Trailing Stop: {trail_pct:.1f}%",     callback_data="scalping:set_trail_pct")],
-        [InlineKeyboardButton("◀️ رجوع",                                 callback_data="scalping:menu")],
-    ])
-
-
-# ── Whale ──────────────────────────────────────────────────────────────────────
-
-def whale_menu_kb(enabled: bool) -> InlineKeyboardMarkup:
-    toggle = "🔴 إيقاف Whale" if enabled else "🟢 تشغيل Whale"
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(toggle,                    callback_data="whale:toggle")],
-        [InlineKeyboardButton("📊 الصفقات المفتوحة",    callback_data="whale:open_trades")],
-        [InlineKeyboardButton("🔴 بيع صفقة",            callback_data="whale:sell_pick")],
-        [InlineKeyboardButton("⚙️ الإعدادات",           callback_data="whale:settings")],
-        [InlineKeyboardButton("◀️ رجوع",                callback_data="menu:main")],
-    ])
-
-
-def whale_settings_kb(trade_size: float, max_trades: int, daily_limit: float) -> InlineKeyboardMarkup:
-    daily_str = f"${daily_limit:.0f}" if daily_limit > 0 else "غير محدد"
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"💵 حجم الصفقة: ${trade_size:.0f}",      callback_data="whale:set_size")],
-        [InlineKeyboardButton(f"📊 أقصى صفقات: {max_trades}",           callback_data="whale:set_max_trades")],
-        [InlineKeyboardButton(f"🛑 حد الخسارة اليومي: {daily_str}",     callback_data="whale:set_daily_limit")],
-        [InlineKeyboardButton("◀️ رجوع",                                 callback_data="whale:menu")],
     ])
 
 

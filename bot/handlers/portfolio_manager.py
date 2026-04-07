@@ -60,23 +60,38 @@ async def portfolio_detail_callback(update: Update, context: ContextTypes.DEFAUL
     threshold = p.get("threshold") or 5.0
     interval  = p.get("auto_interval_hours") or 24
     auto_on   = bool(p.get("auto_enabled"))
-    auto_line = f"🟢 تلقائي كل {interval}س" if auto_on else "🔴 التوازن التلقائي معطل"
+    is_active = p["id"] == active_id
+
+    auto_icon = "🟢" if auto_on else "🔴"
+    auto_str  = f"كل {interval} ساعة" if auto_on else "معطل"
+    active_badge = "✅ *نشطة*" if is_active else "⭕ غير نشطة"
+
+    # Allocation health indicator
+    pct_diff = abs(total_pct - 100)
+    if not allocs:
+        alloc_health = "⚠️ لا يوجد توزيع"
+    elif pct_diff > 1:
+        alloc_health = f"⚠️ المجموع {total_pct:.1f}% \\(يجب أن يكون 100%\\)"
+    else:
+        alloc_health = f"✅ {total_pct:.1f}%"
 
     text = (
-        f"📁 *{p['name']}*\n\n"
+        f"📁 *{p['name']}*  {active_badge}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"💰 رأس المال: *${p['capital_usdt']:,.2f} USDT*\n"
-        f"🪙 عدد العملات: *{len(allocs)}*\n"
-        f"📊 مجموع التوزيع: *{total_pct:.1f}%*\n"
+        f"🪙 العملات: *{len(allocs)}*  📊 التوزيع: {alloc_health}\n"
         f"🎯 حد الانحراف: *{threshold}%*\n"
-        f"{auto_line}\n"
-        f"{'✅ المحفظة النشطة الآن' if p['id'] == active_id else '⭕ غير نشطة'}\n"
+        f"{auto_icon} التوازن التلقائي: *{auto_str}*\n"
     )
     if allocs:
-        text += "\n*التوزيع:*\n"
+        text += "━━━━━━━━━━━━━━━━━━━━━\n"
         for a in allocs[:8]:
-            text += f"• `{a['symbol']:6}` {a['target_percentage']:.1f}%\n"
+            bar_w = 6
+            filled = round(a["target_percentage"] / 100 * bar_w)
+            bar = "█" * filled + "░" * (bar_w - filled)
+            text += f"  `{a['symbol']:<6}` `{bar}` `{a['target_percentage']:.1f}%`\n"
         if len(allocs) > 8:
-            text += f"_... و {len(allocs)-8} عملات أخرى_\n"
+            text += f"  _... و {len(allocs)-8} عملات أخرى_\n"
 
     await query.edit_message_text(
         text, parse_mode="Markdown",

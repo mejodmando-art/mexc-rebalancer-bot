@@ -73,16 +73,21 @@ async def execute_setup(
     await db.save_momentum_trade(user_id, trade)
     momentum_monitor.add_trade(trade)
 
-    pct_to_sl = ((avg_price - setup["stop_loss"]) / avg_price) * 100
+    pct_to_sl  = ((avg_price - setup["stop_loss"]) / avg_price) * 100
+    pct_to_t1  = ((setup["target1"] - avg_price) / avg_price) * 100
+    pct_to_t2  = ((setup["target2"] - avg_price) / avg_price) * 100
     msg = (
-        f"⚡ *Momentum — دخول جديد*\n\n"
-        f"📈 `{symbol}`\n"
+        f"⚡ *Momentum — دخول جديد*\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🔹 *{symbol}*\n"
         f"💰 دخول: `${avg_price:.6g}`\n"
         f"📦 الكمية: `{filled_qty:.6g}`\n"
-        f"🎯 T1: `${setup['target1']:.6g}` (+2%)\n"
-        f"🏆 T2: `${setup['target2']:.6g}` (+4%)\n"
-        f"🛑 SL: `${setup['stop_loss']:.6g}` (-{pct_to_sl:.1f}%)\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🎯 T1: `${setup['target1']:.6g}` \\(`+{pct_to_t1:.1f}%`\\)\n"
+        f"🏆 T2: `${setup['target2']:.6g}` \\(`+{pct_to_t2:.1f}%`\\)\n"
+        f"🛑 SL: `${setup['stop_loss']:.6g}` \\(`-{pct_to_sl:.1f}%`\\)\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"📊 حجم: `{setup.get('volume_ratio', 0):.1f}x` المتوسط\n"
-        f"🕐 {now_str}"
+        f"🕐 `{now_str}`"
     )
     return True, msg

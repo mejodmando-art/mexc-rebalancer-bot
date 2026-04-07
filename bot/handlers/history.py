@@ -12,24 +12,29 @@ async def history_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not history:
         await query.edit_message_text(
-            "📋 *سجل العمليات*\n\n"
-            "━━━━━━━━━━━━━━━━━━━━━\n"
+            "📋 *سجل العمليات*\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n\n"
             "لا توجد عمليات مسجلة بعد.\n\n"
-            "نفّذ أول عملية توازن لتظهر هنا.",
+            "_نفّذ أول عملية توازن لتظهر هنا_",
             parse_mode="Markdown",
             reply_markup=main_menu_kb()
         )
         return
 
-    text = "📋 *آخر 10 عمليات توازن*\n\n"
-    text += "━━━━━━━━━━━━━━━━━━━━━\n"
+    text = "📋 *آخر 10 عمليات*\n━━━━━━━━━━━━━━━━━━━━━\n\n"
 
     for h in history:
-        icon = "✅" if h["success"] else "⚠️"
+        # Skip internal momentum_loss accounting entries
+        if h["summary"].startswith("momentum_loss:"):
+            continue
+        icon   = "✅" if h["success"] else "❌"
+        p_name = h.get("portfolio_name") or ""
+        p_label = f"  🗂 `{p_name}`\n" if p_name else ""
         text += (
             f"{icon} `{h['timestamp']}`\n"
-            f"   ◈ {h['summary']}\n"
-            f"   💵 `${h['total_traded_usdt']:.2f}`\n\n"
+            f"{p_label}"
+            f"  📝 {h['summary']}\n"
+            f"  💵 `${h['total_traded_usdt']:.2f}`\n\n"
         )
 
     text += "━━━━━━━━━━━━━━━━━━━━━"

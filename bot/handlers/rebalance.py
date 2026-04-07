@@ -112,45 +112,47 @@ async def rebalance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
         portfolio_name = portfolio_info.get("name", "")
         text = (
-            f"⚡ *تحليل إعادة التوازن*\n\n"
-            f"🗂 المحفظة: *{portfolio_name}*\n"
-            f"💰 قيمة عملات المحفظة: `${effective_total:,.2f}`\n"
-            f"🏦 إجمالي الحساب الكلي: `${total_usdt:,.2f}`\n"
-            f"🎯 حد الانحراف: `{threshold}%`\n\n"
-            "━━━━━━━━━━━━━━━━━━━━━\n"
-            "📊 *تقرير الانحراف*\n"
-            "━━━━━━━━━━━━━━━━━━━━━\n"
+            f"⚖️ *تحليل إعادة التوازن*\n"
+            f"━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🗂 *{portfolio_name}*\n"
+            f"💰 قيمة المحفظة: `${effective_total:,.2f}`\n"
+            f"🏦 إجمالي الحساب: `${total_usdt:,.2f}`\n"
+            f"🎯 حد الانحراف: `{threshold}%`\n"
+            f"━━━━━━━━━━━━━━━━━━━━━\n"
+            f"📊 *تقرير الانحراف*\n"
+            f"━━━━━━━━━━━━━━━━━━━━━\n"
         )
 
         for d in drift_report:
             if d["needs_action"]:
                 arrow = "🔴" if d["drift_pct"] > 0 else "🟢"
+                action_label = "بيع" if d["drift_pct"] > 0 else "شراء"
                 text += (
-                    f"{arrow} `{d['symbol']:6}` "
-                    f"{d['current_pct']:.1f}% → {d['target_pct']:.1f}%  "
-                    f"({d['drift_pct']:+.1f}%) ⚠️\n"
+                    f"{arrow} `{d['symbol']:<6}` "
+                    f"`{d['current_pct']:.1f}%` → `{d['target_pct']:.1f}%`  "
+                    f"`{d['drift_pct']:+.1f}%` ← {action_label}\n"
                 )
             else:
                 text += (
-                    f"✅ `{d['symbol']:6}` "
-                    f"{d['current_pct']:.1f}% → {d['target_pct']:.1f}%  "
-                    f"({d['drift_pct']:+.1f}%)\n"
+                    f"✅ `{d['symbol']:<6}` "
+                    f"`{d['current_pct']:.1f}%` → `{d['target_pct']:.1f}%`  "
+                    f"`{d['drift_pct']:+.1f}%`\n"
                 )
 
         if not trades:
-            text += "\n✅ *المحفظة متوازنة — لا حاجة لأي إجراء*"
+            text += "\n━━━━━━━━━━━━━━━━━━━━━\n✅ *المحفظة متوازنة — لا حاجة لأي إجراء*"
             await query.edit_message_text(text, parse_mode="Markdown", reply_markup=rebalance_dry_kb())
             return
 
-        text += f"\n━━━━━━━━━━━━━━━━━━━━━\n"
-        text += f"💡 *الصفقات المطلوبة  ({len(trades)})*\n"
+        total_trade = sum(t["usdt_amount"] for t in trades)
+        text += f"━━━━━━━━━━━━━━━━━━━━━\n"
+        text += f"💡 *الصفقات المطلوبة \\({len(trades)}\\)*\n"
         text += "━━━━━━━━━━━━━━━━━━━━━\n"
-        total_trade = 0
         for t in trades:
             emoji = "🔴 بيع" if t["action"] == "sell" else "🟢 شراء"
-            text += f"{emoji}  `{t['symbol']}`  ·  `${t['usdt_amount']:.2f}`\n"
-            total_trade += t["usdt_amount"]
-        text += f"\n💵 إجمالي التداول: `${total_trade:.2f}`"
+            text += f"{emoji}  `{t['symbol']}`  `${t['usdt_amount']:.2f}`\n"
+        text += f"━━━━━━━━━━━━━━━━━━━━━\n"
+        text += f"💵 إجمالي التداول: `${total_trade:.2f}`"
 
         await query.edit_message_text(text, parse_mode="Markdown", reply_markup=rebalance_confirm_kb())
 
@@ -207,19 +209,22 @@ async def rebalance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             if any(r["symbol"] == t["symbol"] and r.get("status") == "ok" for r in results)
         )
 
-        text = "✅ *اكتملت إعادة التوازن*\n\n"
+        text = "✅ *اكتملت إعادة التوازن*\n"
         text += "━━━━━━━━━━━━━━━━━━━━━\n"
         for r in ok:
             a = "🔴 بيع" if r["action"] == "sell" else "🟢 شراء"
-            text += f"{a}  `{r['symbol']}`  ·  `${r.get('usdt', 0):.2f}`  ✅\n"
+            text += f"{a}  `{r['symbol']}`  `${r.get('usdt', 0):.2f}`  ✅\n"
         for r in err:
             text += f"❌  `{r['symbol']}`: {r.get('reason', 'خطأ')[:50]}\n"
         for r in skip:
             text += f"⏭  `{r['symbol']}`: {r.get('reason', 'تم التخطي')}\n"
-
         text += "━━━━━━━━━━━━━━━━━━━━━\n"
-        text += f"📊 ناجح: *{len(ok)}*  |  خطأ: *{len(err)}*  |  تخطي: *{len(skip)}*\n"
-        text += f"💵 الإجمالي: `${total_traded:.2f}`"
+        text += f"📊 ناجح: *{len(ok)}*"
+        if err:
+            text += f"  ❌ خطأ: *{len(err)}*"
+        if skip:
+            text += f"  ⏭ تخطي: *{len(skip)}*"
+        text += f"\n💵 الإجمالي: `${total_traded:.2f}`"
 
         now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
         summary = f"يدوي: {len(ok)} ناجح، {len(err)} خطأ"

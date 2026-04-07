@@ -1036,10 +1036,33 @@ class Database:
             )
 
     async def get_momentum_daily_loss(self, user_id: int) -> float:
-        """Sum of losses from momentum trades closed today (positive = loss amount)."""
-        # This is a best-effort calculation based on trade history.
-        # Returns 0.0 if no history table tracks momentum P&L yet.
-        return 0.0
+        """Sum of losses from momentum trades closed today (positive = loss amount).
+
+        Reads from rebalance_history rows where summary starts with 'momentum_loss:'
+        written by the monitor when a trade closes at a loss.
+        """
+        from datetime import datetime, timezone
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        async with self._conn() as conn:
+            if _USE_PG:
+                row = await conn.fetchone(
+                    """SELECT COALESCE(SUM(total_traded_usdt), 0) as total
+                       FROM rebalance_history
+                       WHERE user_id=$1 AND success=0
+                         AND summary LIKE 'momentum_loss:%'
+                         AND timestamp LIKE $2""",
+                    user_id, f"{today}%",
+                )
+            else:
+                row = await conn.fetchone(
+                    """SELECT COALESCE(SUM(total_traded_usdt), 0) as total
+                       FROM rebalance_history
+                       WHERE user_id=? AND success=0
+                         AND summary LIKE 'momentum_loss:%'
+                         AND timestamp LIKE ?""",
+                    (user_id, f"{today}%"),
+                )
+        return float(row["total"]) if row else 0.0
 
 
 db = Database()
