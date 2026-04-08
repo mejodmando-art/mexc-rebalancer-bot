@@ -523,8 +523,19 @@ async def emergency_exec_all_callback(update: Update, context: ContextTypes.DEFA
         await client.close()
 
     result_text = "\n".join(results) if results else "لم تُنفَّذ أي صفقة"
+
+    ok_count  = sum(1 for r in results if r.startswith("🔴") or r.startswith("⏭"))
+    err_count = sum(1 for r in results if r.startswith("❌"))
+
+    if err_count == 0:
+        header = "✅ *اكتملت عملية البيع الشامل*"
+    elif ok_count == 0:
+        header = "❌ *فشلت عملية البيع الشامل*"
+    else:
+        header = f"⚠️ *اكتمل البيع جزئياً — {err_count} خطأ*"
+
     await query.edit_message_text(
-        f"✅ *اكتملت عملية البيع الشامل*\n\n{result_text}",
+        f"{header}\n\n{result_text}",
         parse_mode="Markdown",
         reply_markup=back_to_main_kb(),
     )
