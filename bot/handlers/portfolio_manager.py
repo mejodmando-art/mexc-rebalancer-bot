@@ -1106,7 +1106,7 @@ async def portfolio_sell_exec_callback(update: Update, context: ContextTypes.DEF
 # ── Per-portfolio: Edit Allocations ───────────────────────────────────────────
 
 async def portfolio_edit_allocs_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Redirect to the global alloc settings flow but scoped to this portfolio."""
+    """شاشة إضافة / حذف عملات المحفظة مباشرة."""
     query = update.callback_query
     await query.answer()
     user_id = update.effective_user.id
@@ -1117,17 +1117,37 @@ async def portfolio_edit_allocs_callback(update: Update, context: ContextTypes.D
         await query.answer("❌ محفظة غير موجودة", show_alert=True)
         return
 
-    # Make this portfolio active so the alloc flow targets it
+    # تفعيل المحفظة حتى يعمل alloc flow عليها
     await db.set_active_portfolio(user_id, portfolio_id)
+
+    allocs = await db.get_portfolio_allocations(portfolio_id)
+    existing = "  ·  ".join(f"`{a['symbol']}`" for a in allocs) if allocs else "لا يوجد"
+    total_pct = sum(a["target_percentage"] for a in allocs)
+    pct_line = f"📌 المجموع: `{total_pct:.1f}%`" + (" ✅" if abs(total_pct - 100) < 1 else " ⚠️ يجب 100%")
+
+    # حفظ portfolio_id في user_data حتى يعرف alloc flow أين يحفظ
+    context.user_data["_alloc_portfolio_id"] = portfolio_id
+
     await query.edit_message_text(
-        f"✏️ *تعديل عملات محفظة: {p['name']}*\n\n"
-        "استخدم الإعدادات ← إضافة / تعديل عملة لتعديل التوزيع.",
+        f"🪙 *إضافة / تعديل عملات*\n"
+        f"📁 المحفظة: *{p['name']}*\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"الحالية: {existing}\n"
+        f"{pct_line}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"أرسل رموز العملات مفصولة بمسافة:\n"
+        f"`BTC ETH SOL ADA XRP`\n\n"
+        f"أو بالنسب مباشرة:\n"
+        f"`BTC=40 ETH=30 SOL=30`\n\n"
+        f"✖️ /cancel للإلغاء",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("⚙️ الإعدادات", callback_data="settings:view")],
-            [InlineKeyboardButton("◀️ رجوع للمحفظة", callback_data=f"portfolio:{portfolio_id}")],
+            [InlineKeyboardButton("🗑  عرض وحذف عملة", callback_data=f"pf_alloc_list:{portfolio_id}")],
+            [InlineKeyboardButton("🧹  مسح جميع العملات", callback_data=f"pf_alloc_clear:{portfolio_id}")],
+            [InlineKeyboardButton("◀️  رجوع للمحفظة",    callback_data=f"portfolio:{portfolio_id}")],
         ]),
     )
+    return
 
 
 # ── Per-portfolio: Set Threshold ───────────────────────────────────────────────
@@ -1238,6 +1258,246 @@ async def portfolio_set_interval_input(update: Update, context: ContextTypes.DEF
         ]),
     )
     return ConversationHandler.END
+
+
+# ── Per-portfolio: Alloc List / Delete / Clear ────────────────────────────────
+
+async def pf_alloc_list_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """عرض قائمة العملات مع زر حذف لكل منها."""
+    query = update.callback_query
+    await query.answer()
+    user_id = update.effective_user.id
+    portfolio_id = int(query.data.split(":")[1])
+
+    p = await db.get_portfolio(portfolio_id)
+    if not p or p["user_id"] != user_id:
+        await query.answer("❌ محفظة غير موجودة", show_alert=True)
+        return
+
+    allocs = await db.get_portfolio_allocations(portfolio_id)
+    if not allocs:
+        await query.answer("لا توجد عملات", show_alert=True)
+        return
+
+    capital = float(p.get("capital_usdt") or 0.0)
+    buttons = []
+    for a in allocs:
+        val = capital * a["target_percentage"] / 100 if capital > 0 else 0
+        val_str = f"  ${val:,.1f}" if val > 0 else ""
+        buttons.append([InlineKeyboardButton(
+            f"🗑  {a['symbol']}  ·  {a['target_percentage']:.1f}%{val_str}",
+            callback_data=f"pf_alloc_del:{portfolio_id}:{a['symbol']}"
+        )])
+    buttons.append([InlineKeyboardButton("◀️  رجوع", callback_data=f"portfolio_edit_allocs:{portfolio_id}")])
+
+    total_pct = sum(a["target_percentage"] for a in allocs)
+    await query.edit_message_text(
+        f"🗑 *حذف عملة — {p['name']}*\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"اضغط على العملة لحذفها:\n"
+        f"المجموع: `{total_pct:.1f}%`",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(buttons),
+    )
+
+
+async def pf_alloc_del_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """حذف عملة واحدة من المحفظة."""
+    query = update.callback_query
+    await query.answer()
+    user_id = update.effective_user.id
+    parts = query.data.split(":")
+    portfolio_id = int(parts[1])
+    symbol = parts[2]
+
+    p = await db.get_portfolio(portfolio_id)
+    if not p or p["user_id"] != user_id:
+        await query.answer("❌ محفظة غير موجودة", show_alert=True)
+        return
+
+    await db.delete_portfolio_allocation(portfolio_id, symbol)
+    await query.answer(f"✅ تم حذف {symbol}", show_alert=False)
+
+    # أعد عرض القائمة بعد الحذف
+    allocs = await db.get_portfolio_allocations(portfolio_id)
+    if not allocs:
+        await query.edit_message_text(
+            f"✅ تم حذف {symbol}\n\nلا توجد عملات متبقية.",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("◀️ رجوع للمحفظة", callback_data=f"portfolio:{portfolio_id}")
+            ]])
+        )
+        return
+
+    capital = float(p.get("capital_usdt") or 0.0)
+    buttons = []
+    for a in allocs:
+        val = capital * a["target_percentage"] / 100 if capital > 0 else 0
+        val_str = f"  ${val:,.1f}" if val > 0 else ""
+        buttons.append([InlineKeyboardButton(
+            f"🗑  {a['symbol']}  ·  {a['target_percentage']:.1f}%{val_str}",
+            callback_data=f"pf_alloc_del:{portfolio_id}:{a['symbol']}"
+        )])
+    buttons.append([InlineKeyboardButton("◀️  رجوع", callback_data=f"portfolio_edit_allocs:{portfolio_id}")])
+
+    total_pct = sum(a["target_percentage"] for a in allocs)
+    await query.edit_message_text(
+        f"✅ تم حذف `{symbol}`\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"المجموع الحالي: `{total_pct:.1f}%`\n"
+        f"اضغط على عملة لحذفها:",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(buttons),
+    )
+
+
+async def pf_alloc_clear_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """مسح جميع عملات المحفظة بعد تأكيد."""
+    query = update.callback_query
+    await query.answer()
+    user_id = update.effective_user.id
+    portfolio_id = int(query.data.split(":")[1])
+
+    p = await db.get_portfolio(portfolio_id)
+    if not p or p["user_id"] != user_id:
+        await query.answer("❌ محفظة غير موجودة", show_alert=True)
+        return
+
+    # تأكيد أول مرة
+    if query.data.startswith("pf_alloc_clear:") and not query.data.startswith("pf_alloc_clear_confirm:"):
+        await query.edit_message_text(
+            f"⚠️ *هل تريد مسح جميع عملات {p['name']}؟*\n\nلا يمكن التراجع.",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("⚠️ نعم، امسح الكل", callback_data=f"pf_alloc_clear_confirm:{portfolio_id}"),
+                    InlineKeyboardButton("✖️ إلغاء",           callback_data=f"portfolio_edit_allocs:{portfolio_id}"),
+                ]
+            ])
+        )
+        return
+
+    await db.clear_portfolio_allocations(portfolio_id)
+    kb = await _portfolio_kb(portfolio_id, user_id)
+    await query.edit_message_text(
+        f"✅ *تم مسح جميع العملات*\n📁 *{p['name']}*\n\n"
+        f"💰 *{'${:,.1f} USD'.format(float(p.get('capital_usdt') or 0))}*          "
+        f"💰 *{'${:,.1f} USD'.format(float(p.get('capital_usdt') or 0))}*\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🪙 *العملات \\(0\\)*",
+        parse_mode="Markdown",
+        reply_markup=kb,
+    )
+
+
+async def pf_alloc_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    استقبال رموز العملات المكتوبة وحفظها في المحفظة النشطة.
+    يُستدعى من _text_router في main.py عند وجود _alloc_portfolio_id في user_data.
+    """
+    user_id = update.effective_user.id
+    portfolio_id = context.user_data.get("_alloc_portfolio_id")
+    if not portfolio_id:
+        return
+
+    p = await db.get_portfolio(portfolio_id)
+    if not p or p["user_id"] != user_id:
+        context.user_data.pop("_alloc_portfolio_id", None)
+        return
+
+    text = update.message.text.strip().upper()
+    MAX_COINS = 20
+
+    # تنسيق BTC=40 ETH=30 ...
+    if "=" in text:
+        pairs_raw = text.replace("\n", " ").split()
+        parsed = []
+        errors = []
+        for item in pairs_raw:
+            if "=" in item:
+                sym, _, pct_str = item.partition("=")
+                sym = sym.strip()
+                try:
+                    pct = float(pct_str.strip())
+                    if pct <= 0:
+                        raise ValueError
+                    parsed.append((sym, pct))
+                except ValueError:
+                    errors.append(item)
+            else:
+                errors.append(item)
+
+        if not parsed:
+            await update.message.reply_text(
+                "❌ تنسيق خاطئ.\nمثال: `BTC=40 ETH=30 SOL=30`",
+                parse_mode="Markdown"
+            )
+            return
+
+        total = sum(p for _, p in parsed)
+        if abs(total - 100) > 1:
+            await update.message.reply_text(
+                f"⚠️ مجموع النسب `{total:.1f}%` — يجب أن يكون 100%.\n"
+                f"مثال: `BTC=40 ETH=30 SOL=30`",
+                parse_mode="Markdown"
+            )
+            return
+
+        for sym, pct in parsed:
+            await db.set_portfolio_allocation(portfolio_id, user_id, sym, pct)
+
+        context.user_data.pop("_alloc_portfolio_id", None)
+        allocs = await db.get_portfolio_allocations(portfolio_id)
+        kb = await _portfolio_kb(portfolio_id, user_id)
+        err_txt = f"\n⚠️ تجاهلت: `{'  '.join(errors)}`" if errors else ""
+        await update.message.reply_text(
+            f"✅ *تم حفظ {len(parsed)} عملة*{err_txt}\n"
+            f"📁 *{p['name']}*\n"
+            f"━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🪙 *العملات \\({len(allocs)}\\)*",
+            parse_mode="Markdown",
+            reply_markup=kb,
+        )
+        return
+
+    # تنسيق BTC ETH SOL ... (بدون نسب — توزيع متساوٍ)
+    symbols = [s.strip() for s in text.replace(",", " ").split() if s.strip().isalpha()]
+    if not symbols:
+        await update.message.reply_text(
+            "❌ أرسل رموز العملات:\n`BTC ETH SOL`\nأو بالنسب:\n`BTC=40 ETH=30 SOL=30`",
+            parse_mode="Markdown"
+        )
+        return
+
+    existing = await db.get_portfolio_allocations(portfolio_id)
+    existing_syms = {a["symbol"] for a in existing}
+    new_syms = [s for s in symbols if s not in existing_syms]
+
+    if len(existing_syms) + len(new_syms) > MAX_COINS:
+        await update.message.reply_text(f"❌ الحد الأقصى {MAX_COINS} عملة.")
+        return
+
+    # توزيع متساوٍ على الجميع (القديم + الجديد)
+    all_syms = list(existing_syms) + new_syms
+    pct = round(100.0 / len(all_syms), 2)
+    diff = round(100.0 - pct * len(all_syms), 2)
+
+    await db.clear_portfolio_allocations(portfolio_id)
+    for i, sym in enumerate(all_syms):
+        p_val = pct + (diff if i == len(all_syms) - 1 else 0)
+        await db.set_portfolio_allocation(portfolio_id, user_id, sym, round(p_val, 2))
+
+    context.user_data.pop("_alloc_portfolio_id", None)
+    allocs = await db.get_portfolio_allocations(portfolio_id)
+    kb = await _portfolio_kb(portfolio_id, user_id)
+    await update.message.reply_text(
+        f"✅ *تم إضافة {len(new_syms)} عملة — توزيع متساوٍ {pct}%*\n"
+        f"📁 *{p['name']}*\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🪙 *العملات \\({len(allocs)}\\)*",
+        parse_mode="Markdown",
+        reply_markup=kb,
+    )
 
 
 # ── Per-portfolio: Toggle Auto Rebalance ──────────────────────────────────────

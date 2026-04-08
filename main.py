@@ -73,6 +73,10 @@ from bot.handlers.portfolio_manager import (
     sl_value_input,
     portfolio_rebalance_callback,
     portfolio_rebalance_exec_callback,
+    pf_alloc_list_callback,
+    pf_alloc_del_callback,
+    pf_alloc_clear_callback,
+    pf_alloc_text_input,
     CREATE_NAME, CREATE_CAPITAL, EDIT_NAME, EDIT_CAPITAL,
     PORTFOLIO_SET_THRESHOLD, PORTFOLIO_SET_INTERVAL,
     TP_TP1_TYPE, TP_TP1_VALUE, TP_TP1_SELL,
@@ -292,6 +296,10 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(delete_portfolio_callback,         pattern="^portfolio_delete:\\d+$"))
     app.add_handler(CallbackQueryHandler(delete_portfolio_confirm_callback, pattern="^portfolio_delete_confirm:"))
     app.add_handler(CallbackQueryHandler(portfolio_edit_allocs_callback,    pattern="^portfolio_edit_allocs:"))
+    app.add_handler(CallbackQueryHandler(pf_alloc_list_callback,            pattern="^pf_alloc_list:\\d+$"))
+    app.add_handler(CallbackQueryHandler(pf_alloc_del_callback,             pattern="^pf_alloc_del:\\d+:"))
+    app.add_handler(CallbackQueryHandler(pf_alloc_clear_callback,           pattern="^pf_alloc_clear:\\d+$"))
+    app.add_handler(CallbackQueryHandler(pf_alloc_clear_callback,           pattern="^pf_alloc_clear_confirm:\\d+$"))
     app.add_handler(CallbackQueryHandler(portfolio_toggle_auto_callback,    pattern="^portfolio_toggle_auto:"))
     app.add_handler(CallbackQueryHandler(portfolio_tp_menu_callback,        pattern="^portfolio_tp_menu:"))
     app.add_handler(CallbackQueryHandler(portfolio_tp_activate_callback,    pattern="^portfolio_tp_activate:"))
@@ -305,7 +313,9 @@ def build_app() -> Application:
     # ── Inline text input router ───────────────────────────────────────────────
     async def _text_router(update, context):
         ud = context.user_data
-        if "_momentum_setting" in ud:
+        if "_alloc_portfolio_id" in ud:
+            await pf_alloc_text_input(update, context)
+        elif "_momentum_setting" in ud:
             await momentum_setting_input(update, context)
         elif "_grid_edit_tpsl" in ud:
             await grid_edit_tpsl_input(update, context)
