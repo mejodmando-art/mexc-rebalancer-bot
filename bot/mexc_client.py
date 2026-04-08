@@ -112,6 +112,28 @@ class MexcClient:
 
         return portfolio, total_usdt
 
+    async def wait_for_order(self, order_id: str, symbol: str, timeout: int = 30) -> dict:
+        """
+        Poll fetch_order until the order is closed (filled).
+
+        Raises immediately on terminal failure statuses (canceled/expired/rejected).
+        Raises TimeoutError if the order is not filled within `timeout` seconds.
+        Needed because ccxt does not guarantee a synchronous fill on market orders
+        for all exchange configurations.
+        """
+        deadline = asyncio.get_event_loop().time() + timeout
+        while True:
+            order = await self.exchange.fetch_order(order_id, symbol)
+            status = order.get("status")
+            if status == "closed":
+                return order
+            if status in ("canceled", "expired", "rejected"):
+                raise Exception(f"Order {order_id} ended with status: {status}")
+            remaining = deadline - asyncio.get_event_loop().time()
+            if remaining <= 0:
+                raise TimeoutError(f"Order {order_id} not filled after {timeout}s")
+            await asyncio.sleep(min(1.0, remaining))
+
     async def execute_rebalance(self, trades: list) -> list:
         if not trades:
             return []
@@ -166,8 +188,22 @@ class MexcClient:
                     # MEXC Spot market buy requires quoteOrderQty (USDT amount), not base qty
                     order = await self.exchange.create_market_buy_order_with_cost(pair, usdt_amt)
 
+                # Wait for confirmed fill before recording success
+                order_id = order.get("id")
+                filled = float(order.get("filled") or 0)
+                if order_id and order.get("status") != "closed":
+                    try:
+                        confirmed = await self.wait_for_order(order_id, pair)
+                        filled = float(confirmed.get("filled") or filled)
+                        price = float(confirmed.get("average") or confirmed.get("price") or price)
+                    except Exception as wait_err:
+                        results.append({"symbol": sym, "action": action, "status": "error",
+                                        "reason": str(wait_err)[:100]})
+                        continue
+
                 results.append({"symbol": sym, "action": action, "status": "ok",
-                                "usdt": usdt_amt, "price": price, "order_id": order.get("id")})
+                                "usdt": usdt_amt, "price": price, "filled": filled,
+                                "order_id": order_id})
             except Exception as e:
                 results.append({"symbol": sym, "action": action, "status": "error",
                                 "reason": str(e)[:100]})

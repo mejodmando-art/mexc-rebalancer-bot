@@ -4,6 +4,10 @@ from typing import List, Dict, Tuple
 # exchange minimums and excessive fees on tiny rebalances.
 MIN_TRADE_USDT = 5.0
 
+# MEXC spot taker fee. Buy orders are inflated by 1/(1-fee) so the
+# post-fee received amount matches the target allocation value.
+MEXC_TAKER_FEE = 0.001
+
 
 def calculate_trades(
     portfolio: dict,
@@ -45,9 +49,15 @@ def calculate_trades(
             target_val = (target_pct / 100) * total_usdt
             diff_usdt = abs(target_val - current_val)
             if diff_usdt >= min_trade_usdt:
+                action = "sell" if drift > 0 else "buy"
+                # Inflate buy amount so the post-fee received value matches
+                # the target. Sell amount is left as-is; the fee reduces USDT
+                # received, which is reflected in the next portfolio snapshot.
+                if action == "buy":
+                    diff_usdt = diff_usdt / (1 - MEXC_TAKER_FEE)
                 trades.append({
                     "symbol": sym,
-                    "action": "sell" if drift > 0 else "buy",
+                    "action": action,
                     "usdt_amount": round(diff_usdt, 2),
                     "drift_pct": round(drift, 2),
                 })
