@@ -197,7 +197,7 @@ async def portfolio_rebalance_callback(update: Update, context: ContextTypes.DEF
 
     client = MexcClient(settings["mexc_api_key"], settings["mexc_secret_key"])
     try:
-        portfolio, total_usdt = await asyncio.wait_for(client.get_portfolio(), timeout=20)
+        full_portfolio, total_usdt = await asyncio.wait_for(client.get_portfolio(), timeout=20)
     except asyncio.TimeoutError:
         await query.edit_message_text("❌ انتهت المهلة — MEXC لم يستجب.", reply_markup=back_to_main_kb())
         return
@@ -210,23 +210,16 @@ async def portfolio_rebalance_callback(update: Update, context: ContextTypes.DEF
     capital = float(p.get("capital_usdt") or 0)
     alloc_symbols = {a["symbol"] for a in allocations}
 
-    # قيمة العملات المخصصة لهذه المحفظة فقط (بدون USDT)
-    portfolio_coins_value = sum(
-        portfolio.get(sym, {}).get("value_usdt", 0.0) for sym in alloc_symbols
-    )
+    # فلترة العملات لهذه المحفظة فقط — يمنع تداخل المحافظ المتعددة
+    portfolio = {sym: data for sym, data in full_portfolio.items() if sym in alloc_symbols}
 
-    # effective_total = رأس المال المحدد إذا وُجد، وإلا قيمة العملات الفعلية فقط.
-    # لا نضيف كامل USDT الحساب لأنه قد يخص محافظ أخرى أو grid bots.
+    # رأس المال المحدد هو الأساس — لا نستخدم إجمالي الحساب
     if capital > 0:
         effective_total = capital
     else:
-        effective_total = portfolio_coins_value
-
-    # إذا كانت قيمة العملات صفراً (محفظة جديدة لم تُشترَ بعد) استخدم رأس المال
-    if effective_total < 1.0 and capital > 0:
-        effective_total = capital
-    elif effective_total < 1.0:
-        effective_total = total_usdt
+        effective_total = sum(d.get("value_usdt", 0.0) for d in portfolio.values())
+        if effective_total < 1.0:
+            effective_total = total_usdt
 
     threshold = float(p.get("threshold") or settings.get("threshold") or 5.0)
     trades, drift_report = calculate_trades(portfolio, effective_total, allocations, threshold)

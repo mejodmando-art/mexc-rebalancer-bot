@@ -52,16 +52,24 @@ async def _do_rebalance(app, user_id: int, portfolio_id: int = None, auto: bool 
 
     client = MexcClient(settings["mexc_api_key"], settings["mexc_secret_key"])
     try:
-        portfolio, total_usdt = await client.get_portfolio()
+        full_portfolio, total_usdt = await client.get_portfolio()
+
+        # فلترة العملات لهذه المحفظة فقط — يمنع تداخل المحافظ المتعددة
+        alloc_symbols = {a["symbol"] for a in allocations}
+        portfolio = {sym: data for sym, data in full_portfolio.items() if sym in alloc_symbols}
+
         # Per-portfolio threshold takes priority over the global user setting
         threshold = float(portfolio_info.get("threshold") or settings.get("threshold") or 5.0)
 
-        # Never trade more than what's actually in the account.
+        # رأس المال المحدد للمحفظة هو الأساس — لا نستخدم إجمالي الحساب
         capital = portfolio_info.get("capital_usdt", 0.0) if portfolio_info else 0.0
         if capital > 0:
-            effective_total = min(capital, total_usdt)
+            effective_total = capital
         else:
-            effective_total = total_usdt
+            # إذا لم يُحدد رأس مال، استخدم قيمة عملات المحفظة فقط
+            effective_total = sum(d.get("value_usdt", 0.0) for d in portfolio.values())
+            if effective_total < 1.0:
+                effective_total = total_usdt
 
         # Skip if account is essentially empty — notify the user so they know
         if effective_total < 1.0:
