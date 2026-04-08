@@ -392,11 +392,10 @@ async def switch_portfolio_callback(update: Update, context: ContextTypes.DEFAUL
 
 async def portfolio_balance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    عرض الرصيد الكلي للمحفظة: كل عملة بقيمتها الحالية + الإجمالي + الربح/الخسارة.
+    عرض الرصيد الكلي للمحفظة — سطر واحد لكل عملة.
     callback_data = pf_balance:<portfolio_id>
     """
     from bot.mexc_client import MexcClient
-    from bot.keyboards import coin_emoji
 
     query = update.callback_query
     await query.answer()
@@ -419,7 +418,7 @@ async def portfolio_balance_callback(update: Update, context: ContextTypes.DEFAU
         )
         return
 
-    await query.edit_message_text("⏳ جاري جلب الأرصدة من MEXC...")
+    await query.edit_message_text("⏳ جاري جلب الأرصدة...")
 
     client = MexcClient(settings["mexc_api_key"], settings["mexc_secret_key"])
     try:
@@ -441,39 +440,58 @@ async def portfolio_balance_callback(update: Update, context: ContextTypes.DEFAU
     finally:
         await client.close()
 
-    # حساب قيمة عملات المحفظة فقط (العملات المضافة في التوزيع)
     alloc_symbols = {a["symbol"] for a in allocs}
     portfolio_value = sum(
         portfolio_data.get(sym, {}).get("value_usdt", 0.0)
         for sym in alloc_symbols
     )
 
-    # ربح / خسارة مقارنة برأس المال
-    pnl = portfolio_value - capital if capital > 0 else None
-    pnl_pct = (pnl / capital * 100) if pnl is not None and capital > 0 else None
+    pnl     = portfolio_value - capital if capital > 0 else None
+    pnl_pct = (pnl / capital * 100)     if pnl is not None else None
 
-    # ── بناء الرسالة ──────────────────────────────────────────────────────────
-    lines = [
-        f"📊 *رصيد المحفظة — {p['name']}*",
-        "━━━━━━━━━━━━━━━━━━━━━",
-        f"🏦 *رصيد الحساب الكلي:* `${total_account:,.2f} USDT`",
-    ]
+    def _fmt_price(p: float) -> str:
+        """رقم سعر مقروء بدون scientific notation."""
+        if p == 0:
+            return "0"
+        if p >= 1000:
+            return f"{p:,.0f}"
+        if p >= 1:
+            return f"{p:,.3f}"
+        if p >= 0.01:
+            return f"{p:.4f}"
+        if p >= 0.0001:
+            return f"{p:.6f}"
+        return f"{p:.8f}"
 
+    def _fmt_qty(q: float) -> str:
+        """كمية مقروءة بدون scientific notation."""
+        if q == 0:
+            return "0"
+        if q >= 1000:
+            return f"{q:,.1f}"
+        if q >= 1:
+            return f"{q:,.3f}"
+        if q >= 0.001:
+            return f"{q:.4f}"
+        return f"{q:.6f}"
+
+    # ── هيدر الملخص ──────────────────────────────────────────────────────────
+    pnl_sign = "+" if pnl is not None and pnl >= 0 else ""
+    pnl_icon = "▲" if pnl is not None and pnl >= 0 else "▼"
+
+    header = (
+        f"📊 *{p['name']}*\n"
+        f"`{'─' * 28}`\n"
+        f"💵 الحساب   `${total_account:>10,.2f}`\n"
+        f"💼 المحفظة  `${portfolio_value:>10,.2f}`\n"
+    )
     if capital > 0:
-        lines.append(f"💼 *رأس المال:* `${capital:,.2f} USDT`")
-
-    lines.append(f"💰 *قيمة المحفظة:* `${portfolio_value:,.2f} USDT`")
-
+        header += f"🎯 رأس المال `${capital:>10,.2f}`\n"
     if pnl is not None:
-        pnl_icon = "📈" if pnl >= 0 else "📉"
-        sign = "+" if pnl >= 0 else ""
-        lines.append(
-            f"{pnl_icon} *الربح/الخسارة:* `{sign}${pnl:,.2f}` \\(`{sign}{pnl_pct:.2f}%`\\)"
-        )
+        header += f"{pnl_icon} ر/خ        `{pnl_sign}${abs(pnl):>9,.2f}` ({pnl_sign}{pnl_pct:.1f}%)\n"
+    header += f"`{'─' * 28}`\n"
 
-    lines.append("━━━━━━━━━━━━━━━━━━━━━")
-
-    # تفاصيل كل عملة
+    # ── جدول العملات — سطر واحد لكل عملة ────────────────────────────────────
     alloc_map = {a["symbol"]: a["target_percentage"] for a in allocs}
     sorted_coins = sorted(
         alloc_symbols,
@@ -481,33 +499,35 @@ async def portfolio_balance_callback(update: Update, context: ContextTypes.DEFAU
         reverse=True,
     )
 
+    # رأس الجدول
+    coin_lines = ["`العملة   القيمة    %    @سعر`"]
+
     for sym in sorted_coins:
         data    = portfolio_data.get(sym, {})
         val     = data.get("value_usdt", 0.0)
         amount  = data.get("amount", 0.0)
         price   = data.get("price", 0.0)
-        tgt_pct = alloc_map.get(sym, 0.0)
         cur_pct = (val / portfolio_value * 100) if portfolio_value > 0 else 0.0
+        tgt_pct = alloc_map.get(sym, 0.0)
         drift   = cur_pct - tgt_pct
-        logo    = coin_emoji(sym)
 
-        drift_str = f" `{drift:+.1f}%`" if abs(drift) >= 0.5 else ""
-        lines.append(
-            f"{logo} *{sym}*  `${val:,.2f}`  \\(`{cur_pct:.1f}%`{drift_str}\\)\n"
-            f"   _{amount:.4g} @ ${price:,.4g}_"
+        drift_str = f"{drift:+.1f}%" if abs(drift) >= 0.5 else "  ✓  "
+        price_str = _fmt_price(price)
+
+        # سطر واحد: SYM  $val  pct%  drift  @price
+        coin_lines.append(
+            f"`{sym:<7} ${val:>6.2f}  {cur_pct:>4.1f}%  {drift_str}  @{price_str}`"
         )
 
-    lines.append("━━━━━━━━━━━━━━━━━━━━━")
+    footer = f"`{'─' * 28}`"
+
+    text = header + "\n".join(coin_lines) + "\n" + footer
 
     back_kb = InlineKeyboardMarkup([[
-        InlineKeyboardButton("◀️ رجوع للمحفظة", callback_data=f"portfolio:{portfolio_id}")
+        InlineKeyboardButton("◀️ رجوع", callback_data=f"portfolio:{portfolio_id}")
     ]])
 
-    await query.edit_message_text(
-        "\n".join(lines),
-        parse_mode="Markdown",
-        reply_markup=back_kb,
-    )
+    await query.edit_message_text(text, parse_mode="Markdown", reply_markup=back_kb)
 
 
 async def delete_portfolio_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
