@@ -5,31 +5,23 @@ from typing import List, Dict
 # ── القائمة الرئيسية ───────────────────────────────────────────────────────────
 
 def main_menu_kb() -> InlineKeyboardMarkup:
+    """
+    الواجهة الرئيسية = شاشة المحفظة النشطة مباشرة.
+    هذا الـ keyboard يُستخدم فقط كـ fallback عند عدم وجود محفظة نشطة.
+    """
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🗂️  محافظي",     callback_data="portfolios")],
-        [
-            InlineKeyboardButton("⚡  Momentum", callback_data="momentum:menu"),
-            InlineKeyboardButton("🔲  Grid Bot", callback_data="grid:menu"),
-        ],
+        [InlineKeyboardButton("🗂️  فتح المحفظة",  callback_data="home")],
+        [InlineKeyboardButton("🔑  إعدادات API",   callback_data="menu:settings")],
     ])
 
 
 # ── الإعدادات العامة ───────────────────────────────────────────────────────────
 
 def settings_kb(auto_enabled: bool = False) -> InlineKeyboardMarkup:
-    auto_label = "🟢 إيقاف التوازن التلقائي" if auto_enabled else "🔴 تفعيل التوازن التلقائي"
+    """إعدادات عامة — API keys فقط. إعدادات إعادة التوازن داخل شاشة المحفظة."""
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔑 مفاتيح MEXC API",        callback_data="settings:set_api")],
-        [
-            InlineKeyboardButton("📊 عرض التوزيع",          callback_data="settings:view_allocs"),
-            InlineKeyboardButton("✏️ تعديل العملات",        callback_data="settings:add_alloc"),
-        ],
-        [
-            InlineKeyboardButton("🎯 حد الانحراف",          callback_data="settings:set_threshold"),
-            InlineKeyboardButton("⏱ فترة التوازن",          callback_data="settings:set_interval"),
-        ],
-        [InlineKeyboardButton(auto_label,                   callback_data="toggle_auto")],
-        [InlineKeyboardButton("◀️ رجوع",                    callback_data="menu:main")],
+        [InlineKeyboardButton("🔑 مفاتيح MEXC API", callback_data="settings:set_api")],
+        [InlineKeyboardButton("◀️ رجوع",             callback_data="menu:main")],
     ])
 
 

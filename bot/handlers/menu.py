@@ -11,43 +11,26 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     user_id = update.effective_user.id
 
     if action == "main":
-        await query.edit_message_text(
-            "🏠 *القائمة الرئيسية*",
-            parse_mode="Markdown",
-            reply_markup=main_menu_kb(),
-        )
+        # الواجهة الرئيسية = شاشة المحفظة النشطة
+        from bot.handlers.start import _show_home
+        await _show_home(update, context)
+        return
 
     elif action == "settings":
         settings = await db.get_settings(user_id)
-        auto_on   = bool(settings.get("auto_enabled"))      if settings else False
-        has_api   = bool(settings.get("mexc_api_key"))      if settings else False
-        threshold = settings.get("threshold", 5.0)          if settings else 5.0
-        interval  = settings.get("auto_interval_hours", 24) if settings else 24
-        allocs    = await db.get_allocations(user_id)
-
-        portfolio_id   = await db.get_active_portfolio_id(user_id)
-        portfolio_line = ""
-        if portfolio_id:
-            p = await db.get_portfolio(portfolio_id)
-            if p:
-                portfolio_line = f"\n🗂 المحفظة النشطة: *{p['name']}*"
-
-        api_icon  = "✅" if has_api else "❌"
-        auto_icon = "🟢" if auto_on else "🔴"
-        alloc_str = f"{len(allocs)} عملة" if allocs else "لا يوجد توزيع"
-        auto_str  = f"كل {interval} ساعة" if auto_on else "معطل"
+        has_api  = bool(settings.get("mexc_api_key")) if settings else False
+        api_icon = "✅" if has_api else "❌"
 
         text = (
-            f"⚙️ *الإعدادات*{portfolio_line}\n"
+            f"⚙️ *الإعدادات العامة*\n"
             f"━━━━━━━━━━━━━━━━━━━━━\n"
             f"{api_icon} MEXC API: *{'مربوط' if has_api else 'غير مربوط'}*\n"
-            f"🪙 التوزيع: *{alloc_str}*\n"
-            f"🎯 حد الانحراف: *{threshold}%*\n"
-            f"{auto_icon} التوازن التلقائي: *{auto_str}*\n"
-            f"━━━━━━━━━━━━━━━━━━━━━"
+            f"━━━━━━━━━━━━━━━━━━━━━\n"
+            f"📌 إعدادات إعادة التوازن (حد الانحراف، فترة التوازن، التلقائي)\n"
+            f"موجودة داخل شاشة المحفظة مباشرة."
         )
         await query.edit_message_text(
-            text, parse_mode="Markdown", reply_markup=settings_kb(auto_on)
+            text, parse_mode="Markdown", reply_markup=settings_kb()
         )
 
     elif action == "info":

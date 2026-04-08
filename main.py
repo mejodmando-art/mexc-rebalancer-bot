@@ -10,7 +10,7 @@ from telegram.ext import (
 )
 from bot.config import config
 from bot.database import db
-from bot.handlers.start import start_handler, help_handler, menu_command
+from bot.handlers.start import start_handler, help_handler, menu_command, home_callback, main_menu_callback
 from bot.handlers.portfolio import portfolio_callback
 from bot.handlers.rebalance import rebalance_callback
 from bot.handlers.history import history_callback
@@ -244,6 +244,9 @@ def build_app() -> Application:
 
 
     # ── Navigation ─────────────────────────────────────────────────────────────
+    # home / menu:main → شاشة المحفظة النشطة مباشرة
+    app.add_handler(CallbackQueryHandler(home_callback,        pattern="^home$"))
+    app.add_handler(CallbackQueryHandler(main_menu_callback,   pattern="^menu:main$"))
     app.add_handler(CallbackQueryHandler(handle_menu_callback, pattern="^menu:"))
     app.add_handler(CallbackQueryHandler(portfolio_callback,   pattern="^balance$"))
     app.add_handler(CallbackQueryHandler(history_callback,     pattern="^history$"))
