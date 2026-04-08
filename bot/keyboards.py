@@ -49,11 +49,22 @@ def allocs_list_kb(allocations: List[Dict]) -> InlineKeyboardMarkup:
 
 # ── إعادة التوازن ──────────────────────────────────────────────────────────────
 
-def rebalance_confirm_kb() -> InlineKeyboardMarkup:
+def rebalance_confirm_kb(portfolio_id: int = 0) -> InlineKeyboardMarkup:
+    """
+    زر التأكيد لإعادة التوازن.
+    إذا أُعطي portfolio_id يُرسل pf_rebalance_exec:{id} (المسار الصحيح).
+    وإلا يُرسل rebalance:execute للتوافق مع الكود القديم.
+    """
+    if portfolio_id:
+        exec_data = f"pf_rebalance_exec:{portfolio_id}"
+        cancel_data = f"portfolio:{portfolio_id}"
+    else:
+        exec_data = "rebalance:execute"
+        cancel_data = "menu:main"
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("✅ تنفيذ الآن", callback_data="rebalance:execute"),
-            InlineKeyboardButton("✖️ إلغاء",      callback_data="menu:main"),
+            InlineKeyboardButton("✅ تنفيذ الآن", callback_data=exec_data),
+            InlineKeyboardButton("✖️ إلغاء",      callback_data=cancel_data),
         ],
     ])
 
@@ -95,38 +106,98 @@ def portfolios_list_kb(portfolios: List[Dict], active_id: int) -> InlineKeyboard
     return InlineKeyboardMarkup(buttons)
 
 
-def portfolio_actions_kb(portfolio_id: int, is_active: bool, auto_enabled: bool = False) -> InlineKeyboardMarkup:
-    """أزرار مربعة متساوية داخل المحفظة."""
+def portfolio_actions_kb(
+    portfolio_id: int,
+    is_active: bool,
+    auto_enabled: bool = False,
+    allocations: List[Dict] = None,
+    capital_usdt: float = 0.0,
+    threshold: float = 5.0,
+    auto_interval: int = 24,
+) -> InlineKeyboardMarkup:
+    """
+    شاشة المحفظة الكاملة:
+    - معلومات رأس المال + حد الانحراف في أزرار عرض
+    - كل عملة = زر خارجي يعرض: 🪙 SYM  XX%  $YY.Y
+    - زر إعادة التوازن بارز في المنتصف
+    - باقي أزرار الإدارة في الأسفل
+    """
     buttons = []
+
+    # ── تفعيل المحفظة إذا لم تكن نشطة ──
     if not is_active:
-        buttons.append([InlineKeyboardButton("✅  تفعيل هذه المحفظة", callback_data=f"portfolio_switch:{portfolio_id}")])
-    # ── إعادة التوازن ──
-    buttons.append([InlineKeyboardButton("⚖️  إعادة التوازن الآن", callback_data=f"pf_rebalance:{portfolio_id}")])
-    # ── التوازن التلقائي ──
-    auto_label = "🟢  إيقاف التوازن التلقائي" if auto_enabled else "🔴  تفعيل التوازن التلقائي"
-    buttons.append([InlineKeyboardButton(auto_label, callback_data=f"portfolio_toggle_auto:{portfolio_id}")])
-    # ── الإعدادات (صفين متساويين) ──
+        buttons.append([InlineKeyboardButton(
+            "✅  تفعيل هذه المحفظة",
+            callback_data=f"portfolio_switch:{portfolio_id}"
+        )])
+
+    # ── معلومات رأس المال وحد الانحراف (صف واحد للعرض) ──
+    auto_icon = "🟢" if auto_enabled else "🔴"
+    buttons.append([
+        InlineKeyboardButton(f"🎯 حد الانحراف: {threshold:.0f}%",
+                             callback_data=f"portfolio_set_threshold:{portfolio_id}"),
+        InlineKeyboardButton(f"{auto_icon} تلقائي: {'شغّال' if auto_enabled else 'معطّل'}",
+                             callback_data=f"portfolio_toggle_auto:{portfolio_id}"),
+    ])
+
+    # ── العملات كأزرار خارجية (عمودان) ──
+    if allocations:
+        coin_buttons = []
+        for a in allocations:
+            sym = a["symbol"]
+            pct = a["target_percentage"]
+            val = capital_usdt * pct / 100 if capital_usdt > 0 else 0.0
+            val_str = f"${val:,.1f}" if val > 0 else f"{pct:.0f}%"
+            label = f"🪙 {sym}   {pct:.0f}%   {val_str}"
+            coin_buttons.append(
+                InlineKeyboardButton(label, callback_data=f"portfolio_edit_allocs:{portfolio_id}")
+            )
+
+        # عمودان متساويان
+        for i in range(0, len(coin_buttons), 2):
+            row = coin_buttons[i:i + 2]
+            buttons.append(row)
+
+    # ── زر إعادة التوازن بارز (عرض كامل) ──
+    buttons.append([InlineKeyboardButton(
+        "🔄  إعادة التوازن الآن",
+        callback_data=f"pf_rebalance:{portfolio_id}"
+    )])
+
+    # ── Momentum + Grid ──
+    buttons.append([
+        InlineKeyboardButton("⚡ Momentum\nاستراتيجية زخم",   callback_data="momentum:menu"),
+        InlineKeyboardButton("🔲 Grid Bot\nأوامر تلقائية",    callback_data="grid:menu"),
+    ])
+
+    # ── رأس المال + تعديل عملات ──
+    buttons.append([
+        InlineKeyboardButton("💰  رأس المال",              callback_data=f"portfolio_edit_capital:{portfolio_id}"),
+        InlineKeyboardButton("🎯  تعديل العملات",          callback_data=f"portfolio_edit_allocs:{portfolio_id}"),
+    ])
+
+    # ── بيع الكل + أهداف الربح ──
+    buttons.append([
+        InlineKeyboardButton("🔴  بيع الكل",               callback_data=f"portfolio_sell_all:{portfolio_id}"),
+        InlineKeyboardButton("🏆  أهداف الربح / وقف الخسارة", callback_data=f"portfolio_tp_menu:{portfolio_id}"),
+    ])
+
+    # ── عملة واحدة + بيع عملة واحدة ──
+    buttons.append([
+        InlineKeyboardButton("🪙  إضافة عملة",             callback_data=f"portfolio_edit_allocs:{portfolio_id}"),
+        InlineKeyboardButton("🗑  بيع عملة واحدة",         callback_data=f"portfolio_sell_one:{portfolio_id}"),
+    ])
+
+    # ── إعدادات متقدمة + حذف + رجوع ──
     buttons.append([
         InlineKeyboardButton("✏️  الاسم",        callback_data=f"portfolio_edit_name:{portfolio_id}"),
-        InlineKeyboardButton("💰  رأس المال",    callback_data=f"portfolio_edit_capital:{portfolio_id}"),
-    ])
-    buttons.append([
-        InlineKeyboardButton("🎯  حد الانحراف",  callback_data=f"portfolio_set_threshold:{portfolio_id}"),
         InlineKeyboardButton("⏱  فترة التوازن", callback_data=f"portfolio_set_interval:{portfolio_id}"),
     ])
-    buttons.append([InlineKeyboardButton("🪙  إضافة / تعديل عملات", callback_data=f"portfolio_edit_allocs:{portfolio_id}")])
-    buttons.append([InlineKeyboardButton("🎯  أهداف الربح ووقف الخسارة", callback_data=f"portfolio_tp_menu:{portfolio_id}")])
-    # ── البيع ──
     buttons.append([
-        InlineKeyboardButton("🔴  بيع الكل",     callback_data=f"portfolio_sell_all:{portfolio_id}"),
-        InlineKeyboardButton("📊  بيع بنسبة",    callback_data=f"portfolio_rebalance_sell:{portfolio_id}"),
+        InlineKeyboardButton("🗑  حذف المحفظة", callback_data=f"portfolio_delete:{portfolio_id}"),
+        InlineKeyboardButton("◀️  رجوع",         callback_data="portfolios"),
     ])
-    buttons.append([InlineKeyboardButton("🔴  بيع عملة واحدة", callback_data=f"portfolio_sell_one:{portfolio_id}")])
-    # ── حذف + رجوع ──
-    buttons.append([
-        InlineKeyboardButton("🗑  حذف المحفظة",  callback_data=f"portfolio_delete:{portfolio_id}"),
-        InlineKeyboardButton("◀️  رجوع",          callback_data="portfolios"),
-    ])
+
     return InlineKeyboardMarkup(buttons)
 
 

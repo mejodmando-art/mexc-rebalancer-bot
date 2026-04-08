@@ -1,4 +1,5 @@
 import asyncio
+import re
 import time
 import ccxt.async_support as ccxt
 
@@ -11,6 +12,37 @@ _MARKETS_CACHE: dict = {}          # symbol → min_qty
 _MARKETS_CACHE_TS: float = 0.0
 _MARKETS_CACHE_TTL: float = 600.0  # seconds
 _MARKETS_LOCK = asyncio.Lock()     # prevents thundering-herd on cache refresh
+
+# MEXC sometimes returns network-tagged balances like USDT_ERC20, BTC_BEP20.
+# This regex strips the network suffix so balances are merged under the base symbol.
+_NETWORK_SUFFIX_RE = re.compile(
+    r"_(ERC20|BEP20|TRC20|MATIC|SOL|AVAXC|ARBITRUM|OPTIMISM|BSC|HECO|"
+    r"OMNI|LIQUID|NATIVE|SPL|ALGO|XLM|ATOM|DOT|KSM|NEAR|FTM|CRO|ONE|"
+    r"CELO|MOVR|GLMR|KLAY|ROSE|EVMOS|ASTR|METIS|BOBA|AURORA|ZKSYNC|"
+    r"BASE|LINEA|SCROLL|MANTA|BLAST|OPBNB|ZKFAIR|MERLIN|BEVM|BOB|MODE)$",
+    re.IGNORECASE,
+)
+
+
+def _base_symbol(raw: str) -> str:
+    """Strip network suffix: 'USDT_ERC20' → 'USDT', 'BTC_BEP20' → 'BTC'."""
+    return _NETWORK_SUFFIX_RE.sub("", raw.upper())
+
+
+def _merge_balances(raw_totals: dict) -> dict:
+    """
+    Merge network-tagged entries into their base symbol.
+    e.g. {'USDT': 10, 'USDT_ERC20': 5, 'USDT_BEP20': 3} → {'USDT': 18}
+    """
+    merged: dict = {}
+    for raw_sym, amount in raw_totals.items():
+        amount = float(amount or 0)
+        if amount < 1e-8:
+            continue
+        base = _base_symbol(raw_sym)
+        merged[base] = merged.get(base, 0.0) + amount
+    return merged
+
 
 class MexcClient:
     def __init__(self, api_key: str, secret: str, quote: str = "USDT"):
@@ -39,10 +71,10 @@ class MexcClient:
         portfolio = {}
         holdings = {}
 
-        for sym, amount in balance["total"].items():
-            amount = float(amount or 0)
-            if amount < 1e-8:
-                continue
+        # Merge network-tagged balances before processing
+        merged = _merge_balances(balance["total"])
+
+        for sym, amount in merged.items():
             if sym == self.quote:
                 portfolio[sym] = {"amount": amount, "value_usdt": amount, "price": 1.0}
                 total_usdt += amount
@@ -52,14 +84,12 @@ class MexcClient:
         if not holdings:
             return portfolio, total_usdt
 
-        # Only fetch tickers for assets that could be worth something
-        # Use a rough filter: skip dust (amount < 0.00001 for most coins)
         pairs = [f"{sym}/{self.quote}" for sym in holdings]
 
         try:
             tickers = await self.exchange.fetch_tickers(pairs)
         except Exception:
-            # Fallback: fetch one by one only for known holdings
+            # Fallback: fetch one by one
             tickers = {}
             for sym in holdings:
                 try:
