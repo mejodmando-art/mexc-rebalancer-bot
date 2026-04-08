@@ -72,6 +72,7 @@ from bot.handlers.portfolio_manager import (
     tp2_value_input, tp2_sell_input,
     sl_value_input,
     portfolio_rebalance_callback,
+    portfolio_rebalance_exec_callback,
     CREATE_NAME, CREATE_CAPITAL, EDIT_NAME, EDIT_CAPITAL,
     PORTFOLIO_SET_THRESHOLD, PORTFOLIO_SET_INTERVAL,
     TP_TP1_TYPE, TP_TP1_VALUE, TP_TP1_SELL,
@@ -272,7 +273,8 @@ def build_app() -> Application:
     # ── Portfolio Management ───────────────────────────────────────────────────
     app.add_handler(CallbackQueryHandler(portfolios_callback,               pattern="^portfolios$"))
     app.add_handler(CallbackQueryHandler(portfolio_detail_callback,         pattern="^portfolio:\\d+$"))
-    app.add_handler(CallbackQueryHandler(portfolio_rebalance_callback,      pattern="^pf_rebalance:"))
+    app.add_handler(CallbackQueryHandler(portfolio_rebalance_callback,      pattern="^pf_rebalance:\\d+$"))
+    app.add_handler(CallbackQueryHandler(portfolio_rebalance_exec_callback, pattern="^pf_rebalance_exec:\\d+$"))
     app.add_handler(CallbackQueryHandler(switch_portfolio_callback,         pattern="^portfolio_switch:"))
     app.add_handler(CallbackQueryHandler(delete_portfolio_callback,         pattern="^portfolio_delete:\\d+$"))
     app.add_handler(CallbackQueryHandler(delete_portfolio_confirm_callback, pattern="^portfolio_delete_confirm:"))

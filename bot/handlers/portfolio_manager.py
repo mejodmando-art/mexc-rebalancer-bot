@@ -9,6 +9,24 @@ from bot.keyboards import (
     rebalance_confirm_kb, rebalance_dry_kb,
 )
 
+async def _portfolio_kb(portfolio_id: int, user_id: int) -> InlineKeyboardMarkup:
+    """جلب بيانات المحفظة وبناء keyboard الشاشة الكاملة."""
+    p      = await db.get_portfolio(portfolio_id)
+    allocs = await db.get_portfolio_allocations(portfolio_id)
+    active_id = await db.get_active_portfolio_id(user_id)
+    if not p:
+        return main_menu_kb()
+    return portfolio_actions_kb(
+        portfolio_id=portfolio_id,
+        is_active=(p["id"] == active_id),
+        auto_enabled=bool(p.get("auto_enabled")),
+        allocations=allocs,
+        capital_usdt=float(p.get("capital_usdt") or 0.0),
+        threshold=float(p.get("threshold") or 5.0),
+        auto_interval=int(p.get("auto_interval_hours") or 24),
+    )
+
+
 # Conversation states
 CREATE_NAME, CREATE_CAPITAL, EDIT_NAME, EDIT_CAPITAL = range(30, 34)
 PORTFOLIO_SET_THRESHOLD, PORTFOLIO_SET_INTERVAL = range(34, 36)
@@ -65,47 +83,44 @@ async def portfolio_detail_callback(update: Update, context: ContextTypes.DEFAUL
         return
 
     active_id = await db.get_active_portfolio_id(user_id)
-    allocs = await db.get_portfolio_allocations(portfolio_id)
+    allocs    = await db.get_portfolio_allocations(portfolio_id)
     total_pct = sum(a["target_percentage"] for a in allocs)
 
-    threshold = p.get("threshold") or 5.0
-    interval  = p.get("auto_interval_hours") or 24
+    threshold = float(p.get("threshold") or 5.0)
+    interval  = int(p.get("auto_interval_hours") or 24)
     auto_on   = bool(p.get("auto_enabled"))
+    capital   = float(p.get("capital_usdt") or 0.0)
     is_active = p["id"] == active_id
 
-    auto_icon = "🟢" if auto_on else "🔴"
-    auto_str  = f"كل {interval} ساعة" if auto_on else "معطل"
     active_badge = "✅ *نشطة*" if is_active else "⭕ غير نشطة"
+    capital_str  = f"${capital:,.1f} USD" if capital > 0 else "بدون رأس مال"
 
-    # Allocation health indicator
-    pct_diff = abs(total_pct - 100)
-    if not allocs:
-        alloc_health = "⚠️ لا يوجد توزيع"
-    elif pct_diff > 1:
-        alloc_health = f"⚠️ المجموع {total_pct:.1f}% \\(يجب أن يكون 100%\\)"
-    else:
-        alloc_health = f"✅ {total_pct:.1f}%"
+    # تحذير إذا مجموع النسب ≠ 100%
+    pct_warn = ""
+    if allocs and abs(total_pct - 100) > 1:
+        pct_warn = f"\n⚠️ مجموع النسب `{total_pct:.1f}%` — يجب أن يكون 100%"
 
     text = (
         f"📁 *{p['name']}*  {active_badge}\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
-        f"💰 رأس المال: *${p['capital_usdt']:,.2f} USDT*\n"
-        f"🎯 حد الانحراف: *{threshold}%*  {auto_icon} التوازن: *{auto_str}*\n"
+        f"💰 *{capital_str}*          💰 *{capital_str}*\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🪙 *العملات \\({len(allocs)}\\)*"
+        f"{pct_warn}"
     )
-    if allocs:
-        text += f"🪙 *العملات \\({len(allocs)}\\)*\n\n"
-        for a in allocs:
-            pct = a["target_percentage"]
-            capital_val = p["capital_usdt"] * pct / 100 if p["capital_usdt"] > 0 else 0
-            capital_str = f"  `${capital_val:,.1f}`" if capital_val > 0 else ""
-            text += f"  *{a['symbol']}*  `{pct:.1f}%`{capital_str}\n"
-    else:
-        text += "⚠️ لا يوجد توزيع — اضغط 🪙 لإضافة عملات\n"
 
     await query.edit_message_text(
-        text, parse_mode="Markdown",
-        reply_markup=portfolio_actions_kb(portfolio_id, p["id"] == active_id, bool(p.get("auto_enabled")))
+        text,
+        parse_mode="Markdown",
+        reply_markup=portfolio_actions_kb(
+            portfolio_id=portfolio_id,
+            is_active=is_active,
+            auto_enabled=auto_on,
+            allocations=allocs,
+            capital_usdt=capital,
+            threshold=threshold,
+            auto_interval=interval,
+        )
     )
 
 
@@ -142,7 +157,7 @@ async def portfolio_rebalance_callback(update: Update, context: ContextTypes.DEF
             f"❌ لا يوجد توزيع في محفظة *{p.get('name', '')}*.\n"
             "اذهب إلى 🪙 إضافة / تعديل عملات.",
             parse_mode="Markdown",
-            reply_markup=portfolio_actions_kb(portfolio_id, True, bool(p.get("auto_enabled")))
+            reply_markup=await _portfolio_kb(portfolio_id, user_id)
         )
         return
 
@@ -152,7 +167,7 @@ async def portfolio_rebalance_callback(update: Update, context: ContextTypes.DEF
             f"⚠️ *التوزيع غير صحيح*\n\n"
             f"المجموع الحالي: `{total_pct:.1f}%` — يجب أن يكون 100%",
             parse_mode="Markdown",
-            reply_markup=portfolio_actions_kb(portfolio_id, True, bool(p.get("auto_enabled")))
+            reply_markup=await _portfolio_kb(portfolio_id, user_id)
         )
         return
 
@@ -170,11 +185,24 @@ async def portfolio_rebalance_callback(update: Update, context: ContextTypes.DEF
 
     capital = float(p.get("capital_usdt") or 0)
     alloc_symbols = {a["symbol"] for a in allocations}
-    portfolio_value = sum(portfolio.get(sym, {}).get("value_usdt", 0.0) for sym in alloc_symbols)
-    usdt_in_account = portfolio.get("USDT", {}).get("value_usdt", 0.0)
-    effective_total = min(capital, portfolio_value + usdt_in_account) if capital > 0 else portfolio_value + usdt_in_account
-    if effective_total < 1.0:
-        effective_total = min(capital, total_usdt) if capital > 0 else total_usdt
+
+    # قيمة العملات المخصصة لهذه المحفظة فقط (بدون USDT)
+    portfolio_coins_value = sum(
+        portfolio.get(sym, {}).get("value_usdt", 0.0) for sym in alloc_symbols
+    )
+
+    # effective_total = رأس المال المحدد إذا وُجد، وإلا قيمة العملات الفعلية فقط.
+    # لا نضيف كامل USDT الحساب لأنه قد يخص محافظ أخرى أو grid bots.
+    if capital > 0:
+        effective_total = capital
+    else:
+        effective_total = portfolio_coins_value
+
+    # إذا كانت قيمة العملات صفراً (محفظة جديدة لم تُشترَ بعد) استخدم رأس المال
+    if effective_total < 1.0 and capital > 0:
+        effective_total = capital
+    elif effective_total < 1.0:
+        effective_total = total_usdt
 
     threshold = float(p.get("threshold") or settings.get("threshold") or 5.0)
     trades, drift_report = calculate_trades(portfolio, effective_total, allocations, threshold)
@@ -212,7 +240,106 @@ async def portfolio_rebalance_callback(update: Update, context: ContextTypes.DEF
         text += f"{emoji}  `{t['symbol']}`  `${t['usdt_amount']:.2f}`\n"
     text += f"━━━━━━━━━━━━━━━━━━━━━\n💵 الإجمالي: `${total_trade:.2f}`"
 
-    await query.edit_message_text(text, parse_mode="Markdown", reply_markup=rebalance_confirm_kb())
+    await query.edit_message_text(text, parse_mode="Markdown",
+                                   reply_markup=rebalance_confirm_kb(portfolio_id))
+
+
+async def portfolio_rebalance_exec_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """تنفيذ صفقات إعادة التوازن المحفوظة في user_data."""
+    from bot.mexc_client import MexcClient
+    from datetime import datetime, timezone
+    import time as _time
+
+    query = update.callback_query
+    await query.answer()
+    user_id = update.effective_user.id
+    portfolio_id = int(query.data.split(":")[1])
+
+    trades     = context.user_data.get("_pending_trades", [])
+    pending_id = context.user_data.get("_pending_portfolio_id")
+    pending_ts = context.user_data.get("_pending_ts", 0)
+
+    # التحقق من أن التحليل يخص نفس المحفظة
+    if not trades or pending_id != portfolio_id:
+        await query.edit_message_text(
+            "❌ انتهت الجلسة أو المحفظة تغيّرت. أعد التحليل أولاً.",
+            reply_markup=await _portfolio_kb(portfolio_id, user_id)
+        )
+        return
+
+    # رفض التحليل القديم (أكثر من 3 دقائق)
+    if _time.monotonic() - pending_ts > 180:
+        context.user_data.pop("_pending_trades", None)
+        context.user_data.pop("_pending_portfolio_id", None)
+        context.user_data.pop("_pending_ts", None)
+        await query.edit_message_text(
+            "⚠️ *انتهت صلاحية التحليل*\n\n"
+            "مرّت أكثر من 3 دقائق — أسعار السوق تغيّرت.\n"
+            "أعد الضغط على 🔄 إعادة التوازن.",
+            parse_mode="Markdown",
+            reply_markup=await _portfolio_kb(portfolio_id, user_id)
+        )
+        return
+
+    await query.edit_message_text("⏳ جاري تنفيذ الصفقات...")
+
+    settings = await db.get_settings(user_id)
+    if not settings or not settings.get("mexc_api_key"):
+        await query.edit_message_text(
+            "❌ مفاتيح API غير موجودة.",
+            reply_markup=await _portfolio_kb(portfolio_id, user_id)
+        )
+        return
+
+    client = MexcClient(settings["mexc_api_key"], settings["mexc_secret_key"])
+    try:
+        results = await client.execute_rebalance(trades)
+    except Exception as e:
+        await query.edit_message_text(
+            f"❌ خطأ أثناء التنفيذ: {str(e)[:120]}",
+            reply_markup=await _portfolio_kb(portfolio_id, user_id)
+        )
+        return
+    finally:
+        await client.close()
+
+    ok   = [r for r in results if r.get("status") == "ok"]
+    err  = [r for r in results if r.get("status") == "error"]
+    skip = [r for r in results if r.get("status") == "skip"]
+    total_traded = sum(
+        t["usdt_amount"] for t in trades
+        if any(r["symbol"] == t["symbol"] and r.get("status") == "ok" for r in results)
+    )
+
+    text = "✅ *اكتملت إعادة التوازن*\n━━━━━━━━━━━━━━━━━━━━━\n"
+    for r in ok:
+        a = "🔴 بيع" if r["action"] == "sell" else "🟢 شراء"
+        text += f"{a}  `{r['symbol']}`  `${r.get('usdt', 0):.2f}`  ✅\n"
+    for r in err:
+        text += f"❌  `{r['symbol']}`: {r.get('reason', 'خطأ')[:60]}\n"
+    for r in skip:
+        text += f"⏭  `{r['symbol']}`: {r.get('reason', 'تم التخطي')}\n"
+    text += "━━━━━━━━━━━━━━━━━━━━━\n"
+    text += f"📊 ناجح: *{len(ok)}*"
+    if err:
+        text += f"  ❌ خطأ: *{len(err)}*"
+    if skip:
+        text += f"  ⏭ تخطي: *{len(skip)}*"
+    text += f"\n💵 الإجمالي: `${total_traded:.2f}`"
+
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    summary = f"يدوي: {len(ok)} ناجح، {len(err)} خطأ"
+    await db.add_history(user_id, now, summary, total_traded, 1 if not err else 0,
+                         portfolio_id=portfolio_id)
+
+    context.user_data.pop("_pending_trades", None)
+    context.user_data.pop("_pending_portfolio_id", None)
+    context.user_data.pop("_pending_ts", None)
+
+    await query.edit_message_text(
+        text, parse_mode="Markdown",
+        reply_markup=await _portfolio_kb(portfolio_id, user_id)
+    )
 
 
 async def switch_portfolio_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1157,9 +1284,8 @@ async def portfolio_toggle_auto_callback(update: Update, context: ContextTypes.D
 
     await query.edit_message_text(
         text, parse_mode="Markdown",
-        reply_markup=portfolio_actions_kb(portfolio_id, p["id"] == active_id, bool(p.get("auto_enabled")))
+        reply_markup=await _portfolio_kb(portfolio_id, user_id)
     )
-
 
 
 # ── Portfolio TP/SL Menu ───────────────────────────────────────────────────────
