@@ -1,6 +1,52 @@
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from typing import List, Dict
 
+# ── Coin logo emoji map ────────────────────────────────────────────────────────
+# Maps well-known symbols to a distinctive emoji that visually represents the coin.
+# Falls back to 🔹 for unknown symbols.
+_COIN_EMOJI: Dict[str, str] = {
+    "BTC":     "🟠",  # Bitcoin — orange
+    "ETH":     "🔷",  # Ethereum — blue diamond
+    "BNB":     "🟡",  # BNB — yellow
+    "SOL":     "🟣",  # Solana — purple
+    "XRP":     "🔵",  # XRP — blue
+    "ADA":     "🔵",  # Cardano — blue
+    "DOGE":    "🐶",  # Dogecoin
+    "TRX":     "🔴",  # TRON — red
+    "AVAX":    "🔺",  # Avalanche — red triangle
+    "LINK":    "🔗",  # Chainlink
+    "DOT":     "⚪",  # Polkadot
+    "MATIC":   "🟣",  # Polygon — purple
+    "POL":     "🟣",  # Polygon (new ticker)
+    "LTC":     "⚫",  # Litecoin — grey
+    "UNI":     "🦄",  # Uniswap
+    "ATOM":    "⚛️",  # Cosmos
+    "ICP":     "♾️",  # Internet Computer
+    "NEAR":    "🟩",  # NEAR Protocol — green
+    "ARB":     "🔵",  # Arbitrum — blue
+    "OP":      "🔴",  # Optimism — red
+    "FET":     "🤖",  # Fetch.ai
+    "WLD":     "🌍",  # Worldcoin
+    "SUI":     "🔵",  # Sui — blue
+    "APT":     "⬛",  # Aptos
+    "INJ":     "🔵",  # Injective
+    "TIA":     "🌌",  # Celestia
+    "VIRTUAL": "🟦",  # Virtual Protocol
+    "CFX":     "🟠",  # Conflux
+    "TAO":     "🧠",  # Bittensor
+    "AITECH":  "🤖",  # Solidus AI Tech
+    "AIA":     "💎",  # AIA Chain
+    "COAI":    "🤖",  # CoAI
+    "USDT":    "💵",  # Tether
+    "USDC":    "💵",  # USD Coin
+    "BUSD":    "💵",  # BUSD
+}
+
+
+def coin_emoji(symbol: str) -> str:
+    """Return a distinctive emoji for a coin symbol, falling back to 🔹."""
+    return _COIN_EMOJI.get(symbol.upper(), "🔹")
+
 
 # ── القائمة الرئيسية ───────────────────────────────────────────────────────────
 
@@ -175,7 +221,8 @@ def portfolio_actions_kb(
             pct = a["target_percentage"]
             val = capital_usdt * pct / 100 if capital_usdt > 0 else 0.0
             val_str = f"${val:,.1f}" if val > 0 else f"{pct:.0f}%"
-            label = f"🪙 {sym}   {pct:.0f}%   {val_str}"
+            logo = coin_emoji(sym)
+            label = f"{logo} {sym}   {pct:.0f}%   {val_str}"
             coin_buttons.append(
                 InlineKeyboardButton(label, callback_data=f"portfolio_edit_allocs:{portfolio_id}")
             )
@@ -185,11 +232,17 @@ def portfolio_actions_kb(
             row = coin_buttons[i:i + 2]
             buttons.append(row)
 
-    # ── زر إعادة التوازن بارز (عرض كامل) ──
-    buttons.append([InlineKeyboardButton(
-        "🔄  إعادة التوازن الآن",
-        callback_data=f"pf_rebalance:{portfolio_id}"
-    )])
+    # ── زر إعادة التوازن + عرض الرصيد (صف واحد) ──
+    buttons.append([
+        InlineKeyboardButton(
+            "🔄  إعادة التوازن الآن",
+            callback_data=f"pf_rebalance:{portfolio_id}"
+        ),
+        InlineKeyboardButton(
+            "📊  عرض الرصيد",
+            callback_data=f"pf_balance:{portfolio_id}"
+        ),
+    ])
 
     # ── توزيع ذكي تلقائي ──
     buttons.append([InlineKeyboardButton(

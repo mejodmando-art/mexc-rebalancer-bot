@@ -93,17 +93,39 @@ async def portfolio_detail_callback(update: Update, context: ContextTypes.DEFAUL
     is_active = p["id"] == active_id
 
     active_badge = "✅ *نشطة*" if is_active else "⭕ غير نشطة"
-    capital_str  = f"${capital:,.1f} USD" if capital > 0 else "بدون رأس مال"
 
-    # تحذير إذا مجموع النسب ≠ 100%
+    # ── جلب الرصيد الحي من MEXC ──────────────────────────────────────────────
+    total_usdt = None
+    settings = await db.get_settings(user_id)
+    if settings and settings.get("mexc_api_key"):
+        try:
+            from bot.mexc_client import MexcClient
+            client = MexcClient(settings["mexc_api_key"], settings["mexc_secret_key"])
+            _, total_usdt = await asyncio.wait_for(client.get_portfolio(), timeout=10)
+            await client.close()
+        except Exception:
+            total_usdt = None
+
+    # ── بناء نص الرسالة ───────────────────────────────────────────────────────
     pct_warn = ""
     if allocs and abs(total_pct - 100) > 1:
         pct_warn = f"\n⚠️ مجموع النسب `{total_pct:.1f}%` — يجب أن يكون 100%"
 
+    balance_line = ""
+    if total_usdt is not None:
+        balance_line = f"💵 *رصيد الحساب:* `${total_usdt:,.2f} USDT`\n"
+
+    portfolio_balance_line = ""
+    if capital > 0:
+        portfolio_balance_line = f"💼 *رصيد المحفظة:* `${capital:,.2f} USD`\n"
+    else:
+        portfolio_balance_line = f"💼 *رصيد المحفظة:* بدون رأس مال محدد\n"
+
     text = (
         f"📁 *{p['name']}*  {active_badge}\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
-        f"💰 *{capital_str}*          💰 *{capital_str}*\n"
+        f"{balance_line}"
+        f"{portfolio_balance_line}"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"🪙 *العملات \\({len(allocs)}\\)*"
         f"{pct_warn}"
@@ -365,6 +387,126 @@ async def switch_portfolio_callback(update: Update, context: ContextTypes.DEFAUL
     await query.edit_message_text(
         text, parse_mode="Markdown",
         reply_markup=portfolios_list_kb(portfolios, portfolio_id)
+    )
+
+
+async def portfolio_balance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    عرض الرصيد الكلي للمحفظة: كل عملة بقيمتها الحالية + الإجمالي + الربح/الخسارة.
+    callback_data = pf_balance:<portfolio_id>
+    """
+    from bot.mexc_client import MexcClient
+    from bot.keyboards import coin_emoji
+
+    query = update.callback_query
+    await query.answer()
+    user_id = update.effective_user.id
+    portfolio_id = int(query.data.split(":")[1])
+
+    p = await db.get_portfolio(portfolio_id)
+    if not p or p["user_id"] != user_id:
+        await query.answer("❌ محفظة غير موجودة", show_alert=True)
+        return
+
+    allocs  = await db.get_portfolio_allocations(portfolio_id)
+    capital = float(p.get("capital_usdt") or 0.0)
+
+    settings = await db.get_settings(user_id)
+    if not settings or not settings.get("mexc_api_key"):
+        await query.edit_message_text(
+            "❌ يجب ربط مفاتيح MEXC API أولاً.",
+            reply_markup=await _portfolio_kb(portfolio_id, user_id),
+        )
+        return
+
+    await query.edit_message_text("⏳ جاري جلب الأرصدة من MEXC...")
+
+    client = MexcClient(settings["mexc_api_key"], settings["mexc_secret_key"])
+    try:
+        portfolio_data, total_account = await asyncio.wait_for(
+            client.get_portfolio(), timeout=15
+        )
+    except asyncio.TimeoutError:
+        await query.edit_message_text(
+            "❌ انتهت المهلة — MEXC لم يستجب.",
+            reply_markup=await _portfolio_kb(portfolio_id, user_id),
+        )
+        return
+    except Exception as e:
+        await query.edit_message_text(
+            f"❌ خطأ: {str(e)[:100]}",
+            reply_markup=await _portfolio_kb(portfolio_id, user_id),
+        )
+        return
+    finally:
+        await client.close()
+
+    # حساب قيمة عملات المحفظة فقط (العملات المضافة في التوزيع)
+    alloc_symbols = {a["symbol"] for a in allocs}
+    portfolio_value = sum(
+        portfolio_data.get(sym, {}).get("value_usdt", 0.0)
+        for sym in alloc_symbols
+    )
+
+    # ربح / خسارة مقارنة برأس المال
+    pnl = portfolio_value - capital if capital > 0 else None
+    pnl_pct = (pnl / capital * 100) if pnl is not None and capital > 0 else None
+
+    # ── بناء الرسالة ──────────────────────────────────────────────────────────
+    lines = [
+        f"📊 *رصيد المحفظة — {p['name']}*",
+        "━━━━━━━━━━━━━━━━━━━━━",
+        f"🏦 *رصيد الحساب الكلي:* `${total_account:,.2f} USDT`",
+    ]
+
+    if capital > 0:
+        lines.append(f"💼 *رأس المال:* `${capital:,.2f} USDT`")
+
+    lines.append(f"💰 *قيمة المحفظة:* `${portfolio_value:,.2f} USDT`")
+
+    if pnl is not None:
+        pnl_icon = "📈" if pnl >= 0 else "📉"
+        sign = "+" if pnl >= 0 else ""
+        lines.append(
+            f"{pnl_icon} *الربح/الخسارة:* `{sign}${pnl:,.2f}` \\(`{sign}{pnl_pct:.2f}%`\\)"
+        )
+
+    lines.append("━━━━━━━━━━━━━━━━━━━━━")
+
+    # تفاصيل كل عملة
+    alloc_map = {a["symbol"]: a["target_percentage"] for a in allocs}
+    sorted_coins = sorted(
+        alloc_symbols,
+        key=lambda s: portfolio_data.get(s, {}).get("value_usdt", 0.0),
+        reverse=True,
+    )
+
+    for sym in sorted_coins:
+        data    = portfolio_data.get(sym, {})
+        val     = data.get("value_usdt", 0.0)
+        amount  = data.get("amount", 0.0)
+        price   = data.get("price", 0.0)
+        tgt_pct = alloc_map.get(sym, 0.0)
+        cur_pct = (val / portfolio_value * 100) if portfolio_value > 0 else 0.0
+        drift   = cur_pct - tgt_pct
+        logo    = coin_emoji(sym)
+
+        drift_str = f" `{drift:+.1f}%`" if abs(drift) >= 0.5 else ""
+        lines.append(
+            f"{logo} *{sym}*  `${val:,.2f}`  \\(`{cur_pct:.1f}%`{drift_str}\\)\n"
+            f"   _{amount:.4g} @ ${price:,.4g}_"
+        )
+
+    lines.append("━━━━━━━━━━━━━━━━━━━━━")
+
+    back_kb = InlineKeyboardMarkup([[
+        InlineKeyboardButton("◀️ رجوع للمحفظة", callback_data=f"portfolio:{portfolio_id}")
+    ]])
+
+    await query.edit_message_text(
+        "\n".join(lines),
+        parse_mode="Markdown",
+        reply_markup=back_kb,
     )
 
 
