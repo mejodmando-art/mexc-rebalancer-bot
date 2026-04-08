@@ -67,6 +67,41 @@ def rebalance_dry_kb() -> InlineKeyboardMarkup:
     ])
 
 
+def auto_alloc_methods_kb(portfolio_id: int) -> InlineKeyboardMarkup:
+    """أزرار اختيار طريقة التوزيع التلقائي."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(
+            "⚖️  توزيع متساوٍ",
+            callback_data=f"auto_alloc:equal:{portfolio_id}"
+        )],
+        [InlineKeyboardButton(
+            "📊  حسب حجم التداول (Volume)",
+            callback_data=f"auto_alloc:volume:{portfolio_id}"
+        )],
+        [InlineKeyboardButton(
+            "📈  حسب القيمة السوقية (Market Cap)",
+            callback_data=f"auto_alloc:mcap:{portfolio_id}"
+        )],
+        [InlineKeyboardButton("◀️  رجوع", callback_data=f"portfolio:{portfolio_id}")],
+    ])
+
+
+def auto_alloc_confirm_kb(portfolio_id: int, method: str) -> InlineKeyboardMarkup:
+    """تأكيد تطبيق التوزيع المحسوب."""
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(
+                "✅  تطبيق النسب",
+                callback_data=f"auto_alloc_apply:{method}:{portfolio_id}"
+            ),
+            InlineKeyboardButton(
+                "✖️  إلغاء",
+                callback_data=f"portfolio:{portfolio_id}"
+            ),
+        ]
+    ])
+
+
 # ── أزرار عامة ────────────────────────────────────────────────────────────────
 
 def back_to_main_kb() -> InlineKeyboardMarkup:
@@ -154,6 +189,12 @@ def portfolio_actions_kb(
     buttons.append([InlineKeyboardButton(
         "🔄  إعادة التوازن الآن",
         callback_data=f"pf_rebalance:{portfolio_id}"
+    )])
+
+    # ── توزيع ذكي تلقائي ──
+    buttons.append([InlineKeyboardButton(
+        "🤖  توزيع ذكي تلقائي",
+        callback_data=f"auto_alloc_menu:{portfolio_id}"
     )])
 
     # ── Momentum + Grid ──

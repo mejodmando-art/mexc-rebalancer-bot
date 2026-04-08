@@ -173,5 +173,66 @@ class MexcClient:
                                 "reason": str(e)[:100]})
         return results
 
+    async def compute_allocations(self, symbols: list, method: str) -> list:
+        """
+        احسب النسب المستهدفة لقائمة عملات بثلاث طرق:
+          equal  — توزيع متساوٍ
+          volume — نسبي حسب حجم التداول 24h من MEXC
+          mcap   — نسبي حسب القيمة السوقية (quoteVolume كبديل عملي)
+
+        Returns: [{'symbol': str, 'target_percentage': float}, ...]  مجموعها 100.0
+        """
+        if not symbols:
+            return []
+
+        if method == "equal":
+            pct = round(100.0 / len(symbols), 4)
+            result = [{"symbol": s, "target_percentage": pct} for s in symbols]
+            # تصحيح الفارق العشري على آخر عملة
+            diff = round(100.0 - sum(r["target_percentage"] for r in result), 4)
+            result[-1]["target_percentage"] = round(result[-1]["target_percentage"] + diff, 4)
+            return result
+
+        # volume و mcap: نجلب tickers ونستخدم quoteVolume
+        pairs = [f"{s}/{self.quote}" for s in symbols]
+        try:
+            tickers = await self.exchange.fetch_tickers(pairs)
+        except Exception:
+            tickers = {}
+            for s in symbols:
+                try:
+                    t = await self.exchange.fetch_ticker(f"{s}/{self.quote}")
+                    tickers[f"{s}/{self.quote}"] = t
+                except Exception:
+                    pass
+
+        weights = {}
+        for s in symbols:
+            pair = f"{s}/{self.quote}"
+            t = tickers.get(pair, {})
+            # quoteVolume = حجم التداول بالـ USDT خلال 24 ساعة
+            # يُستخدم لكلا الطريقتين (volume و mcap) لأن MEXC لا يوفر market cap مباشرة
+            vol = float(t.get("quoteVolume") or t.get("baseVolume") or 0)
+            weights[s] = max(vol, 0.0)
+
+        total_w = sum(weights.values())
+
+        if total_w <= 0:
+            # fallback: توزيع متساوٍ إذا لم تتوفر بيانات
+            return await self.compute_allocations(symbols, "equal")
+
+        result = []
+        running = 0.0
+        for i, s in enumerate(symbols):
+            if i == len(symbols) - 1:
+                # آخر عملة تأخذ الباقي لضمان المجموع = 100
+                pct = round(100.0 - running, 2)
+            else:
+                pct = round(weights[s] / total_w * 100, 2)
+                running += pct
+            result.append({"symbol": s, "target_percentage": pct})
+
+        return result
+
     async def close(self):
         await self.exchange.close()

@@ -81,6 +81,11 @@ from bot.handlers.portfolio_manager import (
     CREATE_TP1_TYPE, CREATE_TP1_VALUE, CREATE_TP2_VALUE, CREATE_SL_VALUE,
 )
 from bot.portfolio_monitor import run_portfolio_monitor
+from bot.handlers.auto_alloc_handler import (
+    auto_alloc_menu_callback,
+    auto_alloc_preview_callback,
+    auto_alloc_apply_callback,
+)
 from bot.handlers.emergency_handler import (
     emergency_menu_callback,
     emergency_pick_coin_callback,
@@ -278,6 +283,11 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(portfolio_detail_callback,         pattern="^portfolio:\\d+$"))
     app.add_handler(CallbackQueryHandler(portfolio_rebalance_callback,      pattern="^pf_rebalance:\\d+$"))
     app.add_handler(CallbackQueryHandler(portfolio_rebalance_exec_callback, pattern="^pf_rebalance_exec:\\d+$"))
+
+    # ── التوزيع الذكي التلقائي ─────────────────────────────────────────────────
+    app.add_handler(CallbackQueryHandler(auto_alloc_menu_callback,    pattern="^auto_alloc_menu:\\d+$"))
+    app.add_handler(CallbackQueryHandler(auto_alloc_preview_callback, pattern="^auto_alloc:(equal|volume|mcap):\\d+$"))
+    app.add_handler(CallbackQueryHandler(auto_alloc_apply_callback,   pattern="^auto_alloc_apply:(equal|volume|mcap):\\d+$"))
     app.add_handler(CallbackQueryHandler(switch_portfolio_callback,         pattern="^portfolio_switch:"))
     app.add_handler(CallbackQueryHandler(delete_portfolio_callback,         pattern="^portfolio_delete:\\d+$"))
     app.add_handler(CallbackQueryHandler(delete_portfolio_confirm_callback, pattern="^portfolio_delete_confirm:"))
