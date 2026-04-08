@@ -1,8 +1,7 @@
 from typing import List, Dict, Tuple
 
-# Minimum trade size in USDT — orders below this are skipped to avoid
-# exchange minimums and excessive fees on tiny rebalances.
-MIN_TRADE_USDT = 5.0
+# Minimum trade size in USDT — MEXC minimum is $1.
+MIN_TRADE_USDT = 1.0
 
 # MEXC spot taker fee. Buy orders are inflated by 1/(1-fee) so the
 # post-fee received amount matches the target allocation value.
