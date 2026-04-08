@@ -73,6 +73,7 @@ from bot.handlers.portfolio_manager import (
     sl_value_input,
     portfolio_rebalance_callback,
     portfolio_rebalance_exec_callback,
+    portfolio_balance_callback,
     pf_alloc_list_callback,
     pf_alloc_del_callback,
     pf_alloc_clear_callback,
@@ -287,6 +288,7 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(portfolio_detail_callback,         pattern="^portfolio:\\d+$"))
     app.add_handler(CallbackQueryHandler(portfolio_rebalance_callback,      pattern="^pf_rebalance:\\d+$"))
     app.add_handler(CallbackQueryHandler(portfolio_rebalance_exec_callback, pattern="^pf_rebalance_exec:\\d+$"))
+    app.add_handler(CallbackQueryHandler(portfolio_balance_callback,        pattern="^pf_balance:\\d+$"))
 
     # ── التوزيع الذكي التلقائي ─────────────────────────────────────────────────
     app.add_handler(CallbackQueryHandler(auto_alloc_menu_callback,    pattern="^auto_alloc_menu:\\d+$"))
