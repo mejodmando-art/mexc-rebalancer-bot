@@ -262,6 +262,11 @@ def portfolio_actions_kb(
         InlineKeyboardButton("🎯  تعديل العملات",          callback_data=f"portfolio_edit_allocs:{portfolio_id}"),
     ])
 
+    # ── نسخ المحفظة ──
+    buttons.append([
+        InlineKeyboardButton("📋  نسخ المحفظة",            callback_data=f"portfolio_clone:{portfolio_id}"),
+    ])
+
     # ── بيع الكل + أهداف الربح ──
     buttons.append([
         InlineKeyboardButton("🔴  بيع الكل",               callback_data=f"portfolio_sell_all:{portfolio_id}"),

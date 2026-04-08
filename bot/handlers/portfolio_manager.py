@@ -34,6 +34,8 @@ PORTFOLIO_SET_THRESHOLD, PORTFOLIO_SET_INTERVAL = range(34, 36)
 TP_TP1_TYPE, TP_TP1_VALUE, TP_TP1_SELL, TP_TP2_TYPE, TP_TP2_VALUE, TP_TP2_SELL, TP_SL_TYPE, TP_SL_VALUE = range(36, 44)
 # Create-portfolio wizard TP/SL states
 CREATE_TP1_TYPE, CREATE_TP1_VALUE, CREATE_TP2_VALUE, CREATE_SL_VALUE = range(44, 48)
+# Clone portfolio wizard states
+CLONE_NAME, CLONE_CAPITAL = range(48, 50)
 
 
 async def portfolios_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -851,6 +853,153 @@ async def _finalize_portfolio_creation(update, context, tp1_type, tp1_value, tp2
             text, parse_mode="Markdown",
             reply_markup=portfolios_list_kb(portfolios, active_id)
         )
+
+
+# ── Clone Portfolio Conversation ───────────────────────────────────────────────
+
+async def clone_portfolio_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """بداية نسخ المحفظة — اطلب الاسم الجديد."""
+    query = update.callback_query
+    await query.answer()
+    user_id = update.effective_user.id
+    portfolio_id = int(query.data.split(":")[1])
+
+    p = await db.get_portfolio(portfolio_id)
+    if not p or p["user_id"] != user_id:
+        await query.answer("❌ محفظة غير موجودة", show_alert=True)
+        return ConversationHandler.END
+
+    allocs = await db.get_portfolio_allocations(portfolio_id)
+    capital = float(p.get("capital_usdt") or 0.0)
+
+    # احفظ بيانات المحفظة الأصلية في user_data
+    context.user_data["_clone_source_id"] = portfolio_id
+    context.user_data["_clone_source_name"] = p["name"]
+    context.user_data["_clone_capital"] = capital
+
+    coins_preview = "  ·  ".join(a["symbol"] for a in allocs[:8])
+    if len(allocs) > 8:
+        coins_preview += f"  +{len(allocs)-8}"
+
+    await query.edit_message_text(
+        f"📋 *نسخ المحفظة*\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"المصدر: *{p['name']}*\n"
+        f"العملات: `{coins_preview}`\n"
+        f"رأس المال: `${capital:,.2f}`\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"أدخل *اسم المحفظة الجديدة*:\n\n"
+        f"/cancel للإلغاء",
+        parse_mode="Markdown",
+    )
+    return CLONE_NAME
+
+
+async def clone_portfolio_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """استقبال الاسم الجديد — اطلب المبلغ."""
+    name = update.message.text.strip()
+    if not name or len(name) > 50:
+        await update.message.reply_text("❌ اسم غير صالح. أدخل اسماً بين 1 و50 حرف:")
+        return CLONE_NAME
+
+    context.user_data["_clone_new_name"] = name
+    source_capital = context.user_data.get("_clone_capital", 0.0)
+
+    await update.message.reply_text(
+        f"💰 *رأس المال للمحفظة الجديدة*\n\n"
+        f"رأس مال المحفظة الأصلية: `${source_capital:,.2f}`\n\n"
+        f"أدخل المبلغ الجديد بالـ USDT\n"
+        f"أو أرسل `.` للإبقاء على نفس المبلغ:\n\n"
+        f"/cancel للإلغاء",
+        parse_mode="Markdown",
+    )
+    return CLONE_CAPITAL
+
+
+async def clone_portfolio_capital(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """استقبال المبلغ الجديد — نفذ النسخ."""
+    user_id = update.effective_user.id
+    text = update.message.text.strip()
+
+    source_id   = context.user_data.pop("_clone_source_id", None)
+    source_name = context.user_data.pop("_clone_source_name", "")
+    new_name    = context.user_data.pop("_clone_new_name", "نسخة")
+    old_capital = context.user_data.pop("_clone_capital", 0.0)
+
+    if not source_id:
+        await update.message.reply_text("❌ انتهت الجلسة، حاول مجدداً.")
+        return ConversationHandler.END
+
+    # تحديد رأس المال الجديد
+    if text == ".":
+        new_capital = old_capital
+    else:
+        try:
+            new_capital = float(text.replace(",", ""))
+            if new_capital < 0:
+                raise ValueError
+        except ValueError:
+            await update.message.reply_text("❌ مبلغ غير صالح. أدخل رقماً أو أرسل `.` للإبقاء على نفس المبلغ:")
+            # أعد الحفظ لأن pop حذفها
+            context.user_data["_clone_source_id"]   = source_id
+            context.user_data["_clone_source_name"] = source_name
+            context.user_data["_clone_new_name"]    = new_name
+            context.user_data["_clone_capital"]     = old_capital
+            return CLONE_CAPITAL
+
+    # جلب بيانات المحفظة الأصلية كاملة
+    source = await db.get_portfolio(source_id)
+    allocs = await db.get_portfolio_allocations(source_id)
+
+    # إنشاء المحفظة الجديدة
+    new_id = await db.create_portfolio(user_id, new_name, new_capital)
+
+    # نسخ كل إعدادات المحفظة الأصلية
+    await db.update_portfolio(
+        new_id,
+        threshold=float(source.get("threshold") or 5.0),
+        auto_interval_hours=int(source.get("auto_interval_hours") or 24),
+    )
+
+    # نسخ TP/SL إذا كانت موجودة
+    if source.get("tp1_value") and float(source.get("tp1_value") or 0) > 0:
+        await db.update_portfolio(
+            new_id,
+            tp1_type=source.get("tp1_type") or "pct",
+            tp1_value=float(source.get("tp1_value") or 0),
+            tp1_sell_pct=float(source.get("tp1_sell_pct") or 50),
+            tp2_type=source.get("tp2_type") or "pct",
+            tp2_value=float(source.get("tp2_value") or 0),
+            tp2_sell_pct=float(source.get("tp2_sell_pct") or 100),
+            sl_type=source.get("sl_type") or "pct",
+            sl_value=float(source.get("sl_value") or 0),
+        )
+
+    # نسخ التوزيعات
+    for a in allocs:
+        await db.set_portfolio_allocation(new_id, user_id, a["symbol"], a["target_percentage"])
+
+    portfolios = await db.get_portfolios(user_id)
+    active_id  = await db.get_active_portfolio_id(user_id)
+
+    coins_text = "\n".join(
+        f"  • `{a['symbol']}` — {a['target_percentage']:.1f}%"
+        for a in allocs
+    )
+
+    await update.message.reply_text(
+        f"✅ *تم نسخ المحفظة بنجاح!*\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"📋 المصدر: *{source_name}*\n"
+        f"📁 الجديدة: *{new_name}*\n"
+        f"💰 رأس المال: `${new_capital:,.2f} USDT`\n"
+        f"🪙 العملات ({len(allocs)}):\n{coins_text}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"يمكنك تفعيلها أو تعديلها من قائمة المحافظ.",
+        parse_mode="Markdown",
+        reply_markup=portfolios_list_kb(portfolios, active_id),
+    )
+    return ConversationHandler.END
 
 
 # ── Edit Portfolio Name Conversation ───────────────────────────────────────────
