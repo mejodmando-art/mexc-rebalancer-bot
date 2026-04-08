@@ -1,3 +1,4 @@
+import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from bot.config import config
@@ -7,8 +8,8 @@ from bot.keyboards import main_menu_kb, settings_kb
 
 async def _show_home(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    الواجهة الرئيسية = شاشة المحفظة النشطة مباشرة.
-    تُستدعى من /start، /menu، وكل callback_data='menu:main' أو 'home'.
+    الواجهة الرئيسية = شاشة المحفظة النشطة.
+    تعرض: الرصيد العام للحساب + رصيد المحفظة + العملات.
     """
     from bot.handlers.portfolio_manager import _portfolio_kb
 
@@ -37,7 +38,34 @@ async def _show_home(update: Update, context: ContextTypes.DEFAULT_TYPE):
     capital   = float(p.get("capital_usdt") or 0.0)
     total_pct = sum(a["target_percentage"] for a in allocs)
 
-    capital_str = f"${capital:,.1f} USD" if capital > 0 else "بدون رأس مال"
+    # جلب الرصيد الحقيقي من MEXC (بدون انتظار طويل)
+    total_account = None
+    settings = await db.get_settings(user_id)
+    if settings and settings.get("mexc_api_key"):
+        try:
+            from bot.mexc_client import MexcClient
+            client = MexcClient(settings["mexc_api_key"], settings["mexc_secret_key"])
+            try:
+                _, total_account = await asyncio.wait_for(
+                    client.get_portfolio(), timeout=8
+                )
+            finally:
+                await client.close()
+        except Exception:
+            total_account = None
+
+    # بناء سطر الأرصدة
+    if total_account is not None:
+        account_str  = f"${total_account:,.2f}"
+        portfolio_str = f"${capital:,.2f}" if capital > 0 else "—"
+        balance_line = (
+            f"🏦 *الرصيد العام:* `{account_str} USD`\n"
+            f"💼 *رصيد المحفظة:* `{portfolio_str} USD`"
+        )
+    else:
+        portfolio_str = f"${capital:,.2f}" if capital > 0 else "بدون رأس مال"
+        balance_line = f"💼 *رصيد المحفظة:* `{portfolio_str} USD`"
+
     pct_warn = ""
     if allocs and abs(total_pct - 100) > 1:
         pct_warn = f"\n⚠️ مجموع النسب `{total_pct:.1f}%` — يجب أن يكون 100%"
@@ -45,7 +73,7 @@ async def _show_home(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
         f"📁 *{p['name']}*\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
-        f"💰 *{capital_str}*          💰 *{capital_str}*\n"
+        f"{balance_line}\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"🪙 *العملات \\({len(allocs)}\\)*"
         f"{pct_warn}"
@@ -103,7 +131,7 @@ async def home_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """callback_data='menu:main' — يعود لشاشة المحفظة النشطة."""
+    """callback_data='menu:main'"""
     query = update.callback_query
     await query.answer()
     await _show_home(update, context)
