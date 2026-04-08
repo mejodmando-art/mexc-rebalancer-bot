@@ -449,85 +449,56 @@ async def portfolio_balance_callback(update: Update, context: ContextTypes.DEFAU
     pnl     = portfolio_value - capital if capital > 0 else None
     pnl_pct = (pnl / capital * 100)     if pnl is not None else None
 
-    def _fmt_price(p: float) -> str:
-        """رقم سعر مقروء بدون scientific notation."""
-        if p == 0:
-            return "0"
-        if p >= 1000:
-            return f"{p:,.0f}"
-        if p >= 1:
-            return f"{p:,.3f}"
-        if p >= 0.01:
-            return f"{p:.4f}"
-        if p >= 0.0001:
-            return f"{p:.6f}"
-        return f"{p:.8f}"
-
-    def _fmt_qty(q: float) -> str:
-        """كمية مقروءة بدون scientific notation."""
-        if q == 0:
-            return "0"
-        if q >= 1000:
-            return f"{q:,.1f}"
-        if q >= 1:
-            return f"{q:,.3f}"
-        if q >= 0.001:
-            return f"{q:.4f}"
-        return f"{q:.6f}"
-
     # ── هيدر الملخص ──────────────────────────────────────────────────────────
     pnl_sign = "+" if pnl is not None and pnl >= 0 else ""
-    pnl_icon = "▲" if pnl is not None and pnl >= 0 else "▼"
+    pnl_icon = "📈" if pnl is not None and pnl >= 0 else "📉"
 
-    header = (
-        f"📊 *{p['name']}*\n"
-        f"`{'─' * 28}`\n"
-        f"💵 الحساب   `${total_account:>10,.2f}`\n"
-        f"💼 المحفظة  `${portfolio_value:>10,.2f}`\n"
-    )
+    lines = [f"📊 *{p['name']}*", ""]
+    lines.append(f"🏦  الحساب الكلي    `${total_account:,.2f}`")
+    lines.append(f"💼  قيمة المحفظة   `${portfolio_value:,.2f}`")
     if capital > 0:
-        header += f"🎯 رأس المال `${capital:>10,.2f}`\n"
+        lines.append(f"🎯  رأس المال       `${capital:,.2f}`")
     if pnl is not None:
-        header += f"{pnl_icon} ر/خ        `{pnl_sign}${abs(pnl):>9,.2f}` ({pnl_sign}{pnl_pct:.1f}%)\n"
-    header += f"`{'─' * 28}`\n"
+        lines.append(f"{pnl_icon}  ر / خ            `{pnl_sign}${abs(pnl):,.2f}  ({pnl_sign}{pnl_pct:.1f}%)`")
+    lines.append("")
 
-    # ── جدول العملات — سطر واحد لكل عملة ────────────────────────────────────
-    alloc_map = {a["symbol"]: a["target_percentage"] for a in allocs}
+    # ── العملات — 3 في كل صف ─────────────────────────────────────────────────
+    # كل خلية: SYM \n $val  (بدون أي تفاصيل زيادة)
     sorted_coins = sorted(
         alloc_symbols,
         key=lambda s: portfolio_data.get(s, {}).get("value_usdt", 0.0),
         reverse=True,
     )
 
-    # رأس الجدول
-    coin_lines = ["`العملة   القيمة    %    @سعر`"]
-
+    # نبني صفوف من 3 عملات — كل صف سطر واحد بـ monospace
+    # تنسيق كل خلية: "SYM $X.XX" بعرض ثابت 12 حرف
+    CELL = 13
+    row_cells = []
     for sym in sorted_coins:
-        data    = portfolio_data.get(sym, {})
-        val     = data.get("value_usdt", 0.0)
-        amount  = data.get("amount", 0.0)
-        price   = data.get("price", 0.0)
-        cur_pct = (val / portfolio_value * 100) if portfolio_value > 0 else 0.0
-        tgt_pct = alloc_map.get(sym, 0.0)
-        drift   = cur_pct - tgt_pct
+        val = portfolio_data.get(sym, {}).get("value_usdt", 0.0)
+        cell = f"{sym:<6} ${val:>5.2f}"   # مثال: "BTC    $4.97"
+        row_cells.append(cell)
 
-        drift_str = f"{drift:+.1f}%" if abs(drift) >= 0.5 else "  ✓  "
-        price_str = _fmt_price(price)
+    # اجمع كل 3 في سطر
+    for i in range(0, len(row_cells), 3):
+        chunk = row_cells[i:i+3]
+        # افصل بـ │ وحاذِ
+        row = "  │  ".join(f"{c:<{CELL}}" for c in chunk)
+        lines.append(f"`{row}`")
 
-        # سطر واحد: SYM  $val  pct%  drift  @price
-        coin_lines.append(
-            f"`{sym:<7} ${val:>6.2f}  {cur_pct:>4.1f}%  {drift_str}  @{price_str}`"
-        )
-
-    footer = f"`{'─' * 28}`"
-
-    text = header + "\n".join(coin_lines) + "\n" + footer
+    lines.append("")
+    lines.append(f"_آخر تحديث: الآن_")
 
     back_kb = InlineKeyboardMarkup([[
-        InlineKeyboardButton("◀️ رجوع", callback_data=f"portfolio:{portfolio_id}")
+        InlineKeyboardButton("🔄 تحديث", callback_data=f"pf_balance:{portfolio_id}"),
+        InlineKeyboardButton("◀️ رجوع",  callback_data=f"portfolio:{portfolio_id}"),
     ]])
 
-    await query.edit_message_text(text, parse_mode="Markdown", reply_markup=back_kb)
+    await query.edit_message_text(
+        "\n".join(lines),
+        parse_mode="Markdown",
+        reply_markup=back_kb,
+    )
 
 
 async def delete_portfolio_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
