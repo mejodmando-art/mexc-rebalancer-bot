@@ -215,10 +215,9 @@ def portfolio_actions_kb(
         InlineKeyboardButton("🏆  أهداف الربح / وقف الخسارة", callback_data=f"portfolio_tp_menu:{portfolio_id}"),
     ])
 
-    # ── عملة واحدة + بيع عملة واحدة ──
+    # ── بيع عملة واحدة ──
     buttons.append([
-        InlineKeyboardButton("🪙  إضافة عملة",             callback_data=f"portfolio_edit_allocs:{portfolio_id}"),
-        InlineKeyboardButton("🗑  بيع عملة واحدة",         callback_data=f"portfolio_sell_one:{portfolio_id}"),
+        InlineKeyboardButton("🗑  بيع عملة واحدة", callback_data=f"portfolio_sell_one:{portfolio_id}"),
     ])
 
     # ── إعدادات متقدمة + حذف + رجوع ──
