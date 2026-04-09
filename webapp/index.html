@@ -59,10 +59,10 @@
   <section class="section">
     <div class="section-title">الإدارة</div>
     <div class="btn-grid-2">
-      <button class="btn btn-secondary" onclick="showToast('جاري فتح تعديل العملات...','info')"><span class="btn-icon">✏️</span><span>تعديل العملات</span></button>
-      <button class="btn btn-secondary" onclick="showToast('جاري جلب الرصيد الحي...','info')"><span class="btn-icon">📊</span><span>الرصيد الحي</span></button>
-      <button class="btn btn-secondary" onclick="showToast('جاري فتح رأس المال...','info')"><span class="btn-icon">💰</span><span>رأس المال</span></button>
-      <button class="btn btn-secondary" onclick="showToast('جاري فتح السجل...','info')"><span class="btn-icon">📋</span><span>السجل</span></button>
+      <button class="btn btn-secondary" onclick="openTelegramBot('edit_coins')"><span class="btn-icon">✏️</span><span>تعديل العملات</span></button>
+      <button class="btn btn-secondary" onclick="openLiveBalance()"><span class="btn-icon">📊</span><span>الرصيد الحي</span></button>
+      <button class="btn btn-secondary" onclick="openTelegramBot('capital')"><span class="btn-icon">💰</span><span>رأس المال</span></button>
+      <button class="btn btn-secondary" onclick="openHistory()"><span class="btn-icon">📋</span><span>السجل</span></button>
     </div>
   </section>
 
@@ -159,7 +159,7 @@
     <div class="modal-header"><span>🔲 Grid Bot</span><button class="modal-close" onclick="closeModal('modal-grid')">✕</button></div>
     <div class="modal-body">
       <div class="grid-list" id="grid-list"></div>
-      <button class="btn btn-primary" style="width:100%;margin-top:12px;flex-direction:row;gap:8px;padding:12px" onclick="showToast('جاري إنشاء شبكة جديدة...','info');closeModal('modal-grid')">➕ شبكة جديدة</button>
+      <button class="btn btn-primary" style="width:100%;margin-top:12px;flex-direction:row;gap:8px;padding:12px" onclick="openTelegramBot('grid_new')">➕ شبكة جديدة (من البوت)</button>
     </div>
     <div class="modal-footer"><button class="btn-ghost" onclick="closeModal('modal-grid')">✖ إغلاق</button></div>
   </div>
@@ -184,6 +184,24 @@
       <button class="btn btn-danger" style="flex-direction:row;gap:6px;padding:10px 20px" onclick="execDeletePortfolio()">🗑 نعم، احذف</button>
       <button class="btn-ghost" onclick="closeModal('modal-delete-portfolio')">✖ إلغاء</button>
     </div>
+  </div>
+</div>
+
+<!-- Modal: الرصيد الحي -->
+<div class="modal-overlay" id="modal-live-balance">
+  <div class="modal">
+    <div class="modal-header"><span>📊 الرصيد الحي</span><button class="modal-close" onclick="closeModal('modal-live-balance')">✕</button></div>
+    <div class="modal-body" id="live-balance-body"></div>
+    <div class="modal-footer"><button class="btn-ghost" onclick="closeModal('modal-live-balance')">✖ إغلاق</button></div>
+  </div>
+</div>
+
+<!-- Modal: السجل -->
+<div class="modal-overlay" id="modal-history">
+  <div class="modal">
+    <div class="modal-header"><span>📋 سجل العمليات</span><button class="modal-close" onclick="closeModal('modal-history')">✕</button></div>
+    <div class="modal-body" id="history-body" style="padding:0"></div>
+    <div class="modal-footer"><button class="btn-ghost" onclick="closeModal('modal-history')">✖ إغلاق</button></div>
   </div>
 </div>
 

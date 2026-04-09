@@ -387,6 +387,22 @@ def sell_all():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/history")
+@require_auth
+def get_history():
+    """آخر 20 عملية إعادة توازن."""
+    user_id = _get_user_id()
+
+    async def _fetch():
+        rows = await db.get_history(user_id, limit=20)
+        return {"history": [dict(r) for r in rows]}
+
+    try:
+        return jsonify(_run(_fetch()))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/grids")
 @require_auth
 def get_grids():

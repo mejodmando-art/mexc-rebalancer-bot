@@ -340,6 +340,74 @@ async function selectMethod(method) {
   showToast(`✅ تم إرسال أمر ${labels[method]} للبوت`, 'success');
 }
 
+// ── Live Balance ──────────────────────────────────────────────────────────────
+async function openLiveBalance() {
+  openModal('modal-live-balance');
+  const el = document.getElementById('live-balance-body');
+  el.innerHTML = '<p style="text-align:center;color:var(--text-muted);padding:20px">⏳ جاري الجلب...</p>';
+  try {
+    const data = await apiFetch('/api/portfolio');
+    const coins = data.coins || [];
+    if (!coins.length) {
+      el.innerHTML = '<p style="text-align:center;color:var(--text-muted);padding:20px">لا توجد عملات</p>';
+      return;
+    }
+    el.innerHTML = `
+      <div style="text-align:center;margin-bottom:12px">
+        <div style="font-size:1.4rem;font-weight:700">${(data.total_account||0).toLocaleString('en',{minimumFractionDigits:2})} <span style="font-size:.9rem;color:var(--text-muted)">USDT</span></div>
+        <div style="font-size:.8rem;color:var(--text-muted)">${data.coin_count} عملة</div>
+      </div>
+      <div class="coins-table">
+        ${coins.map(c => `
+          <div class="coin-row">
+            <div class="coin-emoji">${coinLogo(c.symbol)}</div>
+            <div class="coin-info">
+              <div class="coin-name">${c.symbol}</div>
+              <div class="coin-bar-wrap">
+                <div class="coin-bar-bg"><div class="coin-bar-fill" style="width:${Math.min((c.pct||0)*4,100)}%"></div></div>
+                <span class="coin-bar-pct">${(c.pct||0).toFixed(1)}%</span>
+                ${c.drift!=null?`<span style="font-size:.68rem;color:${c.drift>0?'var(--red)':'var(--green)'}">${c.drift>0?'+':''}${c.drift.toFixed(1)}%</span>`:''}
+              </div>
+            </div>
+            <div class="coin-right">
+              <div class="coin-price">$${c.value>=100?c.value.toLocaleString('en',{maximumFractionDigits:2}):c.value.toFixed(4)}</div>
+              ${c.target!=null?`<div style="font-size:.7rem;color:var(--text-muted)">🎯${c.target}%</div>`:''}
+            </div>
+          </div>`).join('')}
+      </div>`;
+  } catch(e) {
+    el.innerHTML = `<p style="text-align:center;color:var(--red);padding:20px">❌ ${e.message}</p>`;
+  }
+}
+
+// ── History ───────────────────────────────────────────────────────────────────
+async function openHistory() {
+  openModal('modal-history');
+  const el = document.getElementById('history-body');
+  el.innerHTML = '<p style="text-align:center;color:var(--text-muted);padding:20px">⏳ جاري الجلب...</p>';
+  try {
+    const data = await apiFetch('/api/history');
+    const rows = data.history || [];
+    if (!rows.length) {
+      el.innerHTML = '<p style="text-align:center;color:var(--text-muted);padding:20px">لا يوجد سجل بعد</p>';
+      return;
+    }
+    el.innerHTML = rows.map(r => `
+      <div class="trade-item" style="flex-direction:column;align-items:flex-start;gap:4px;padding:12px">
+        <div style="display:flex;justify-content:space-between;width:100%">
+          <span style="font-weight:600;font-size:.85rem">${r.portfolio_name||'محفظة'}</span>
+          <span style="font-size:.75rem;color:var(--text-muted)">${r.timestamp||''}</span>
+        </div>
+        <div style="font-size:.8rem;color:var(--text-muted)">${r.summary||''}</div>
+        <div style="font-size:.85rem;color:${r.success?'var(--green)':'var(--red)'}">
+          ${r.success?'✅':'❌'} $${(r.total_traded||0).toFixed(2)} USDT
+        </div>
+      </div>`).join('');
+  } catch(e) {
+    el.innerHTML = `<p style="text-align:center;color:var(--red);padding:20px">❌ ${e.message}</p>`;
+  }
+}
+
 // ── Load Grids ────────────────────────────────────────────────────────────────
 async function loadGrids() {
   try {
@@ -362,6 +430,16 @@ async function loadGrids() {
 document.getElementById('btn-theme').addEventListener('click', toggleTheme);
 document.getElementById('btn-settings').addEventListener('click', openDrawer);
 document.getElementById('btn-refresh').addEventListener('click', loadPortfolio);
+
+// ── فتح البوت في تيليجرام ─────────────────────────────────────────────────────
+function openTelegramBot(action) {
+  const tg = window.Telegram?.WebApp;
+  if (tg) {
+    tg.close(); // أغلق الـ Web App وارجع للبوت
+  } else {
+    showToast('افتح هذه الصفحة من داخل تيليجرام', 'info');
+  }
+}
 
 // ── Telegram Web App ──────────────────────────────────────────────────────────
 if (window.Telegram?.WebApp) {
