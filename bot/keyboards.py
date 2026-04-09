@@ -179,10 +179,12 @@ def portfolios_list_kb(portfolios: List[Dict], active_id: int) -> InlineKeyboard
     return InlineKeyboardMarkup(buttons)
 
 
-WEBAPP_URL = "https://mohamedrade-mexcrebalance-xxxxxxxx.gitpod.io/webapp/"
-"""
-عنوان الـ Web App — يُحدَّث بعنوان الـ preview الفعلي.
-"""
+import os as _os
+WEBAPP_URL = _os.environ.get("WEBAPP_URL", "").strip().rstrip("/") + "/"
+if WEBAPP_URL == "/":
+    # fallback: بناء الرابط من WEBHOOK_URL إذا لم يُحدَّد WEBAPP_URL صراحةً
+    _base = _os.environ.get("WEBHOOK_URL", "").strip().rstrip("/")
+    WEBAPP_URL = f"{_base}/webapp/" if _base else "https://example.com/webapp/"
 
 
 def portfolio_actions_kb(

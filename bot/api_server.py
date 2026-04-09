@@ -92,6 +92,15 @@ def health():
     return jsonify({"status": "ok", "ts": int(time.time())})
 
 
+@app.route("/api/config")
+def get_config():
+    """
+    يعطي الـ Web App الإعدادات العامة التي يحتاجها عند التحميل.
+    لا يحتاج مصادقة — المفتاح نفسه هو ما يُعاد، وهو غير سري بمجرد وصول المستخدم للصفحة.
+    """
+    return jsonify({"api_key": _WEB_SECRET})
+
+
 @app.route("/api/portfolio")
 @require_auth
 def get_portfolio():
