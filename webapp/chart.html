@@ -302,7 +302,11 @@ async function loadChart() {
     drawLines(data.lines, data.current_price);
     renderOrders(data.lines);
     // لا نحرك الشارت تلقائياً — المستخدم يتحكم بالموضع
-    if (_symbol !== data.symbol) { _symbol = data.symbol; startPriceFeed(_symbol); }
+    if (_symbol !== data.symbol) {
+      _symbol = data.symbol;
+      if (_wsPrice) { _wsPrice.close(); _wsPrice = null; }
+      startPriceFeed(_symbol);
+    }
   } catch(e) {
     document.getElementById('overlay').style.display = 'flex';
     document.getElementById('overlay').textContent   = `❌ ${e.message}`;
@@ -316,10 +320,14 @@ document.querySelectorAll('.tf-btn').forEach(btn => {
     document.querySelectorAll('.tf-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     TF = btn.dataset.tf;
-    loadChart();
-    startCountdown();
-    if (_wsPrice) { _wsPrice.close(); _wsPrice = null; }
-    if (_symbol) startPriceFeed(_symbol);
+    // إغلاق الاتصالات القديمة أولاً
+    if (_wsPrice)  { _wsPrice.close();  _wsPrice  = null; }
+    if (_sse)      { _sse.close();      _sse      = null; }
+    if (_countdownTimer) { clearInterval(_countdownTimer); _countdownTimer = null; }
+    loadChart().then(() => {
+      _configReady.then(startSSE);
+      startCountdown();
+    });
   });
 });
 
@@ -681,10 +689,10 @@ _chartEl.addEventListener('touchmove', e => {
 
 _chartEl.addEventListener('touchend', () => _onEnd());
 
-// ── Auto refresh ──────────────────────────────────────────────────────────────
+// ── Auto refresh: كل 5 دقائق فقط لإعادة تحميل الشمعات (SSE يغطي الأوامر) ──
 function startAutoRefresh() {
   if (_refreshTimer) clearInterval(_refreshTimer);
-  _refreshTimer = setInterval(loadChart, 30_000);
+  _refreshTimer = setInterval(loadChart, 300_000);
 }
 
 // ── Telegram WebApp ───────────────────────────────────────────────────────────
@@ -697,10 +705,11 @@ if (window.Telegram?.WebApp) {
 // ── Boot ──────────────────────────────────────────────────────────────────────
 initChart();
 loadChart().then(() => {
-  _configReady.then(startSSE);
-  startCountdown();
+  _configReady.then(startSSE);  // SSE للأوامر
+  startCountdown();              // عداد الشمعة
+  // startPriceFeed يُشغَّل تلقائياً من loadChart عند أول تحميل
 });
-startAutoRefresh();
+startAutoRefresh();  // إعادة تحميل الشمعات كل 5 دقائق فقط
 
 </script>
 </body>
