@@ -385,7 +385,7 @@ def get_grids():
     async def _fetch():
         from bot.grid.monitor import grid_monitor
         grids = []
-        for gid, g in grid_monitor.grids.items():
+        for gid, g in grid_monitor.active_grids.items():
             grids.append({
                 "id":     gid,
                 "symbol": g.get("symbol", ""),
