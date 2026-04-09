@@ -1,17 +1,23 @@
 'use strict';
 
 // ── API Config ────────────────────────────────────────────────────────────────
-// في الـ production: BASE_URL يُحدَّد تلقائياً من عنوان الصفحة
 const BASE_URL = window.location.origin;
-const API_KEY  = ''; // اتركه فارغاً لو WEB_APP_SECRET مش محدد في .env
+let _apiKey = '';
+
+// جلب المفتاح من الخادم مرة واحدة عند التحميل
+const _configReady = fetch(BASE_URL + '/api/config')
+  .then(r => r.json())
+  .then(d => { _apiKey = d.api_key || ''; })
+  .catch(() => {});
 
 function apiHeaders() {
   const h = { 'Content-Type': 'application/json' };
-  if (API_KEY) h['X-API-Key'] = API_KEY;
+  if (_apiKey) h['X-API-Key'] = _apiKey;
   return h;
 }
 
 async function apiFetch(path, opts = {}) {
+  await _configReady; // انتظر حتى يُجلب المفتاح
   const res = await fetch(BASE_URL + path, { headers: apiHeaders(), ...opts });
   const data = await res.json().catch(() => ({ error: 'invalid response' }));
   if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
