@@ -29,7 +29,6 @@ from bot.handlers.settings import (
 from bot.handlers.momentum_handler import (
     momentum_callback,
     momentum_setting_input,
-    momentum_cancel,
     run_momentum_scan,
 )
 from bot.momentum.monitor import momentum_monitor
@@ -72,7 +71,6 @@ from bot.handlers.portfolio_manager import (
     portfolio_rebalance_callback,
     portfolio_rebalance_exec_callback,
     portfolio_balance_callback,
-    clone_portfolio_start, clone_portfolio_name, clone_portfolio_capital,
     pf_alloc_list_callback,
     pf_alloc_del_callback,
     pf_alloc_clear_callback,
@@ -83,7 +81,6 @@ from bot.handlers.portfolio_manager import (
     TP_TP2_TYPE, TP_TP2_VALUE, TP_TP2_SELL,
     TP_SL_TYPE, TP_SL_VALUE,
     CREATE_TP1_TYPE, CREATE_TP1_VALUE, CREATE_TP2_VALUE, CREATE_SL_VALUE,
-    CLONE_NAME, CLONE_CAPITAL,
 )
 from bot.portfolio_monitor import run_portfolio_monitor
 from bot.handlers.auto_alloc_handler import (
@@ -186,17 +183,6 @@ def build_app() -> Application:
         conversation_timeout=600,
     )
 
-    clone_portfolio_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(clone_portfolio_start, pattern="^portfolio_clone:\\d+$")],
-        states={
-            CLONE_NAME:    [MessageHandler(TEXT, clone_portfolio_name)],
-            CLONE_CAPITAL: [MessageHandler(TEXT, clone_portfolio_capital)],
-        },
-        fallbacks=[CommandHandler("cancel", cancel_portfolio_conv),
-                   CallbackQueryHandler(cancel_portfolio_conv, pattern="^cancel$")],
-        conversation_timeout=300,
-    )
-
     edit_name_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(edit_portfolio_name_start, pattern="^portfolio_edit_name:")],
         states={EDIT_NAME: [MessageHandler(TEXT, edit_portfolio_name_input)]},
@@ -251,7 +237,6 @@ def build_app() -> Application:
     app.add_handler(interval_conv)
     app.add_handler(alloc_conv)
     app.add_handler(create_portfolio_conv)
-    app.add_handler(clone_portfolio_conv)
     app.add_handler(edit_name_conv)
     app.add_handler(edit_capital_conv)
     app.add_handler(portfolio_threshold_conv)

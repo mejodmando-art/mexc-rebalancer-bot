@@ -4,9 +4,8 @@ from telegram.ext import ContextTypes, ConversationHandler
 from bot.database import db
 from bot.keyboards import (
     portfolios_list_kb, portfolio_actions_kb,
-    portfolio_delete_confirm_kb, main_menu_kb, back_to_main_kb,
+    portfolio_delete_confirm_kb, main_menu_kb,
     portfolio_sell_one_kb, portfolio_sell_confirm_kb,
-    rebalance_confirm_kb, rebalance_dry_kb,
 )
 
 async def _portfolio_kb(portfolio_id: int, user_id: int) -> InlineKeyboardMarkup:
@@ -34,8 +33,7 @@ PORTFOLIO_SET_THRESHOLD, PORTFOLIO_SET_INTERVAL = range(34, 36)
 TP_TP1_TYPE, TP_TP1_VALUE, TP_TP1_SELL, TP_TP2_TYPE, TP_TP2_VALUE, TP_TP2_SELL, TP_SL_TYPE, TP_SL_VALUE = range(36, 44)
 # Create-portfolio wizard TP/SL states
 CREATE_TP1_TYPE, CREATE_TP1_VALUE, CREATE_TP2_VALUE, CREATE_SL_VALUE = range(44, 48)
-# Clone portfolio wizard states
-CLONE_NAME, CLONE_CAPITAL = range(48, 50)
+
 
 
 async def portfolios_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -52,7 +50,7 @@ async def portfolios_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     if not portfolios:
         text = (
             "🗂️ *محافظي*\n"
-            "━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n"
             "لا يوجد محافظ بعد.\n"
             "اضغط ➕ لإنشاء محفظتك الأولى!"
         )
@@ -61,10 +59,9 @@ async def portfolios_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         text = (
             f"🗂️ *محافظي*\n"
             f"━━━━━━━━━━━━━━━━━━━━━\n"
-            f"📊 عدد المحافظ: *{len(portfolios)}*\n"
-            f"💰 إجمالي رأس المال: *${total_capital:,.0f} USDT*\n"
-            f"━━━━━━━━━━━━━━━━━━━━━\n"
-            f"اختر محفظة للإدارة:"
+            f"📊  المحافظ:    *{len(portfolios)}*\n"
+            f"💰  رأس المال:  *${total_capital:,.0f} USDT*\n"
+            f"━━━━━━━━━━━━━━━━━━━━━"
         )
 
     await query.edit_message_text(
@@ -109,29 +106,18 @@ async def portfolio_detail_callback(update: Update, context: ContextTypes.DEFAUL
             total_usdt = None
 
     # ── بناء نص الرسالة ───────────────────────────────────────────────────────
-    pct_warn = ""
-    if allocs and abs(total_pct - 100) > 1:
-        pct_warn = f"\n⚠️ مجموع النسب `{total_pct:.1f}%` — يجب أن يكون 100%"
-
-    balance_line = ""
+    lines = [f"📁 *{p['name']}*  {active_badge}", "━━━━━━━━━━━━━━━━━━━━━"]
     if total_usdt is not None:
-        balance_line = f"💵 *رصيد الحساب:* `${total_usdt:,.2f} USDT`\n"
-
-    portfolio_balance_line = ""
+        lines.append(f"🏦  الحساب:    `${total_usdt:,.2f} USDT`")
     if capital > 0:
-        portfolio_balance_line = f"💼 *رصيد المحفظة:* `${capital:,.2f} USD`\n"
+        lines.append(f"💼  المحفظة:   `${capital:,.2f} USDT`")
+    lines.append("━━━━━━━━━━━━━━━━━━━━━")
+    if allocs:
+        pct_warn = f"  ⚠️ `{total_pct:.1f}%`" if abs(total_pct - 100) > 1 else ""
+        lines.append(f"🪙  *{len(allocs)} عملة*{pct_warn}")
     else:
-        portfolio_balance_line = f"💼 *رصيد المحفظة:* بدون رأس مال محدد\n"
-
-    text = (
-        f"📁 *{p['name']}*  {active_badge}\n"
-        f"━━━━━━━━━━━━━━━━━━━━━\n"
-        f"{balance_line}"
-        f"{portfolio_balance_line}"
-        f"━━━━━━━━━━━━━━━━━━━━━\n"
-        f"🪙 *العملات \\({len(allocs)}\\)*"
-        f"{pct_warn}"
-    )
+        lines.append("🪙  لا توجد عملات — اضغط *تعديل العملات*")
+    text = "\n".join(lines)
 
     await query.edit_message_text(
         text,
@@ -482,7 +468,7 @@ async def portfolio_balance_callback(update: Update, context: ContextTypes.DEFAU
         lines.append(f"`{row}`")
 
     lines.append("")
-    lines.append(f"_آخر تحديث: الآن_")
+    lines.append("_آخر تحديث: الآن_")
 
     back_kb = InlineKeyboardMarkup([[
         InlineKeyboardButton("🔄 تحديث", callback_data=f"pf_balance:{portfolio_id}"),
@@ -848,153 +834,6 @@ async def _finalize_portfolio_creation(update, context, tp1_type, tp1_value, tp2
         )
 
 
-# ── Clone Portfolio Conversation ───────────────────────────────────────────────
-
-async def clone_portfolio_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """بداية نسخ المحفظة — اطلب الاسم الجديد."""
-    query = update.callback_query
-    await query.answer()
-    user_id = update.effective_user.id
-    portfolio_id = int(query.data.split(":")[1])
-
-    p = await db.get_portfolio(portfolio_id)
-    if not p or p["user_id"] != user_id:
-        await query.answer("❌ محفظة غير موجودة", show_alert=True)
-        return ConversationHandler.END
-
-    allocs = await db.get_portfolio_allocations(portfolio_id)
-    capital = float(p.get("capital_usdt") or 0.0)
-
-    # احفظ بيانات المحفظة الأصلية في user_data
-    context.user_data["_clone_source_id"] = portfolio_id
-    context.user_data["_clone_source_name"] = p["name"]
-    context.user_data["_clone_capital"] = capital
-
-    coins_preview = "  ·  ".join(a["symbol"] for a in allocs[:8])
-    if len(allocs) > 8:
-        coins_preview += f"  +{len(allocs)-8}"
-
-    await query.edit_message_text(
-        f"📋 *نسخ المحفظة*\n"
-        f"━━━━━━━━━━━━━━━━━━━━━\n"
-        f"المصدر: *{p['name']}*\n"
-        f"العملات: `{coins_preview}`\n"
-        f"رأس المال: `${capital:,.2f}`\n"
-        f"━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"أدخل *اسم المحفظة الجديدة*:\n\n"
-        f"/cancel للإلغاء",
-        parse_mode="Markdown",
-    )
-    return CLONE_NAME
-
-
-async def clone_portfolio_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """استقبال الاسم الجديد — اطلب المبلغ."""
-    name = update.message.text.strip()
-    if not name or len(name) > 50:
-        await update.message.reply_text("❌ اسم غير صالح. أدخل اسماً بين 1 و50 حرف:")
-        return CLONE_NAME
-
-    context.user_data["_clone_new_name"] = name
-    source_capital = context.user_data.get("_clone_capital", 0.0)
-
-    await update.message.reply_text(
-        f"💰 *رأس المال للمحفظة الجديدة*\n\n"
-        f"رأس مال المحفظة الأصلية: `${source_capital:,.2f}`\n\n"
-        f"أدخل المبلغ الجديد بالـ USDT\n"
-        f"أو أرسل `.` للإبقاء على نفس المبلغ:\n\n"
-        f"/cancel للإلغاء",
-        parse_mode="Markdown",
-    )
-    return CLONE_CAPITAL
-
-
-async def clone_portfolio_capital(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """استقبال المبلغ الجديد — نفذ النسخ."""
-    user_id = update.effective_user.id
-    text = update.message.text.strip()
-
-    source_id   = context.user_data.pop("_clone_source_id", None)
-    source_name = context.user_data.pop("_clone_source_name", "")
-    new_name    = context.user_data.pop("_clone_new_name", "نسخة")
-    old_capital = context.user_data.pop("_clone_capital", 0.0)
-
-    if not source_id:
-        await update.message.reply_text("❌ انتهت الجلسة، حاول مجدداً.")
-        return ConversationHandler.END
-
-    # تحديد رأس المال الجديد
-    if text == ".":
-        new_capital = old_capital
-    else:
-        try:
-            new_capital = float(text.replace(",", ""))
-            if new_capital < 0:
-                raise ValueError
-        except ValueError:
-            await update.message.reply_text("❌ مبلغ غير صالح. أدخل رقماً أو أرسل `.` للإبقاء على نفس المبلغ:")
-            # أعد الحفظ لأن pop حذفها
-            context.user_data["_clone_source_id"]   = source_id
-            context.user_data["_clone_source_name"] = source_name
-            context.user_data["_clone_new_name"]    = new_name
-            context.user_data["_clone_capital"]     = old_capital
-            return CLONE_CAPITAL
-
-    # جلب بيانات المحفظة الأصلية كاملة
-    source = await db.get_portfolio(source_id)
-    allocs = await db.get_portfolio_allocations(source_id)
-
-    # إنشاء المحفظة الجديدة
-    new_id = await db.create_portfolio(user_id, new_name, new_capital)
-
-    # نسخ كل إعدادات المحفظة الأصلية
-    await db.update_portfolio(
-        new_id,
-        threshold=float(source.get("threshold") or 5.0),
-        auto_interval_hours=int(source.get("auto_interval_hours") or 24),
-    )
-
-    # نسخ TP/SL إذا كانت موجودة
-    if source.get("tp1_value") and float(source.get("tp1_value") or 0) > 0:
-        await db.update_portfolio(
-            new_id,
-            tp1_type=source.get("tp1_type") or "pct",
-            tp1_value=float(source.get("tp1_value") or 0),
-            tp1_sell_pct=float(source.get("tp1_sell_pct") or 50),
-            tp2_type=source.get("tp2_type") or "pct",
-            tp2_value=float(source.get("tp2_value") or 0),
-            tp2_sell_pct=float(source.get("tp2_sell_pct") or 100),
-            sl_type=source.get("sl_type") or "pct",
-            sl_value=float(source.get("sl_value") or 0),
-        )
-
-    # نسخ التوزيعات
-    for a in allocs:
-        await db.set_portfolio_allocation(new_id, user_id, a["symbol"], a["target_percentage"])
-
-    portfolios = await db.get_portfolios(user_id)
-    active_id  = await db.get_active_portfolio_id(user_id)
-
-    coins_text = "\n".join(
-        f"  • `{a['symbol']}` — {a['target_percentage']:.1f}%"
-        for a in allocs
-    )
-
-    await update.message.reply_text(
-        f"✅ *تم نسخ المحفظة بنجاح!*\n"
-        f"━━━━━━━━━━━━━━━━━━━━━\n"
-        f"📋 المصدر: *{source_name}*\n"
-        f"📁 الجديدة: *{new_name}*\n"
-        f"💰 رأس المال: `${new_capital:,.2f} USDT`\n"
-        f"🪙 العملات ({len(allocs)}):\n{coins_text}\n"
-        f"━━━━━━━━━━━━━━━━━━━━━\n"
-        f"يمكنك تفعيلها أو تعديلها من قائمة المحافظ.",
-        parse_mode="Markdown",
-        reply_markup=portfolios_list_kb(portfolios, active_id),
-    )
-    return ConversationHandler.END
-
-
 # ── Edit Portfolio Name Conversation ───────────────────────────────────────────
 
 async def edit_portfolio_name_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1140,7 +979,7 @@ async def edit_portfolio_capital_input(update: Update, context: ContextTypes.DEF
                     continue
                 pair = f"{sym}/USDT"
                 try:
-                    order = await client.exchange.create_market_buy_order_with_cost(pair, usdt_to_buy)
+                    await client.exchange.create_market_buy_order_with_cost(pair, usdt_to_buy)
                     results.append(f"🟢 شراء `{sym}` — `${usdt_to_buy:.2f}` ✅")
                 except Exception as e:
                     results.append(f"❌ شراء `{sym}`: {str(e)[:60]}")
@@ -1161,7 +1000,7 @@ async def edit_portfolio_capital_input(update: Update, context: ContextTypes.DEF
                         results.append(f"❌ بيع `{sym}`: تعذّر جلب السعر")
                         continue
                     qty = usdt_to_sell / price
-                    order = await client.exchange.create_market_sell_order(pair, qty)
+                    await client.exchange.create_market_sell_order(pair, qty)
                     results.append(f"🔴 بيع `{sym}` — `${usdt_to_sell:.2f}` ✅")
                 except Exception as e:
                     results.append(f"❌ بيع `{sym}`: {str(e)[:60]}")
@@ -1795,27 +1634,21 @@ async def portfolio_toggle_auto_callback(update: Update, context: ContextTypes.D
     interval  = p.get("auto_interval_hours") or 24
     threshold = p.get("threshold") or 5.0
     auto_on   = bool(p.get("auto_enabled"))
+    allocs    = await db.get_portfolio_allocations(portfolio_id)
+    active_id = await db.get_active_portfolio_id(user_id)
+    active_badge = "✅ نشطة" if p["id"] == active_id else "⭕ غير نشطة"
     auto_line = f"🟢 تلقائي كل {interval}س" if auto_on else "🔴 التوازن التلقائي معطل"
 
-    allocs    = await db.get_portfolio_allocations(portfolio_id)
-    total_pct = sum(a["target_percentage"] for a in allocs)
-    active_id = await db.get_active_portfolio_id(user_id)
-
-    text = (
-        f"📁 *{p['name']}*\n\n"
-        f"💰 رأس المال: *${p['capital_usdt']:,.2f} USDT*\n"
-        f"🪙 عدد العملات: *{len(allocs)}*\n"
-        f"📊 مجموع التوزيع: *{total_pct:.1f}%*\n"
-        f"🎯 حد الانحراف: *{threshold}%*\n"
-        f"{auto_line}\n"
-        f"{'✅ المحفظة النشطة الآن' if p['id'] == active_id else '⭕ غير نشطة'}\n"
-    )
+    lines = [f"📁 *{p['name']}*  {active_badge}", "━━━━━━━━━━━━━━━━━━━━━"]
+    if p.get("capital_usdt", 0) > 0:
+        lines.append(f"💼  المحفظة:   `${p['capital_usdt']:,.2f} USDT`")
+    lines.append(f"🎯  الانحراف:  `{threshold}%`")
+    lines.append(f"⏱  الفترة:    `{interval} ساعة`")
+    lines.append(auto_line)
+    lines.append("━━━━━━━━━━━━━━━━━━━━━")
     if allocs:
-        text += "\n*التوزيع:*\n"
-        for a in allocs[:8]:
-            text += f"• `{a['symbol']:6}` {a['target_percentage']:.1f}%\n"
-        if len(allocs) > 8:
-            text += f"_... و {len(allocs)-8} عملات أخرى_\n"
+        lines.append(f"🪙  *{len(allocs)} عملة*")
+    text = "\n".join(lines)
 
     await query.edit_message_text(
         text, parse_mode="Markdown",
