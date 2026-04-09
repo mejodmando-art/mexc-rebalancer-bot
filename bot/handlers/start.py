@@ -3,7 +3,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from bot.config import config
 from bot.database import db
-from bot.keyboards import main_menu_kb, settings_kb
+from bot.keyboards import main_menu_kb
 
 
 async def _show_home(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -20,7 +20,7 @@ async def _show_home(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not p:
         text = (
             "👋 *أهلاً بك في MEXC Rebalancer*\n"
-            "━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n"
             "لا توجد محفظة بعد.\n"
             "ابدأ بإنشاء محفظتك الأولى 👇"
         )
@@ -54,30 +54,21 @@ async def _show_home(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             total_account = None
 
-    # بناء سطر الأرصدة
+    # بناء نص الشاشة الرئيسية
+    lines = [f"📁 *{p['name']}*", "━━━━━━━━━━━━━━━━━━━━━"]
     if total_account is not None:
-        account_str  = f"${total_account:,.2f}"
-        portfolio_str = f"${capital:,.2f}" if capital > 0 else "—"
-        balance_line = (
-            f"🏦 *الرصيد العام:* `{account_str} USD`\n"
-            f"💼 *رصيد المحفظة:* `{portfolio_str} USD`"
-        )
+        lines.append(f"🏦  الحساب:    `${total_account:,.2f} USDT`")
+    if capital > 0:
+        lines.append(f"💼  المحفظة:   `${capital:,.2f} USDT`")
+    lines.append("━━━━━━━━━━━━━━━━━━━━━")
+
+    if allocs:
+        pct_warn = f"⚠️ مجموع النسب `{total_pct:.1f}%`" if abs(total_pct - 100) > 1 else ""
+        lines.append(f"🪙  *{len(allocs)} عملة*" + (f"  {pct_warn}" if pct_warn else ""))
     else:
-        portfolio_str = f"${capital:,.2f}" if capital > 0 else "بدون رأس مال"
-        balance_line = f"💼 *رصيد المحفظة:* `{portfolio_str} USD`"
+        lines.append("🪙  لا توجد عملات — اضغط *تعديل العملات*")
 
-    pct_warn = ""
-    if allocs and abs(total_pct - 100) > 1:
-        pct_warn = f"\n⚠️ مجموع النسب `{total_pct:.1f}%` — يجب أن يكون 100%"
-
-    text = (
-        f"📁 *{p['name']}*\n"
-        f"━━━━━━━━━━━━━━━━━━━━━\n"
-        f"{balance_line}\n"
-        f"━━━━━━━━━━━━━━━━━━━━━\n"
-        f"🪙 *العملات \\({len(allocs)}\\)*"
-        f"{pct_warn}"
-    )
+    text = "\n".join(lines)
 
     kb = await _portfolio_kb(portfolio_id, user_id)
 
@@ -97,22 +88,20 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "📖 *دليل الاستخدام*\n\n"
+        "📖 *دليل الاستخدام*\n"
         "━━━━━━━━━━━━━━━━━━━━━\n"
-        "⚙️ *الإعداد الأولي*\n"
-        "━━━━━━━━━━━━━━━━━━━━━\n"
-        "1️⃣ اضغط 🔑 إعدادات API ← ربط مفاتيح MEXC\n"
-        "2️⃣ اضغط 💰 رأس المال ← تحديد المبلغ\n"
-        "3️⃣ اضغط 🎯 تعديل العملات ← إضافة العملات بنسبها\n"
-        "4️⃣ اضغط 🔄 إعادة التوازن الآن\n\n"
+        "1️⃣  🔑 *إعدادات API* ← ربط مفاتيح MEXC\n"
+        "2️⃣  💰 *رأس المال* ← تحديد المبلغ\n"
+        "3️⃣  ✏️ *تعديل العملات* ← أضف العملات بنسبها\n"
+        "4️⃣  🔄 *إعادة التوازن* ← يدوي أو تلقائي\n"
         "━━━━━━━━━━━━━━━━━━━━━\n"
         "🪙 *إضافة العملات*\n"
-        "━━━━━━━━━━━━━━━━━━━━━\n"
         "أرسل الرموز: `BTC ETH SOL`\n"
-        "أو بالنسب: `BTC=40 ETH=30 SOL=30`\n\n"
+        "أو بالنسب:   `BTC=40 ETH=30 SOL=30`\n"
         "━━━━━━━━━━━━━━━━━━━━━\n"
         "⚡ *Momentum* — اختراقات تلقائية كل 10 دقائق\n"
-        "🔲 *Grid Bot* — شبكة أوامر تلقائية\n\n"
+        "🔲 *Grid Bot* — شبكة أوامر تلقائية\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
         "`/cancel` — إلغاء أي عملية جارية",
         parse_mode="Markdown",
         reply_markup=main_menu_kb(),
