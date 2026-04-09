@@ -408,21 +408,141 @@ async function openHistory() {
   }
 }
 
-// ── Load Grids ────────────────────────────────────────────────────────────────
+// ── Grid Bot ──────────────────────────────────────────────────────────────────
+let _grids = [];
+
 async function loadGrids() {
+  const el = document.getElementById('grid-list');
+  el.innerHTML = '<p style="color:var(--text-muted);text-align:center;padding:20px">⏳ جاري الجلب...</p>';
   try {
     const data = await apiFetch('/api/grids');
-    const el = document.getElementById('grid-list');
-    const grids = data.grids || [];
-    el.innerHTML = grids.length
-      ? grids.map(g => `<div class="grid-item">
-          <div><div class="grid-item-sym">${g.symbol}</div><div class="grid-item-info">${g.steps} خطوة · $${g.size} · 🔄${g.trades}</div></div>
-          <div class="grid-status${g.active?'':' stopped'}">${g.active?'نشط':'موقوف'}</div>
-        </div>`).join('')
-      : `<p style="color:var(--text-muted);text-align:center;padding:20px">لا توجد شبكات بعد</p>`;
-  } catch (e) {
-    document.getElementById('grid-list').innerHTML =
-      `<p style="color:var(--red);text-align:center;padding:16px">❌ ${e.message}</p>`;
+    _grids = data.grids || [];
+    if (!_grids.length) {
+      el.innerHTML = '<p style="color:var(--text-muted);text-align:center;padding:20px">لا توجد شبكات — أنشئ شبكة جديدة 👇</p>';
+      return;
+    }
+    el.innerHTML = _grids.map(g => `
+      <div class="grid-item" onclick="openGridDetail(${g.id})" style="cursor:pointer">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="font-size:1.1rem;font-weight:700">${g.symbol}</div>
+          <div class="grid-status${g.active ? '' : ' stopped'}">${g.active ? '🟢 نشط' : '🔴 موقوف'}</div>
+        </div>
+        <div class="grid-item-info" style="margin-top:4px;font-size:.8rem;color:var(--text-muted)">
+          ${g.steps} خطوة · $${g.size} USDT · ربح/خطوة: ${g.step_pct}% · 🔄 ${g.trades} صفقة
+        </div>
+        <div style="font-size:.78rem;color:var(--text-muted);margin-top:2px">
+          📈 +${g.upper_pct}%  📉 -${g.lower_pct}%
+          ${g.take_profit ? ` · 🎯 $${g.take_profit}` : ''}
+          ${g.stop_loss   ? ` · 🛑 $${g.stop_loss}`   : ''}
+        </div>
+      </div>`).join('');
+  } catch(e) {
+    el.innerHTML = `<p style="color:var(--red);text-align:center;padding:16px">❌ ${e.message}</p>`;
+  }
+}
+
+function openGridDetail(gridId) {
+  const g = _grids.find(x => x.id === gridId);
+  if (!g) return;
+  document.getElementById('gd-title').textContent = `🔲 ${g.symbol}`;
+  document.getElementById('gd-body').innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:8px;font-size:.88rem">
+      <div class="modal-info-row"><span>💰 مركز الشبكة</span><strong>$${g.center}</strong></div>
+      <div class="modal-info-row"><span>📈 الحد العلوي</span><strong>$${g.upper} (+${g.upper_pct}%)</strong></div>
+      <div class="modal-info-row"><span>📉 الحد السفلي</span><strong>$${g.lower} (-${g.lower_pct}%)</strong></div>
+      <div class="modal-divider"></div>
+      <div class="modal-info-row"><span>🔢 الخطوات</span><strong>${g.steps}</strong></div>
+      <div class="modal-info-row"><span>📊 ربح/خطوة</span><strong>${g.step_pct}%</strong></div>
+      <div class="modal-info-row"><span>💵 حجم الشبكة</span><strong>$${g.size} USDT</strong></div>
+      ${g.take_profit ? `<div class="modal-info-row"><span>🎯 Take Profit</span><strong>$${g.take_profit}</strong></div>` : ''}
+      ${g.stop_loss   ? `<div class="modal-info-row"><span>🛑 Stop Loss</span><strong>$${g.stop_loss}</strong></div>`   : ''}
+      <div class="modal-divider"></div>
+      <div class="modal-info-row"><span>🔄 صفقات منفذة</span><strong>${g.trades}</strong></div>
+      <div class="modal-info-row"><span>↔️ انتقالات</span><strong>${g.shifts}</strong></div>
+      <div class="modal-info-row"><span>الحالة</span><strong style="color:${g.active?'var(--green)':'var(--red)'}">${g.active?'🟢 نشط':'🔴 موقوف'}</strong></div>
+    </div>`;
+
+  const stopBtn = document.getElementById('gd-stop-btn');
+  stopBtn.onclick = () => stopGrid(gridId, g.symbol);
+  stopBtn.disabled = !g.active;
+
+  openModal('modal-grid-detail');
+}
+
+async function stopGrid(gridId, symbol) {
+  if (!confirm(`هل تريد إيقاف شبكة ${symbol}؟ سيتم إلغاء جميع الأوامر.`)) return;
+  const btn = document.getElementById('gd-stop-btn');
+  setLoading(btn, true);
+  try {
+    const r = await apiFetch(`/api/grids/${gridId}/stop`, { method: 'POST' });
+    closeModal('modal-grid-detail');
+    showToast(`✅ تم إيقاف شبكة ${symbol} — أُلغي ${r.cancelled} أمر`, 'success');
+    await loadGrids();
+  } catch(e) {
+    showToast(`❌ ${e.message}`, 'error');
+  } finally {
+    setLoading(btn, false);
+  }
+}
+
+function openGridCreate() {
+  document.getElementById('gc-symbol').value = '';
+  document.getElementById('gc-upper').value  = '5';
+  document.getElementById('gc-lower').value  = '5';
+  document.getElementById('gc-steps').value  = '10';
+  document.getElementById('gc-size').value   = '50';
+  document.getElementById('gc-tp').value     = '';
+  document.getElementById('gc-sl').value     = '';
+  document.getElementById('gc-preview').style.display = 'none';
+  document.getElementById('gc-error').style.display   = 'none';
+  document.getElementById('gc-btn').disabled = false;
+  openModal('modal-grid-create');
+}
+
+async function submitGridCreate() {
+  const btn    = document.getElementById('gc-btn');
+  const errEl  = document.getElementById('gc-error');
+  const prevEl = document.getElementById('gc-preview');
+  errEl.style.display = 'none';
+
+  const symbol = document.getElementById('gc-symbol').value.trim();
+  const upper  = parseFloat(document.getElementById('gc-upper').value);
+  const lower  = parseFloat(document.getElementById('gc-lower').value);
+  const steps  = parseInt(document.getElementById('gc-steps').value);
+  const size   = parseFloat(document.getElementById('gc-size').value);
+  const tp     = parseFloat(document.getElementById('gc-tp').value) || null;
+  const sl     = parseFloat(document.getElementById('gc-sl').value) || null;
+
+  if (!symbol)          { errEl.textContent = 'أدخل رمز العملة'; errEl.style.display='block'; return; }
+  if (upper < 1 || upper > 100) { errEl.textContent = 'الحد العلوي بين 1 و 100'; errEl.style.display='block'; return; }
+  if (lower < 1 || lower > 100) { errEl.textContent = 'الحد السفلي بين 1 و 100'; errEl.style.display='block'; return; }
+  if (steps < 2 || steps > 50)  { errEl.textContent = 'الخطوات بين 2 و 50';      errEl.style.display='block'; return; }
+  if (size < 5)                  { errEl.textContent = 'الحجم الأدنى 5 USDT';     errEl.style.display='block'; return; }
+
+  setLoading(btn, true);
+  prevEl.style.display = 'none';
+  try {
+    const body = { symbol, upper_pct: upper, lower_pct: lower, steps, size };
+    if (tp) body.take_profit_pct = tp;
+    if (sl) body.stop_loss_pct   = sl;
+
+    const r = await apiFetch('/api/grids/create', { method: 'POST', body: JSON.stringify(body) });
+    prevEl.innerHTML = `
+      ✅ <strong>الشبكة شغالة!</strong><br>
+      السعر الحالي: $${r.center}<br>
+      الحد العلوي: $${r.upper} · الحد السفلي: $${r.lower}<br>
+      ربح/خطوة: ${r.step_pct}%<br>
+      أوامر شراء: ${r.buys} · أوامر بيع: ${r.sells}
+      ${r.errors ? `<br>⚠️ أخطاء جزئية: ${r.errors}` : ''}`;
+    prevEl.style.color = 'var(--green)';
+    prevEl.style.display = 'block';
+    showToast(`✅ شبكة ${symbol} شغالة!`, 'success');
+    setTimeout(() => { closeModal('modal-grid-create'); loadGrids(); }, 2000);
+  } catch(e) {
+    errEl.textContent = e.message;
+    errEl.style.display = 'block';
+  } finally {
+    setLoading(btn, false);
   }
 }
 

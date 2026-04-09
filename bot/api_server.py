@@ -406,24 +406,202 @@ def get_history():
 @app.route("/api/grids")
 @require_auth
 def get_grids():
-    """قائمة Grid Bots النشطة."""
+    """قائمة Grid Bots النشطة مع تفاصيلها."""
     async def _fetch():
         from bot.grid.monitor import grid_monitor
         grids = []
         for gid, g in grid_monitor.active_grids.items():
             grids.append({
-                "id":     gid,
-                "symbol": g.get("symbol", ""),
-                "steps":  g.get("steps", 0),
-                "size":   g.get("order_size_usdt", 0),
-                "trades": g.get("total_trades", 0),
-                "active": g.get("active", False),
+                "id":          gid,
+                "symbol":      g.get("symbol", ""),
+                "center":      g.get("center", 0),
+                "upper":       g.get("upper", 0),
+                "lower":       g.get("lower", 0),
+                "upper_pct":   g.get("upper_pct", 0),
+                "lower_pct":   g.get("lower_pct", 0),
+                "steps":       g.get("steps", 0),
+                "step_pct":    round(g.get("step_pct", 0), 4),
+                "size":        g.get("order_size_usdt", 0),
+                "take_profit": g.get("take_profit"),
+                "stop_loss":   g.get("stop_loss"),
+                "trades":      g.get("total_trades", 0),
+                "shifts":      g.get("shifts", 0),
+                "active":      g.get("active", True),
             })
         return {"grids": grids}
 
     try:
         return jsonify(_run(_fetch()))
     except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/grids/<int:grid_id>/stop", methods=["POST"])
+@require_auth
+def stop_grid(grid_id):
+    """إيقاف شبكة وإلغاء أوامرها."""
+    user_id = _get_user_id()
+
+    async def _stop():
+        from bot.grid.monitor import grid_monitor
+        g = grid_monitor.active_grids.get(grid_id)
+        if not g:
+            return {"error": "الشبكة غير موجودة"}
+        if g.get("user_id") and g["user_id"] != user_id:
+            return {"error": "غير مصرح"}
+
+        settings = await db.get_settings(user_id)
+        if not settings or not settings.get("mexc_api_key"):
+            return {"error": "MEXC API غير مربوط"}
+
+        from bot.mexc_client import MexcClient
+        client = MexcClient(settings["mexc_api_key"], settings["mexc_secret_key"])
+        cancelled = 0
+        errors = []
+        try:
+            all_orders = g.get("buy_orders", []) + g.get("sell_orders", [])
+            for o in all_orders:
+                oid = o.get("id") or o.get("order_id")
+                if not oid or o.get("status") == "filled":
+                    continue
+                try:
+                    await client.exchange.cancel_order(oid, g["symbol"])
+                    cancelled += 1
+                except Exception as e:
+                    errors.append(str(e)[:60])
+        finally:
+            await client.close()
+
+        await grid_monitor.remove_grid(grid_id)
+        await db.delete_grid(grid_id)
+        return {"ok": True, "cancelled": cancelled, "errors": errors}
+
+    try:
+        result = _run(_stop())
+        if "error" in result:
+            return jsonify(result), 400
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/grids/create", methods=["POST"])
+@require_auth
+def create_grid():
+    """إنشاء شبكة جديدة من الواجهة المرئية."""
+    user_id = _get_user_id()
+    body = request.get_json(silent=True) or {}
+
+    required = ["symbol", "upper_pct", "lower_pct", "steps", "size"]
+    for f in required:
+        if f not in body:
+            return jsonify({"error": f"حقل مطلوب: {f}"}), 400
+
+    async def _create():
+        settings = await db.get_settings(user_id)
+        if not settings or not settings.get("mexc_api_key"):
+            return {"error": "MEXC API غير مربوط"}
+
+        from bot.mexc_client import MexcClient
+        from bot.grid.engine import calculate_grid_levels, place_grid_orders
+        from bot.grid.monitor import grid_monitor
+
+        symbol     = body["symbol"].upper().replace("/", "").replace("-", "") + (
+            "" if body["symbol"].upper().endswith("USDT") else "/USDT"
+        )
+        upper_pct  = float(body["upper_pct"])
+        lower_pct  = float(body["lower_pct"])
+        steps      = int(body["steps"])
+        size       = float(body["size"])
+        tp_pct     = float(body["take_profit_pct"]) if body.get("take_profit_pct") else None
+        sl_pct     = float(body["stop_loss_pct"])   if body.get("stop_loss_pct")   else None
+
+        if not (1 <= upper_pct <= 100): return {"error": "upper_pct يجب بين 1 و 100"}
+        if not (1 <= lower_pct <= 100): return {"error": "lower_pct يجب بين 1 و 100"}
+        if not (2 <= steps <= 50):      return {"error": "steps يجب بين 2 و 50"}
+        if size < 5:                    return {"error": "الحجم الأدنى 5 USDT"}
+
+        client = MexcClient(settings["mexc_api_key"], settings["mexc_secret_key"])
+        try:
+            ticker = await asyncio.wait_for(
+                client.exchange.fetch_ticker(symbol), timeout=10
+            )
+            center = float(ticker.get("last") or 0)
+            if center <= 0:
+                return {"error": "تعذّر جلب السعر الحالي"}
+
+            balance = await client.exchange.fetch_balance()
+            usdt_bal = float(balance.get("total", {}).get("USDT", 0) or 0)
+            if usdt_bal < size:
+                return {"error": f"رصيد غير كافٍ — متاح: ${usdt_bal:.2f}"}
+
+            take_profit = round(center * (1 + tp_pct / 100), 8) if tp_pct else None
+            stop_loss   = round(center * (1 - sl_pct / 100), 8) if sl_pct else None
+
+            grid_levels = calculate_grid_levels(
+                center_price=center,
+                upper_pct=upper_pct,
+                lower_pct=lower_pct,
+                steps=steps,
+            )
+            result = await place_grid_orders(
+                exchange=client.exchange,
+                symbol=symbol,
+                grid=grid_levels,
+                order_size_usdt=size,
+                initial=True,
+            )
+
+            if not result["buy_orders"] and not result["sell_orders"]:
+                err = result["errors"][0] if result["errors"] else "خطأ غير معروف"
+                return {"error": f"فشل تنفيذ الشبكة: {err}"}
+
+            grid = {
+                "user_id":         user_id,
+                "symbol":          symbol,
+                "center":          center,
+                "upper":           grid_levels["upper"],
+                "lower":           grid_levels["lower"],
+                "upper_pct":       upper_pct,
+                "lower_pct":       lower_pct,
+                "steps":           steps,
+                "step_pct":        grid_levels["step_pct"],
+                "order_size_usdt": size,
+                "take_profit":     take_profit,
+                "stop_loss":       stop_loss,
+                "buy_orders":      result["buy_orders"],
+                "sell_orders":     result["sell_orders"],
+                "total_trades":    0,
+                "shifts":          0,
+                "mexc_api_key":    settings["mexc_api_key"],
+                "mexc_secret_key": settings["mexc_secret_key"],
+            }
+            grid_id = await db.save_grid(grid)
+            grid["id"] = grid_id
+            await grid_monitor.add_grid(grid)
+
+            return {
+                "ok":      True,
+                "grid_id": grid_id,
+                "symbol":  symbol,
+                "center":  center,
+                "upper":   grid_levels["upper"],
+                "lower":   grid_levels["lower"],
+                "step_pct": round(grid_levels["step_pct"], 4),
+                "buys":    len(result["buy_orders"]),
+                "sells":   len(result["sell_orders"]),
+                "errors":  len(result["errors"]),
+            }
+        finally:
+            await client.close()
+
+    try:
+        result = _run(_create())
+        if "error" in result:
+            return jsonify(result), 400
+        return jsonify(result)
+    except Exception as e:
+        logger.exception("create_grid error")
         return jsonify({"error": str(e)}), 500
 
 

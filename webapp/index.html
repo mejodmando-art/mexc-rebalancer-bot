@@ -154,14 +154,85 @@
   </div>
 </div>
 
+<!-- Modal: قائمة الشبكات -->
 <div class="modal-overlay" id="modal-grid">
   <div class="modal">
     <div class="modal-header"><span>🔲 Grid Bot</span><button class="modal-close" onclick="closeModal('modal-grid')">✕</button></div>
-    <div class="modal-body">
+    <div class="modal-body" style="padding:0">
       <div class="grid-list" id="grid-list"></div>
-      <button class="btn btn-primary" style="width:100%;margin-top:12px;flex-direction:row;gap:8px;padding:12px" onclick="openTelegramBot('grid_new')">➕ شبكة جديدة (من البوت)</button>
     </div>
-    <div class="modal-footer"><button class="btn-ghost" onclick="closeModal('modal-grid')">✖ إغلاق</button></div>
+    <div class="modal-footer" style="gap:8px">
+      <button class="btn btn-primary" style="flex:1;flex-direction:row;gap:6px;padding:10px" onclick="openGridCreate()">➕ شبكة جديدة</button>
+      <button class="btn-ghost" onclick="closeModal('modal-grid')">✖ إغلاق</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: إنشاء شبكة جديدة -->
+<div class="modal-overlay" id="modal-grid-create">
+  <div class="modal">
+    <div class="modal-header"><span>➕ شبكة جديدة</span><button class="modal-close" onclick="closeModal('modal-grid-create')">✕</button></div>
+    <div class="modal-body">
+      <div style="display:flex;flex-direction:column;gap:12px">
+
+        <div>
+          <label style="font-size:.8rem;color:var(--text-muted);display:block;margin-bottom:4px">رمز العملة (مثال: BTC أو BTCUSDT)</label>
+          <input id="gc-symbol" type="text" placeholder="BTC" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:.95rem;box-sizing:border-box">
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div>
+            <label style="font-size:.8rem;color:var(--text-muted);display:block;margin-bottom:4px">📈 الحد العلوي %</label>
+            <input id="gc-upper" type="number" value="5" min="1" max="100" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:.95rem;box-sizing:border-box">
+          </div>
+          <div>
+            <label style="font-size:.8rem;color:var(--text-muted);display:block;margin-bottom:4px">📉 الحد السفلي %</label>
+            <input id="gc-lower" type="number" value="5" min="1" max="100" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:.95rem;box-sizing:border-box">
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div>
+            <label style="font-size:.8rem;color:var(--text-muted);display:block;margin-bottom:4px">🔢 عدد الخطوات</label>
+            <input id="gc-steps" type="number" value="10" min="2" max="50" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:.95rem;box-sizing:border-box">
+          </div>
+          <div>
+            <label style="font-size:.8rem;color:var(--text-muted);display:block;margin-bottom:4px">💵 الحجم (USDT)</label>
+            <input id="gc-size" type="number" value="50" min="5" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:.95rem;box-sizing:border-box">
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div>
+            <label style="font-size:.8rem;color:var(--text-muted);display:block;margin-bottom:4px">🎯 Take Profit % (اختياري)</label>
+            <input id="gc-tp" type="number" placeholder="مثال: 10" min="0" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:.95rem;box-sizing:border-box">
+          </div>
+          <div>
+            <label style="font-size:.8rem;color:var(--text-muted);display:block;margin-bottom:4px">🛑 Stop Loss % (اختياري)</label>
+            <input id="gc-sl" type="number" placeholder="مثال: 8" min="0" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:.95rem;box-sizing:border-box">
+          </div>
+        </div>
+
+        <div id="gc-preview" style="display:none;background:var(--card);border-radius:8px;padding:12px;font-size:.82rem;color:var(--text-muted);line-height:1.7"></div>
+        <div id="gc-error" style="display:none;color:var(--red);font-size:.85rem;padding:8px;background:rgba(239,68,68,.1);border-radius:8px"></div>
+      </div>
+    </div>
+    <div class="modal-footer" style="gap:8px">
+      <button id="gc-btn" class="btn btn-primary" style="flex:1;flex-direction:row;gap:6px;padding:10px" onclick="submitGridCreate()">🚀 إنشاء الشبكة</button>
+      <button class="btn-ghost" onclick="closeModal('modal-grid-create')">✖ إلغاء</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: تفاصيل شبكة -->
+<div class="modal-overlay" id="modal-grid-detail">
+  <div class="modal">
+    <div class="modal-header"><span id="gd-title">🔲 تفاصيل الشبكة</span><button class="modal-close" onclick="closeModal('modal-grid-detail')">✕</button></div>
+    <div class="modal-body" id="gd-body"></div>
+    <div class="modal-footer" style="gap:8px">
+      <button id="gd-stop-btn" class="btn btn-danger" style="flex:1;flex-direction:row;gap:6px;padding:10px">🛑 إيقاف الشبكة</button>
+      <button class="btn-ghost" onclick="closeModal('modal-grid-detail')">✖ إغلاق</button>
+    </div>
   </div>
 </div>
 
