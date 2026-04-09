@@ -96,18 +96,9 @@ def health():
 def get_config():
     """
     يعطي الـ Web App مفتاح الـ API عند التحميل.
-    مقيّد بـ Referer من t.me أو نفس الـ origin، ويُعيد مفتاحاً فارغاً
-    لأي طلب خارجي حتى لا يُكشف السر لغير الواجهة.
+    الصفحة على نفس الخادم فالمفتاح يُعاد دائماً.
     """
-    referer = request.headers.get("Referer", "")
-    origin  = request.headers.get("Origin", "")
-    # السماح فقط للطلبات القادمة من Telegram WebApp أو نفس الخادم
-    allowed = (
-        "t.me" in referer or "telegram.org" in referer
-        or "t.me" in origin or "telegram.org" in origin
-        or referer == ""  # طلب مباشر من نفس الصفحة (same-origin)
-    )
-    return jsonify({"api_key": _WEB_SECRET if allowed else ""})
+    return jsonify({"api_key": _WEB_SECRET})
 
 
 @app.route("/api/portfolio")
