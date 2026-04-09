@@ -353,12 +353,12 @@ async def main():
         @flask_app.route(webhook_path, methods=["POST"])
         def telegram_webhook():
             from flask import request as flask_request
-            import json
+            from bot.api_server import _bot_loop as _loop
             data = flask_request.get_json(force=True, silent=True)
-            if data:
+            if data and _loop is not None:
                 update = TGUpdate.de_json(data, tg_app.bot)
                 asyncio.run_coroutine_threadsafe(
-                    tg_app.process_update(update), asyncio.get_event_loop()
+                    tg_app.process_update(update), _loop
                 )
             return "", 200
 
