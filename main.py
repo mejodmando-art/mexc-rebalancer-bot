@@ -64,6 +64,13 @@ from bot.handlers.auto_alloc_handler import (
     auto_alloc_preview_callback,
     auto_alloc_apply_callback,
 )
+from bot.handlers.momentum_handler import (
+    momentum_callback,
+    momentum_setting_input,
+    momentum_cancel,
+    run_momentum_scan,
+    SET_SIZE, SET_MAX, SET_LOSS,
+)
 from bot.handlers.emergency_handler import (
     emergency_menu_callback,
     emergency_pick_coin_callback,
@@ -161,12 +168,25 @@ def build_app() -> Application:
         conversation_timeout=300,
     )
 
+    momentum_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(momentum_callback, pattern="^momentum:(set_size|set_max|set_loss)$")],
+        states={
+            SET_SIZE: [MessageHandler(TEXT, momentum_setting_input)],
+            SET_MAX:  [MessageHandler(TEXT, momentum_setting_input)],
+            SET_LOSS: [MessageHandler(TEXT, momentum_setting_input)],
+        },
+        fallbacks=[CommandHandler("cancel", momentum_cancel),
+                   CallbackQueryHandler(momentum_cancel, pattern="^cancel$")],
+        conversation_timeout=300,
+    )
+
     app.add_handler(api_conv)
     app.add_handler(threshold_conv)
     app.add_handler(interval_conv)
     app.add_handler(alloc_conv)
     app.add_handler(create_portfolio_conv)
     app.add_handler(edit_capital_conv)
+    app.add_handler(momentum_conv)
     app.add_handler(build_grid_conv())
 
     # ── Commands ───────────────────────────────────────────────────────────────
@@ -245,6 +265,9 @@ def build_app() -> Application:
         _text_router,
     ))
 
+    # ── Momentum ───────────────────────────────────────────────────────────────
+    app.add_handler(CallbackQueryHandler(momentum_callback, pattern="^momentum:"))
+
     # ── Emergency Sell ─────────────────────────────────────────────────────────
     app.add_handler(CallbackQueryHandler(emergency_menu_callback,              pattern="^emergency:menu$"))
     app.add_handler(CallbackQueryHandler(emergency_pick_coin_callback,         pattern="^emergency:pick_coin$"))
@@ -276,6 +299,16 @@ async def main():
         seconds=30,
         args=[tg_app],
         id="grid_monitor",
+        replace_existing=True,
+    )
+
+    # Momentum scan job
+    scheduler.add_job(
+        run_momentum_scan,
+        trigger="interval",
+        minutes=10,
+        args=[tg_app],
+        id="momentum_scan",
         replace_existing=True,
     )
 

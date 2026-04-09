@@ -231,9 +231,10 @@ def portfolio_actions_kb(
         InlineKeyboardButton("🤖  توزيع ذكي",     callback_data=f"auto_alloc_menu:{portfolio_id}"),
     ])
 
-    # ── Grid Bot ──
+    # ── Grid Bot + Momentum ──
     buttons.append([
-        InlineKeyboardButton("🔲  Grid Bot", callback_data="grid:menu"),
+        InlineKeyboardButton("🔲  Grid Bot",  callback_data="grid:menu"),
+        InlineKeyboardButton("⚡  Momentum",  callback_data="momentum:menu"),
     ])
 
     # ── رأس المال ──
