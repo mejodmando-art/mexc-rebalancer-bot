@@ -27,7 +27,8 @@ from bot.rebalancer import calculate_trades
 
 logger = logging.getLogger(__name__)
 
-app = Flask(__name__, static_folder=None)
+_WEBAPP_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "webapp")
+app = Flask(__name__, static_folder=_WEBAPP_DIR, static_url_path="/webapp")
 
 # ── Secret key للحماية ────────────────────────────────────────────────────────
 _WEB_SECRET = os.environ.get("WEB_APP_SECRET", "").strip()
@@ -402,13 +403,11 @@ def get_grids():
 
 
 # ── Static files (webapp/) ────────────────────────────────────────────────────
-_WEBAPP_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "webapp")
+# Flask serves webapp/ at /webapp/* automatically via static_folder above.
+# These routes handle the root and /webapp/ index redirects.
 
 @app.route("/")
 @app.route("/webapp/")
+@app.route("/webapp")
 def webapp_index():
     return send_from_directory(_WEBAPP_DIR, "index.html")
-
-@app.route("/webapp/<path:filename>")
-def webapp_static(filename):
-    return send_from_directory(_WEBAPP_DIR, filename)
