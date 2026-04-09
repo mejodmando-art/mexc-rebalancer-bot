@@ -653,6 +653,67 @@ def edit_grid_order(grid_id):
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/grids/<int:grid_id>/order/cancel", methods=["POST"])
+@require_auth
+def cancel_grid_order(grid_id):
+    """إلغاء أمر مفتوح من الشارت. Body: { side, price }"""
+    user_id = _get_user_id()
+    body    = request.get_json(silent=True) or {}
+    side    = body.get("side", "")
+    price   = float(body.get("price", 0))
+
+    if side not in ("buy", "sell") or price <= 0:
+        return jsonify({"error": "بيانات غير صحيحة"}), 400
+
+    async def _cancel():
+        from bot.grid.monitor import grid_monitor
+        g = grid_monitor.active_grids.get(grid_id)
+        if not g:
+            return {"error": "الشبكة غير موجودة"}
+        if g.get("user_id") and g["user_id"] != user_id:
+            return {"error": "غير مصرح"}
+
+        settings = await db.get_settings(user_id)
+        if not settings or not settings.get("mexc_api_key"):
+            return {"error": "MEXC API غير مربوط"}
+
+        from bot.mexc_client import MexcClient
+        client = MexcClient(settings["mexc_api_key"], settings["mexc_secret_key"])
+        try:
+            order_list = g.get(f"{side}_orders", [])
+            target = None
+            for o in order_list:
+                if abs(o["price"] - price) / price < 0.001 and o.get("status") == "open":
+                    target = o
+                    break
+
+            if not target:
+                return {"error": "الأمر غير موجود"}
+
+            oid = target.get("order_id") or target.get("id")
+            if oid:
+                try:
+                    await client.exchange.cancel_order(str(oid), g["symbol"])
+                except Exception:
+                    pass
+
+            # إزالة من القائمة
+            order_list.remove(target)
+            await db.update_grid(g)
+            return {"ok": True}
+        finally:
+            await client.close()
+
+    try:
+        result = _run(_cancel())
+        if "error" in result:
+            return jsonify(result), 400
+        return jsonify(result)
+    except Exception as e:
+        logger.exception("cancel_grid_order error")
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/grids/<int:grid_id>/stop", methods=["POST"])
 @require_auth
 def stop_grid(grid_id):

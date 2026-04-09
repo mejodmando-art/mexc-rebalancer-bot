@@ -61,8 +61,11 @@ body {
 #drag-confirm .dc-prices { font-size:.83rem;font-family:monospace;margin-bottom:10px;line-height:1.6; }
 #drag-confirm .dc-btns { display:flex;gap:8px; }
 #drag-confirm button { flex:1;padding:7px;border-radius:7px;border:none;cursor:pointer;font-size:.8rem;font-weight:600; }
-.dc-ok { background:#3B82F6;color:#fff; }
+.dc-ok     { background:#22C55E;color:#fff; }
+.dc-edit   { background:#3B82F6;color:#fff; }
+.dc-del    { background:#EF4444;color:#fff; }
 .dc-cancel { background:rgba(255,255,255,.08);color:#94A3B8; }
+#drag-confirm .dc-btns { display:flex;flex-direction:column;gap:6px; }
 .orders-panel { flex-shrink:0;max-height:140px;overflow-y:auto;border-top:1px solid var(--border);background:var(--card); }
 .orders-title { padding:5px 12px;font-size:.74rem;font-weight:600;color:var(--text-muted);border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--card); }
 .order-row { display:flex;justify-content:space-between;align-items:center;padding:5px 12px;font-size:.76rem;border-bottom:1px solid rgba(255,255,255,.03); }
@@ -102,10 +105,12 @@ body {
   <div class="overlay" id="overlay">⏳ جاري التحميل...</div>
   <div id="drag-tooltip"></div>
   <div id="drag-confirm">
-    <div class="dc-title" id="dc-title">تعديل أمر</div>
+    <div class="dc-title" id="dc-title">أمر شراء</div>
     <div class="dc-prices" id="dc-prices"></div>
     <div class="dc-btns">
-      <button class="dc-ok" id="dc-ok">✅ تأكيد</button>
+      <button class="dc-ok"     id="dc-ok">✅ تأكيد التعديل</button>
+      <button class="dc-edit"   id="dc-edit">✏️ تعديل السعر</button>
+      <button class="dc-del"    id="dc-del">🗑 حذف الأمر</button>
       <button class="dc-cancel" id="dc-cancel">✖ إلغاء</button>
     </div>
   </div>
@@ -401,7 +406,7 @@ function startCountdown() {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// DRAG TO EDIT — سحب احترافي
+// DRAG TO EDIT
 // ══════════════════════════════════════════════════════════════════════════════
 let _drag = {
   active:     false,
@@ -463,6 +468,12 @@ function _onStart(clientX, clientY) {
   _drag.startY    = clientY;
   document.getElementById('chart').style.cursor = 'ns-resize';
   _hideConfirm();
+
+  // ── تجميد الشارت: إيقاف scroll وzoom طول السحب ──────────────────
+  _chart.applyOptions({
+    handleScroll: false,
+    handleScale:  false,
+  });
 }
 
 function _onMove(clientX, clientY) {
@@ -508,20 +519,33 @@ function _onEnd() {
   document.getElementById('chart').style.cursor = '';
   _hideTooltip();
 
-  const diff = Math.abs(_drag.curPrice - _drag.origPrice) / _drag.origPrice;
-  if (diff < 0.0005) { _drag.line = null; return; }  // حركة صغيرة جداً → تجاهل
+  // ── إعادة تفعيل الشارت ───────────────────────────────────────────
+  _chart.applyOptions({
+    handleScroll: true,
+    handleScale:  true,
+  });
 
-  _showConfirm();
+  const diff = Math.abs(_drag.curPrice - _drag.origPrice) / _drag.origPrice;
+  // إظهار الـ menu دائماً عند الإفلات (حتى بدون حركة كبيرة)
+  _showConfirm(diff >= 0.0005);
 }
 
-function _showConfirm() {
+function _showConfirm(moved) {
   const d    = _drag.data;
   const side = d.type==='buy' ? '🟢 شراء' : '🔴 بيع';
   const fmt  = p => Number(p).toPrecision(6);
-  document.getElementById('dc-title').textContent  = `تعديل أمر ${side}`;
-  document.getElementById('dc-prices').innerHTML   =
-    `من: <span style="color:#94A3B8">$${fmt(_drag.origPrice)}</span><br>` +
-    `إلى: <span style="color:${d.type==='buy'?'#22C55E':'#EF4444'};font-weight:700">$${fmt(_drag.curPrice)}</span>`;
+  document.getElementById('dc-title').textContent = `${side}  —  $${fmt(_drag.origPrice)}`;
+
+  if (moved) {
+    document.getElementById('dc-prices').innerHTML =
+      `السعر الجديد: <span style="color:${d.type==='buy'?'#22C55E':'#EF4444'};font-weight:700">$${fmt(_drag.curPrice)}</span>`;
+    document.getElementById('dc-ok').style.display   = 'block';
+    document.getElementById('dc-edit').style.display = 'none';
+  } else {
+    document.getElementById('dc-prices').innerHTML = '';
+    document.getElementById('dc-ok').style.display   = 'none';
+    document.getElementById('dc-edit').style.display = 'block';
+  }
   _confirm.style.display = 'block';
 }
 
@@ -532,9 +556,43 @@ document.getElementById('dc-ok').addEventListener('click', async () => {
   await _applyEdit(_drag.data, _drag.origPrice, _drag.curPrice);
 });
 
+document.getElementById('dc-edit').addEventListener('click', () => {
+  _hideConfirm();
+  // فتح input لإدخال سعر يدوي
+  const fmt = p => Number(p).toPrecision(6);
+  const val = prompt(`أدخل السعر الجديد لأمر ${_drag.data.type==='buy'?'الشراء':'البيع'}:`, fmt(_drag.origPrice));
+  if (!val) return;
+  const newP = parseFloat(val);
+  if (!newP || newP <= 0) { alert('سعر غير صحيح'); return; }
+  _drag.curPrice = newP;
+  _drag.data.price = newP;
+  drawLines(_lastLines.map(l =>
+    (l.type===_drag.data.type && Math.abs(l.price-_drag.origPrice)/_drag.origPrice < 0.001)
+      ? {...l, price: newP} : l
+  ), _lastPrice);
+  _applyEdit(_drag.data, _drag.origPrice, newP);
+});
+
+document.getElementById('dc-del').addEventListener('click', async () => {
+  _hideConfirm();
+  const d = _drag.data;
+  const side = d.type==='buy' ? 'شراء' : 'بيع';
+  if (!confirm(`حذف أمر ${side} بسعر $${Number(d.price).toPrecision(6)}؟`)) return;
+  await _configReady;
+  try {
+    const res = await fetch(`${BASE_URL}/api/grids/${GRID_ID}/order/cancel`, {
+      method: 'POST',
+      headers: apiHeaders(),
+      body: JSON.stringify({ side: d.type, price: _drag.origPrice }),
+    });
+    const data = await res.json();
+    if (data.ok) { loadChart(); }
+    else { alert('❌ فشل الحذف: ' + (data.error||'خطأ')); }
+  } catch(e) { alert('❌ خطأ في الاتصال'); }
+});
+
 document.getElementById('dc-cancel').addEventListener('click', () => {
   _hideConfirm();
-  // تراجع: إعادة رسم الخط بسعره الأصلي
   _drag.data.price = _drag.origPrice;
   drawLines(_lastLines, _lastPrice);
   _drag.line = null;
@@ -571,6 +629,8 @@ _chartEl.addEventListener('mousedown', e => {
   if (pl) {
     e.stopPropagation();
     e.preventDefault();
+    // تجميد فوري قبل _onStart
+    _chart.applyOptions({ handleScroll: false, handleScale: false });
   }
   _onStart(e.clientX, e.clientY);
 });
@@ -579,7 +639,11 @@ _chartEl.addEventListener('mouseup',    () => _onEnd());
 _chartEl.addEventListener('mouseleave', () => { if (_drag.active) _onEnd(); _hideTooltip(); });
 
 _chartEl.addEventListener('touchstart', e => {
-  const t = e.touches[0];
+  const t  = e.touches[0];
+  const pl = _findNearestLine(t.clientY);
+  if (pl) {
+    _chart.applyOptions({ handleScroll: false, handleScale: false });
+  }
   _onStart(t.clientX, t.clientY);
 }, { passive: true });
 
