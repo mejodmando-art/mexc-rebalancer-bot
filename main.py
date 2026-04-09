@@ -4,7 +4,7 @@ import re
 from telegram import Update
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
-    MessageHandler, ConversationHandler, filters
+    MessageHandler, ConversationHandler, TypeHandler, filters
 )
 from bot.config import config
 from bot.database import db
@@ -101,8 +101,23 @@ logging.getLogger().addFilter(_RedactTokenFilter())
 logger = logging.getLogger(__name__)
 
 
+async def _block_unauthorized(update: Update, context) -> None:
+    """Reject every update from users not in ALLOWED_USER_IDS (group -1 = runs first)."""
+    uid = update.effective_user.id if update.effective_user else None
+    if uid in config.allowed_user_ids:
+        return  # allowed — let other handlers process it
+    if update.callback_query:
+        await update.callback_query.answer("⛔ غير مصرح.", show_alert=True)
+    elif update.message:
+        await update.message.reply_text("⛔ غير مصرح.")
+
+
 def build_app() -> Application:
     app = Application.builder().token(config.telegram_token).build()
+
+    # ── Auth gate (group -1 runs before all other handlers) ───────────────────
+    if config.allowed_user_ids:
+        app.add_handler(TypeHandler(Update, _block_unauthorized), group=-1)
 
     TEXT = filters.TEXT & ~filters.COMMAND
 

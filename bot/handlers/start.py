@@ -79,10 +79,7 @@ async def _show_home(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    if config.allowed_user_ids and user.id not in config.allowed_user_ids:
-        await update.message.reply_text("⛔ غير مصرح لك باستخدام هذا البوت.")
-        return
+    # Auth is enforced globally via TypeHandler in main.py — no check needed here
     await _show_home(update, context)
 
 

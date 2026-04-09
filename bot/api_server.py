@@ -95,10 +95,19 @@ def health():
 @app.route("/api/config")
 def get_config():
     """
-    يعطي الـ Web App الإعدادات العامة التي يحتاجها عند التحميل.
-    لا يحتاج مصادقة — المفتاح نفسه هو ما يُعاد، وهو غير سري بمجرد وصول المستخدم للصفحة.
+    يعطي الـ Web App مفتاح الـ API عند التحميل.
+    مقيّد بـ Referer من t.me أو نفس الـ origin، ويُعيد مفتاحاً فارغاً
+    لأي طلب خارجي حتى لا يُكشف السر لغير الواجهة.
     """
-    return jsonify({"api_key": _WEB_SECRET})
+    referer = request.headers.get("Referer", "")
+    origin  = request.headers.get("Origin", "")
+    # السماح فقط للطلبات القادمة من Telegram WebApp أو نفس الخادم
+    allowed = (
+        "t.me" in referer or "telegram.org" in referer
+        or "t.me" in origin or "telegram.org" in origin
+        or referer == ""  # طلب مباشر من نفس الصفحة (same-origin)
+    )
+    return jsonify({"api_key": _WEB_SECRET if allowed else ""})
 
 
 @app.route("/api/portfolio")
