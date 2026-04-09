@@ -111,6 +111,7 @@ async def _auth_gate(update: Update, context) -> None:
     if not config.allowed_user_ids:
         return  # مفتوح للكل
     uid = update.effective_user.id if update.effective_user else None
+    logger.info("AUTH: uid=%s allowed=%s", uid, config.allowed_user_ids)
     if uid in config.allowed_user_ids:
         return  # مصرح له — كمّل
     # غير مصرح — رد وأوقف
