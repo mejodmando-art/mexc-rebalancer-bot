@@ -183,6 +183,13 @@ function initChart() {
   new ResizeObserver(() => {
     _chart.applyOptions({ width: container.clientWidth, height: container.clientHeight });
   }).observe(container);
+
+  // عند تحريك المستخدم: حدّث الـ range المحفوظ
+  _chart.timeScale().subscribeVisibleTimeRangeChange((range) => {
+    if (range && !_drag.active) {
+      _lockedRange = range;
+    }
+  });
 }
 
 // ── Draw order lines ──────────────────────────────────────────────────────────
@@ -285,7 +292,13 @@ async function loadChart() {
     const wasEmpty = !_chart.timeScale().getVisibleRange();
     _candleSeries.setData(data.candles);
     // تحريك للنهاية عند أول تحميل فقط
-    if (wasEmpty) _chart.timeScale().scrollToRealTime();
+    if (wasEmpty) {
+      _chart.timeScale().scrollToRealTime();
+      // احفظ الـ range بعد لحظة قصيرة
+      setTimeout(() => {
+        _lockedRange = _chart.timeScale().getVisibleRange();
+      }, 300);
+    }
     drawLines(data.lines, data.current_price);
     renderOrders(data.lines);
     // لا نحرك الشارت تلقائياً — المستخدم يتحكم بالموضع
@@ -384,7 +397,13 @@ function startPriceFeed(symbol) {
         const k = d.k||d;
         if (k) {
           _currentCandle = { time:Math.floor((k.t||k.T||Date.now())/1000), open:parseFloat(k.o||k.O||0), high:parseFloat(k.h||k.H||0), low:parseFloat(k.l||k.L||0), close:parseFloat(k.c||k.C||0) };
-          if (_currentCandle.open > 0) _candleSeries.update(_currentCandle);
+          if (_currentCandle.open > 0) {
+            _candleSeries.update(_currentCandle);
+            // إعادة تثبيت الـ range بعد الـ update
+            if (_lockedRange) {
+              _chart.timeScale().setVisibleRange(_lockedRange);
+            }
+          }
         }
       }
     } catch(err) {}
@@ -425,24 +444,28 @@ const _confirm = document.getElementById('drag-confirm');
 
 // إيجاد أقرب خط أمر مفتوح لإحداثية Y
 function _findNearestLine(clientY) {
-  const rect  = document.getElementById('chart').getBoundingClientRect();
-  const y     = clientY - rect.top;
-  const price = _candleSeries.coordinateToPrice(y);
-  if (!price) return null;
+  const rect = document.getElementById('chart').getBoundingClientRect();
+  const y    = clientY - rect.top;
 
+  // قارن بالـ pixel مباشرة — أدق من مقارنة الأسعار
   let best = null, bestDist = Infinity;
   for (const pl of _orderLines) {
     const d = pl._data;
     if (!d || (d.type!=='buy' && d.type!=='sell') || d.filled) continue;
-    const dist = Math.abs(d.price - price) / price;
-    if (dist < 0.012 && dist < bestDist) { bestDist = dist; best = pl; }
+    // تحويل سعر الخط إلى إحداثية Y
+    const lineY = _candleSeries.priceToCoordinate(d.price);
+    if (lineY === null || lineY === undefined) continue;
+    const dist = Math.abs(lineY - y);
+    // نطاق 28 pixel للإمساك (مناسب للموبايل)
+    if (dist < 28 && dist < bestDist) { bestDist = dist; best = pl; }
   }
   return best;
 }
 
 function _priceAtY(clientY) {
   const rect = document.getElementById('chart').getBoundingClientRect();
-  return _candleSeries.coordinateToPrice(clientY - rect.top);
+  const y    = clientY - rect.top;
+  return _candleSeries.coordinateToPrice(y);
 }
 
 function _showTooltip(clientX, clientY, text, color) {
