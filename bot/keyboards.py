@@ -179,6 +179,12 @@ def portfolios_list_kb(portfolios: List[Dict], active_id: int) -> InlineKeyboard
     return InlineKeyboardMarkup(buttons)
 
 
+WEBAPP_URL = "https://mohamedrade-mexcrebalance-xxxxxxxx.gitpod.io/webapp/"
+"""
+عنوان الـ Web App — يُحدَّث بعنوان الـ preview الفعلي.
+"""
+
+
 def portfolio_actions_kb(
     portfolio_id: int,
     is_active: bool,
@@ -188,7 +194,14 @@ def portfolio_actions_kb(
     threshold: float = 5.0,
     auto_interval: int = 24,
 ) -> InlineKeyboardMarkup:
+    from telegram import WebAppInfo
     buttons = []
+
+    # ── زر فتح الواجهة الجديدة ──
+    buttons.append([InlineKeyboardButton(
+        "🌐  فتح الواجهة المرئية",
+        web_app=WebAppInfo(url=WEBAPP_URL)
+    )])
 
     # ── تفعيل المحفظة إذا لم تكن نشطة ──
     if not is_active:
