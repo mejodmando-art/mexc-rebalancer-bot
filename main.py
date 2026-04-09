@@ -274,6 +274,29 @@ async def main():
         id="grid_monitor",
         replace_existing=True,
     )
+
+    # ── Flask API server (runs in a background thread) ──────────────────────
+    import threading
+    import os
+    from bot.api_server import app as flask_app, set_bot_loop
+
+    set_bot_loop(asyncio.get_event_loop())
+    flask_port = int(os.environ.get("API_PORT", 8080))
+
+    flask_thread = threading.Thread(
+        target=lambda: flask_app.run(
+            host="0.0.0.0",
+            port=flask_port,
+            debug=False,
+            use_reloader=False,
+        ),
+        daemon=True,
+        name="flask-api",
+    )
+    flask_thread.start()
+    logger.info("🌐 Flask API started on port %d", flask_port)
+    # ────────────────────────────────────────────────────────────────────────
+
     logger.info("🤖 Bot started polling...")
     async with app:
         await app.start()
