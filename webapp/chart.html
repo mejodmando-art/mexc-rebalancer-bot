@@ -160,6 +160,11 @@
   <button class="back-btn" onclick="history.back()">◀</button>
   <span class="chart-title" id="chart-title">Grid Chart</span>
   <span class="chart-price" id="chart-price">—</span>
+  <span id="candle-countdown" style="
+    font-size:.72rem;color:#FBBF24;font-family:monospace;
+    background:rgba(251,191,36,.12);padding:2px 7px;border-radius:6px;
+    min-width:48px;text-align:center;display:none;
+  ">—</span>
   <button class="icon-btn" id="btn-refresh" onclick="loadChart()" title="تحديث">↻</button>
 </div>
 
@@ -217,6 +222,10 @@ let   _apiKey  = '';
 let   _chart, _candleSeries, _priceLine, _orderLines = [];
 let   _refreshTimer = null;
 let   _lastPrice = 0;
+let   _currentCandle = null;   // الشمعة الحالية (تتحدث لحظياً)
+let   _wsPrice = null;         // WebSocket للسعر اللحظي
+let   _countdownTimer = null;  // مؤقت العداد التنازلي
+let   _symbol = '';            // رمز العملة الحالي
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 const _configReady = fetch(BASE_URL + '/api/config')
@@ -367,6 +376,11 @@ async function loadChart() {
 
     // Update header
     document.getElementById('chart-title').textContent = `🔲 ${data.symbol}`;
+    // حفظ الرمز وتشغيل WebSocket للسعر اللحظي
+    if (_symbol !== data.symbol) {
+      _symbol = data.symbol;
+      startPriceFeed(_symbol);
+    }
     updatePriceDisplay(data.current_price);
 
     // Update stats
@@ -411,6 +425,9 @@ document.querySelectorAll('.tf-btn').forEach(btn => {
     btn.classList.add('active');
     TF = btn.dataset.tf;
     loadChart();
+    startCountdown();
+    if (_wsPrice) { _wsPrice.close(); _wsPrice = null; }
+    if (_symbol) startPriceFeed(_symbol);
   });
 });
 
@@ -523,14 +540,121 @@ if (window.Telegram?.WebApp) {
   tg.setHeaderColor(theme === 'dark' ? '#0A0F1F' : '#F0F4FF');
 }
 
+// ── WebSocket: سعر لحظي من MEXC ──────────────────────────────────────────────
+function startPriceFeed(symbol) {
+  if (_wsPrice) { _wsPrice.close(); _wsPrice = null; }
+
+  // تحويل BTC/USDT → btcusdt
+  const wsSymbol = symbol.replace('/', '').toLowerCase();
+  const url = `wss://wbs.mexc.com/ws`;
+
+  _wsPrice = new WebSocket(url);
+
+  _wsPrice.onopen = () => {
+    // الاشتراك في ticker + kline للشمعة الحالية
+    _wsPrice.send(JSON.stringify({
+      method: 'SUBSCRIPTION',
+      params: [
+        `spot@public.miniTicker.v3.api@${wsSymbol}@UTC+3`,
+        `spot@public.kline.v3.api@${wsSymbol}@Min${_tfToMin(TF)}`,
+      ]
+    }));
+  };
+
+  _wsPrice.onmessage = (e) => {
+    try {
+      const msg = JSON.parse(e.data);
+      const d   = msg.d;
+      if (!d) return;
+
+      // ── ticker: سعر لحظي ──────────────────────────────────────────────────
+      if (msg.c && msg.c.includes('miniTicker')) {
+        const price = parseFloat(d.p || d.c || 0);
+        if (price > 0) {
+          updatePriceDisplay(price);
+          // تحديث خط السعر الحالي على الشارت
+          if (_priceLine) {
+            _candleSeries.removePriceLine(_priceLine);
+          }
+          _priceLine = _candleSeries.createPriceLine({
+            price, color: '#FBBF24', lineWidth: 2,
+            lineStyle: LightweightCharts.LineStyle.Solid,
+            axisLabelVisible: true,
+            title: `▶ ${price}`,
+          });
+          // تحديث الشمعة الحالية (close يتغير مع كل tick)
+          if (_currentCandle) {
+            const updated = { ..._currentCandle, close: price,
+              high: Math.max(_currentCandle.high, price),
+              low:  Math.min(_currentCandle.low,  price),
+            };
+            _currentCandle = updated;
+            _candleSeries.update(updated);
+          }
+        }
+      }
+
+      // ── kline: بيانات الشمعة الحالية ─────────────────────────────────────
+      if (msg.c && msg.c.includes('kline')) {
+        const k = d.k || d;
+        if (k) {
+          _currentCandle = {
+            time:  Math.floor((k.t || k.T || Date.now()) / 1000),
+            open:  parseFloat(k.o || k.O || 0),
+            high:  parseFloat(k.h || k.H || 0),
+            low:   parseFloat(k.l || k.L || 0),
+            close: parseFloat(k.c || k.C || 0),
+          };
+          if (_currentCandle.open > 0) {
+            _candleSeries.update(_currentCandle);
+          }
+        }
+      }
+    } catch(err) { /* تجاهل أخطاء parse */ }
+  };
+
+  _wsPrice.onerror = () => {};
+  _wsPrice.onclose = () => {
+    // إعادة الاتصال بعد 3 ثوانٍ
+    setTimeout(() => { if (_symbol) startPriceFeed(_symbol); }, 3000);
+  };
+}
+
+// تحويل timeframe إلى دقائق للـ WebSocket
+function _tfToMin(tf) {
+  const map = { '1m':1, '3m':3, '5m':5, '15m':15, '30m':30, '1h':60, '4h':240, '1d':1440 };
+  return map[tf] || 15;
+}
+
+// ── عداد تنازلي لإغلاق الشمعة ────────────────────────────────────────────────
+function startCountdown() {
+  if (_countdownTimer) clearInterval(_countdownTimer);
+  const el = document.getElementById('candle-countdown');
+  if (!el) return;
+  el.style.display = 'inline-block';
+
+  _countdownTimer = setInterval(() => {
+    const now      = Date.now();
+    const minMs    = _tfToMin(TF) * 60 * 1000;
+    const rem      = minMs - (now % minMs);   // الوقت المتبقي حتى إغلاق الشمعة
+    const remSec   = Math.floor(rem / 1000);
+    const m        = Math.floor(remSec / 60);
+    const s        = remSec % 60;
+    el.textContent = `${m}:${s.toString().padStart(2,'0')}`;
+
+    // تلوين أحمر عند آخر 10 ثوانٍ
+    el.style.color = remSec <= 10 ? '#EF4444' : '#FBBF24';
+    el.style.background = remSec <= 10 ? 'rgba(239,68,68,.15)' : 'rgba(251,191,36,.12)';
+  }, 500);
+}
+
 // ── Boot ──────────────────────────────────────────────────────────────────────
 initChart();
-// تحميل الشمعات والأوامر أول مرة
 loadChart().then(() => {
-  // بعد التحميل الأولي: ابدأ SSE للتحديثات اللحظية
   _configReady.then(startSSE);
+  // تشغيل العداد التنازلي
+  startCountdown();
 });
-// polling كـ fallback كل 30 ثانية (يغطي حالة عدم دعم SSE)
 startAutoRefresh();
 </script>
 </body>
