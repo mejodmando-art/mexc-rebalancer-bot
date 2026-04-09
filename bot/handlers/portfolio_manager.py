@@ -70,42 +70,11 @@ async def portfolios_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     )
 
 
-async def portfolio_detail_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    user_id = update.effective_user.id
-    portfolio_id = int(query.data.split(":")[1])
-
-    p = await db.get_portfolio(portfolio_id)
-    if not p or p["user_id"] != user_id:
-        await query.answer("❌ محفظة غير موجودة", show_alert=True)
-        return
-
-    active_id = await db.get_active_portfolio_id(user_id)
-    allocs    = await db.get_portfolio_allocations(portfolio_id)
-    total_pct = sum(a["target_percentage"] for a in allocs)
-
-    threshold = float(p.get("threshold") or 5.0)
-    interval  = int(p.get("auto_interval_hours") or 24)
-    auto_on   = bool(p.get("auto_enabled"))
-    capital   = float(p.get("capital_usdt") or 0.0)
-    is_active = p["id"] == active_id
-
+def _build_portfolio_detail_text(p: dict, allocs: list, capital: float,
+                                  is_active: bool, total_usdt=None) -> str:
+    """بناء نص شاشة تفاصيل المحفظة — يُستخدم مرتين (فوري + بعد MEXC)."""
+    total_pct    = sum(a["target_percentage"] for a in allocs)
     active_badge = "✅ *نشطة*" if is_active else "⭕ غير نشطة"
-
-    # ── جلب الرصيد الحي من MEXC ──────────────────────────────────────────────
-    total_usdt = None
-    settings = await db.get_settings(user_id)
-    if settings and settings.get("mexc_api_key"):
-        try:
-            from bot.mexc_client import MexcClient
-            client = MexcClient(settings["mexc_api_key"], settings["mexc_secret_key"])
-            _, total_usdt = await asyncio.wait_for(client.get_portfolio(), timeout=10)
-            await client.close()
-        except Exception:
-            total_usdt = None
-
-    # ── بناء نص الرسالة ───────────────────────────────────────────────────────
     lines = [f"📁 *{p['name']}*  {active_badge}", "━━━━━━━━━━━━━━━━━━━━━"]
     if total_usdt is not None:
         lines.append(f"🏦  الحساب:    `${total_usdt:,.2f} USDT`")
@@ -117,21 +86,58 @@ async def portfolio_detail_callback(update: Update, context: ContextTypes.DEFAUL
         lines.append(f"🪙  *{len(allocs)} عملة*{pct_warn}")
     else:
         lines.append("🪙  لا توجد عملات — اضغط *تعديل العملات*")
-    text = "\n".join(lines)
+    return "\n".join(lines)
 
-    await query.edit_message_text(
-        text,
-        parse_mode="Markdown",
-        reply_markup=portfolio_actions_kb(
-            portfolio_id=portfolio_id,
-            is_active=is_active,
-            auto_enabled=auto_on,
-            allocations=allocs,
-            capital_usdt=capital,
-            threshold=threshold,
-            auto_interval=interval,
-        )
+
+async def portfolio_detail_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id      = update.effective_user.id
+    portfolio_id = int(query.data.split(":")[1])
+
+    p = await db.get_portfolio(portfolio_id)
+    if not p or p["user_id"] != user_id:
+        await query.answer("❌ محفظة غير موجودة", show_alert=True)
+        return
+
+    active_id = await db.get_active_portfolio_id(user_id)
+    allocs    = await db.get_portfolio_allocations(portfolio_id)
+    threshold = float(p.get("threshold") or 5.0)
+    interval  = int(p.get("auto_interval_hours") or 24)
+    auto_on   = bool(p.get("auto_enabled"))
+    capital   = float(p.get("capital_usdt") or 0.0)
+    is_active = p["id"] == active_id
+
+    kb = portfolio_actions_kb(
+        portfolio_id=portfolio_id,
+        is_active=is_active,
+        auto_enabled=auto_on,
+        allocations=allocs,
+        capital_usdt=capital,
+        threshold=threshold,
+        auto_interval=interval,
     )
+
+    # ── إرسال فوري بدون رصيد MEXC ────────────────────────────────────────────
+    text_initial = _build_portfolio_detail_text(p, allocs, capital, is_active)
+    await query.edit_message_text(text_initial, parse_mode="Markdown", reply_markup=kb)
+
+    # ── جلب رصيد MEXC في الخلفية وتحديث الرسالة ─────────────────────────────
+    settings = await db.get_settings(user_id)
+    if not settings or not settings.get("mexc_api_key"):
+        return
+    try:
+        from bot.mexc_client import MexcClient
+        client = MexcClient(settings["mexc_api_key"], settings["mexc_secret_key"])
+        try:
+            _, total_usdt = await asyncio.wait_for(client.get_portfolio(), timeout=10)
+        finally:
+            await client.close()
+        text_updated = _build_portfolio_detail_text(p, allocs, capital, is_active, total_usdt)
+        if text_updated != text_initial:
+            await query.edit_message_text(text_updated, parse_mode="Markdown", reply_markup=kb)
+    except Exception:
+        pass
 
 
 async def portfolio_rebalance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
