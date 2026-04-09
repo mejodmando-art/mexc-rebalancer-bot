@@ -436,6 +436,137 @@ def get_grids():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/grids/<int:grid_id>/chart")
+@require_auth
+def get_grid_chart(grid_id):
+    """
+    بيانات الشارت لشبكة معينة:
+    - سعر الشمعات (OHLCV) من MEXC
+    - خطوط الأوامر (buy/sell/TP/SL/center)
+    - السعر الحالي
+    """
+    user_id = _get_user_id()
+
+    async def _fetch():
+        from bot.grid.monitor import grid_monitor
+        g = grid_monitor.active_grids.get(grid_id)
+        if not g:
+            return {"error": "الشبكة غير موجودة"}
+
+        settings = await db.get_settings(user_id)
+        if not settings or not settings.get("mexc_api_key"):
+            return {"error": "MEXC API غير مربوط"}
+
+        from bot.mexc_client import MexcClient
+        client = MexcClient(settings["mexc_api_key"], settings["mexc_secret_key"])
+        try:
+            symbol = g["symbol"]
+
+            # ── السعر الحالي ──────────────────────────────────────────────
+            ticker = await asyncio.wait_for(
+                client.exchange.fetch_ticker(symbol), timeout=10
+            )
+            current_price = float(ticker.get("last") or 0)
+
+            # ── شمعات OHLCV آخر 200 شمعة (15 دقيقة) ─────────────────────
+            ohlcv = await asyncio.wait_for(
+                client.exchange.fetch_ohlcv(symbol, timeframe="15m", limit=200),
+                timeout=15,
+            )
+            candles = [
+                {
+                    "time":  int(c[0] / 1000),  # Unix seconds
+                    "open":  c[1],
+                    "high":  c[2],
+                    "low":   c[3],
+                    "close": c[4],
+                    "volume": c[5],
+                }
+                for c in ohlcv
+            ]
+
+            # ── خطوط الأوامر ──────────────────────────────────────────────
+            lines = []
+
+            # خط المركز
+            lines.append({
+                "price": g["center"],
+                "color": "#94A3B8",
+                "style": "dashed",
+                "label": f"مركز ${g['center']:.6g}",
+                "type":  "center",
+            })
+
+            # أوامر الشراء
+            for o in g.get("buy_orders", []):
+                filled = o.get("status") == "filled"
+                lines.append({
+                    "price": o["price"],
+                    "color": "#22C55E" if not filled else "#16A34A",
+                    "style": "solid" if not filled else "dashed",
+                    "label": f"شراء ${o['price']:.6g}" + (" ✅" if filled else ""),
+                    "type":  "buy",
+                    "filled": filled,
+                    "qty":   o.get("qty", 0),
+                })
+
+            # أوامر البيع
+            for o in g.get("sell_orders", []):
+                filled = o.get("status") == "filled"
+                lines.append({
+                    "price": o["price"],
+                    "color": "#EF4444" if not filled else "#DC2626",
+                    "style": "solid" if not filled else "dashed",
+                    "label": f"بيع ${o['price']:.6g}" + (" ✅" if filled else ""),
+                    "type":  "sell",
+                    "filled": filled,
+                    "qty":   o.get("qty", 0),
+                })
+
+            # Take Profit
+            if g.get("take_profit"):
+                lines.append({
+                    "price": g["take_profit"],
+                    "color": "#A855F7",
+                    "style": "solid",
+                    "label": f"TP ${g['take_profit']:.6g}",
+                    "type":  "tp",
+                })
+
+            # Stop Loss
+            if g.get("stop_loss"):
+                lines.append({
+                    "price": g["stop_loss"],
+                    "color": "#F97316",
+                    "style": "solid",
+                    "label": f"SL ${g['stop_loss']:.6g}",
+                    "type":  "sl",
+                })
+
+            return {
+                "grid_id":      grid_id,
+                "symbol":       symbol,
+                "current_price": current_price,
+                "upper":        g["upper"],
+                "lower":        g["lower"],
+                "candles":      candles,
+                "lines":        lines,
+                "trades":       g.get("total_trades", 0),
+                "step_pct":     round(g.get("step_pct", 0), 4),
+            }
+        finally:
+            await client.close()
+
+    try:
+        result = _run(_fetch())
+        if "error" in result:
+            return jsonify(result), 404
+        return jsonify(result)
+    except Exception as e:
+        logger.exception("get_grid_chart error")
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/grids/<int:grid_id>/stop", methods=["POST"])
 @require_auth
 def stop_grid(grid_id):
@@ -614,3 +745,9 @@ def create_grid():
 @app.route("/webapp")
 def webapp_index():
     return send_from_directory(_WEBAPP_DIR, "index.html")
+
+
+@app.route("/webapp/chart")
+@app.route("/webapp/chart.html")
+def webapp_chart():
+    return send_from_directory(_WEBAPP_DIR, "chart.html")

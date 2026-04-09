@@ -422,15 +422,21 @@ async function loadGrids() {
       return;
     }
     el.innerHTML = _grids.map(g => `
-      <div class="grid-item" onclick="openGridDetail(${g.id})" style="cursor:pointer">
-        <div style="display:flex;align-items:center;gap:10px">
-          <div style="font-size:1.1rem;font-weight:700">${g.symbol}</div>
-          <div class="grid-status${g.active ? '' : ' stopped'}">${g.active ? '🟢 نشط' : '🔴 موقوف'}</div>
+      <div class="grid-item" style="cursor:pointer">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <div style="display:flex;align-items:center;gap:8px" onclick="openGridDetail(${g.id})">
+            <div style="font-size:1.1rem;font-weight:700">${g.symbol}</div>
+            <div class="grid-status${g.active ? '' : ' stopped'}">${g.active ? '🟢 نشط' : '🔴 موقوف'}</div>
+          </div>
+          <button onclick="openGridChart(${g.id})"
+            style="background:var(--accent,#3B82F6);color:#fff;border:none;border-radius:6px;padding:4px 10px;font-size:.75rem;cursor:pointer">
+            📈 شارت
+          </button>
         </div>
-        <div class="grid-item-info" style="margin-top:4px;font-size:.8rem;color:var(--text-muted)">
+        <div class="grid-item-info" style="margin-top:4px;font-size:.8rem;color:var(--text-muted)" onclick="openGridDetail(${g.id})">
           ${g.steps} خطوة · $${g.size} USDT · ربح/خطوة: ${g.step_pct}% · 🔄 ${g.trades} صفقة
         </div>
-        <div style="font-size:.78rem;color:var(--text-muted);margin-top:2px">
+        <div style="font-size:.78rem;color:var(--text-muted);margin-top:2px" onclick="openGridDetail(${g.id})">
           📈 +${g.upper_pct}%  📉 -${g.lower_pct}%
           ${g.take_profit ? ` · 🎯 $${g.take_profit}` : ''}
           ${g.stop_loss   ? ` · 🛑 $${g.stop_loss}`   : ''}
@@ -439,6 +445,11 @@ async function loadGrids() {
   } catch(e) {
     el.innerHTML = `<p style="color:var(--red);text-align:center;padding:16px">❌ ${e.message}</p>`;
   }
+}
+
+function openGridChart(gridId) {
+  // فتح صفحة الشارت في نفس النافذة
+  window.location.href = `/webapp/chart?id=${gridId}`;
 }
 
 function openGridDetail(gridId) {

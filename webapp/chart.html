@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Grid Chart</title>
+<script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+<link rel="stylesheet" href="/webapp/style.css">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* ── Header ── */
+  .chart-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    background: var(--card);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .chart-header .back-btn {
+    background: none;
+    border: none;
+    color: var(--text);
+    font-size: 1.2rem;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 6px;
+  }
+  .chart-header .back-btn:hover { background: var(--border); }
+  .chart-title  { font-weight: 700; font-size: 1rem; flex: 1; }
+  .chart-price  { font-size: .9rem; font-weight: 600; }
+  .chart-price.up   { color: var(--green); }
+  .chart-price.down { color: var(--red); }
+
+  /* ── Stats bar ── */
+  .stats-bar {
+    display: flex;
+    gap: 16px;
+    padding: 8px 14px;
+    background: var(--card);
+    border-bottom: 1px solid var(--border);
+    font-size: .75rem;
+    color: var(--text-muted);
+    flex-shrink: 0;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+  .stat { display: flex; flex-direction: column; gap: 2px; }
+  .stat strong { color: var(--text); font-size: .82rem; }
+
+  /* ── Timeframe tabs ── */
+  .tf-bar {
+    display: flex;
+    gap: 4px;
+    padding: 6px 14px;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .tf-btn {
+    padding: 4px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: none;
+    color: var(--text-muted);
+    font-size: .78rem;
+    cursor: pointer;
+  }
+  .tf-btn.active {
+    background: var(--accent, #3B82F6);
+    color: #fff;
+    border-color: transparent;
+  }
+
+  /* ── Chart container ── */
+  #chart-container {
+    flex: 1;
+    position: relative;
+    min-height: 0;
+  }
+  #chart { width: 100%; height: 100%; }
+
+  /* ── Legend overlay ── */
+  .legend {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    background: rgba(0,0,0,.55);
+    backdrop-filter: blur(4px);
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: .72rem;
+    line-height: 1.8;
+    pointer-events: none;
+    z-index: 10;
+  }
+  .legend-row { display: flex; align-items: center; gap: 6px; }
+  .legend-dot { width: 10px; height: 3px; border-radius: 2px; flex-shrink: 0; }
+
+  /* ── Orders panel ── */
+  .orders-panel {
+    flex-shrink: 0;
+    max-height: 160px;
+    overflow-y: auto;
+    border-top: 1px solid var(--border);
+    background: var(--card);
+  }
+  .orders-title {
+    padding: 6px 14px;
+    font-size: .78rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    background: var(--card);
+  }
+  .order-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 5px 14px;
+    font-size: .78rem;
+    border-bottom: 1px solid rgba(255,255,255,.04);
+  }
+  .order-row .side-buy  { color: var(--green); font-weight: 600; }
+  .order-row .side-sell { color: var(--red);   font-weight: 600; }
+  .order-row .filled    { opacity: .5; text-decoration: line-through; }
+
+  /* ── Loading / error ── */
+  .overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: .9rem;
+    color: var(--text-muted);
+    background: var(--bg);
+    z-index: 20;
+  }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="chart-header">
+  <button class="back-btn" onclick="history.back()">◀</button>
+  <span class="chart-title" id="chart-title">Grid Chart</span>
+  <span class="chart-price" id="chart-price">—</span>
+  <button class="icon-btn" id="btn-refresh" onclick="loadChart()" title="تحديث">↻</button>
+</div>
+
+<!-- Stats -->
+<div class="stats-bar" id="stats-bar">
+  <div class="stat"><span>الخطوات</span><strong id="s-steps">—</strong></div>
+  <div class="stat"><span>ربح/خطوة</span><strong id="s-step-pct">—</strong></div>
+  <div class="stat"><span>الصفقات</span><strong id="s-trades">—</strong></div>
+  <div class="stat"><span>الحد العلوي</span><strong id="s-upper">—</strong></div>
+  <div class="stat"><span>الحد السفلي</span><strong id="s-lower">—</strong></div>
+</div>
+
+<!-- Timeframe -->
+<div class="tf-bar">
+  <button class="tf-btn" data-tf="1m">1د</button>
+  <button class="tf-btn active" data-tf="15m">15د</button>
+  <button class="tf-btn" data-tf="1h">1س</button>
+  <button class="tf-btn" data-tf="4h">4س</button>
+  <button class="tf-btn" data-tf="1d">يوم</button>
+</div>
+
+<!-- Chart -->
+<div id="chart-container">
+  <div id="chart"></div>
+  <div class="overlay" id="overlay">⏳ جاري التحميل...</div>
+  <div class="legend" id="legend" style="display:none">
+    <div class="legend-row"><div class="legend-dot" style="background:#22C55E"></div> شراء مفتوح</div>
+    <div class="legend-row"><div class="legend-dot" style="background:#16A34A;opacity:.5"></div> شراء منفذ</div>
+    <div class="legend-row"><div class="legend-dot" style="background:#EF4444"></div> بيع مفتوح</div>
+    <div class="legend-row"><div class="legend-dot" style="background:#DC2626;opacity:.5"></div> بيع منفذ</div>
+    <div class="legend-row"><div class="legend-dot" style="background:#94A3B8"></div> مركز</div>
+    <div class="legend-row"><div class="legend-dot" style="background:#A855F7"></div> Take Profit</div>
+    <div class="legend-row"><div class="legend-dot" style="background:#F97316"></div> Stop Loss</div>
+  </div>
+</div>
+
+<!-- Orders panel -->
+<div class="orders-panel">
+  <div class="orders-title">الأوامر</div>
+  <div id="orders-list"></div>
+</div>
+
+<script>
+'use strict';
+
+// ── Config ────────────────────────────────────────────────────────────────────
+const BASE_URL = window.location.origin;
+const params   = new URLSearchParams(location.search);
+const GRID_ID  = parseInt(params.get('id') || '0');
+let   TF       = params.get('tf') || '15m';
+let   _apiKey  = '';
+let   _chart, _candleSeries, _priceLine, _orderLines = [];
+let   _refreshTimer = null;
+let   _lastPrice = 0;
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+const _configReady = fetch(BASE_URL + '/api/config')
+  .then(r => r.json()).then(d => { _apiKey = d.api_key || ''; }).catch(() => {});
+
+function apiHeaders() {
+  const h = { 'Content-Type': 'application/json' };
+  if (_apiKey) h['X-API-Key'] = _apiKey;
+  return h;
+}
+async function apiFetch(path) {
+  await _configReady;
+  const res  = await fetch(BASE_URL + path, { headers: apiHeaders() });
+  const data = await res.json().catch(() => ({ error: 'invalid response' }));
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  return data;
+}
+
+// ── Theme ─────────────────────────────────────────────────────────────────────
+const isDark = (localStorage.getItem('theme') || 'dark') === 'dark';
+const THEME = {
+  layout:     { background: { color: isDark ? '#0A0F1F' : '#F0F4FF' }, textColor: isDark ? '#94A3B8' : '#475569' },
+  grid:       { vertLines: { color: isDark ? 'rgba(255,255,255,.05)' : 'rgba(0,0,0,.05)' },
+                horzLines: { color: isDark ? 'rgba(255,255,255,.05)' : 'rgba(0,0,0,.05)' } },
+  crosshair:  { mode: 1 },
+  timeScale:  { borderColor: isDark ? '#1E293B' : '#CBD5E1', timeVisible: true, secondsVisible: false },
+  rightPriceScale: { borderColor: isDark ? '#1E293B' : '#CBD5E1' },
+};
+
+// ── Init chart ────────────────────────────────────────────────────────────────
+function initChart() {
+  const container = document.getElementById('chart');
+  _chart = LightweightCharts.createChart(container, {
+    ...THEME,
+    width:  container.clientWidth,
+    height: container.clientHeight,
+    localization: { locale: 'ar-SA' },
+  });
+
+  _candleSeries = _chart.addCandlestickSeries({
+    upColor:          '#22C55E',
+    downColor:        '#EF4444',
+    borderUpColor:    '#22C55E',
+    borderDownColor:  '#EF4444',
+    wickUpColor:      '#22C55E',
+    wickDownColor:    '#EF4444',
+  });
+
+  // Resize observer
+  new ResizeObserver(() => {
+    _chart.applyOptions({
+      width:  container.clientWidth,
+      height: container.clientHeight,
+    });
+  }).observe(container);
+}
+
+// ── Draw order lines ──────────────────────────────────────────────────────────
+function drawLines(lines, currentPrice) {
+  // Remove old lines
+  _orderLines.forEach(l => _candleSeries.removePriceLine(l));
+  _orderLines = [];
+
+  // Current price line
+  if (_priceLine) _candleSeries.removePriceLine(_priceLine);
+  _priceLine = _candleSeries.createPriceLine({
+    price:     currentPrice,
+    color:     '#FBBF24',
+    lineWidth: 2,
+    lineStyle: LightweightCharts.LineStyle.Solid,
+    axisLabelVisible: true,
+    title: `▶ ${currentPrice}`,
+  });
+
+  // Order lines
+  lines.forEach(l => {
+    const lineStyle = l.style === 'dashed'
+      ? LightweightCharts.LineStyle.Dashed
+      : LightweightCharts.LineStyle.Solid;
+
+    const pl = _candleSeries.createPriceLine({
+      price:     l.price,
+      color:     l.filled ? l.color + '88' : l.color,
+      lineWidth: l.type === 'center' ? 1 : (l.type === 'tp' || l.type === 'sl' ? 2 : 1),
+      lineStyle: lineStyle,
+      axisLabelVisible: true,
+      title: l.label,
+    });
+    _orderLines.push(pl);
+  });
+}
+
+// ── Render orders list ────────────────────────────────────────────────────────
+function renderOrders(lines) {
+  const el = document.getElementById('orders-list');
+  const orders = lines.filter(l => l.type === 'buy' || l.type === 'sell');
+  orders.sort((a, b) => b.price - a.price);
+
+  if (!orders.length) {
+    el.innerHTML = '<div style="padding:10px 14px;color:var(--text-muted);font-size:.8rem">لا توجد أوامر</div>';
+    return;
+  }
+
+  el.innerHTML = orders.map(o => `
+    <div class="order-row">
+      <span class="side-${o.type}${o.filled ? ' filled' : ''}">${o.type === 'buy' ? '🟢 شراء' : '🔴 بيع'}</span>
+      <span style="font-family:monospace">$${o.price.toFixed ? o.price.toFixed(6).replace(/\.?0+$/, '') : o.price}</span>
+      <span style="color:var(--text-muted)">${o.qty ? o.qty.toFixed(6).replace(/\.?0+$/, '') : ''}</span>
+      <span style="color:${o.filled ? 'var(--green)' : 'var(--text-muted)'}">${o.filled ? '✅ منفذ' : '⏳ مفتوح'}</span>
+    </div>`).join('');
+}
+
+// ── Update price display ──────────────────────────────────────────────────────
+function updatePriceDisplay(price) {
+  const el = document.getElementById('chart-price');
+  el.textContent = `$${price}`;
+  if (_lastPrice) {
+    el.className = 'chart-price ' + (price >= _lastPrice ? 'up' : 'down');
+  }
+  _lastPrice = price;
+}
+
+// ── Load chart data ───────────────────────────────────────────────────────────
+async function loadChart() {
+  if (!GRID_ID) {
+    document.getElementById('overlay').textContent = '❌ لم يتم تحديد الشبكة';
+    return;
+  }
+
+  document.getElementById('btn-refresh').classList.add('spin');
+
+  try {
+    const data = await apiFetch(`/api/grids/${GRID_ID}/chart?tf=${TF}`);
+
+    // Hide overlay
+    document.getElementById('overlay').style.display = 'none';
+    document.getElementById('legend').style.display  = 'block';
+
+    // Update header
+    document.getElementById('chart-title').textContent = `🔲 ${data.symbol}`;
+    updatePriceDisplay(data.current_price);
+
+    // Update stats
+    document.getElementById('s-steps').textContent    = data.lines.filter(l => l.type === 'buy' || l.type === 'sell').length + ' أمر';
+    document.getElementById('s-step-pct').textContent = data.step_pct + '%';
+    document.getElementById('s-trades').textContent   = data.trades;
+    document.getElementById('s-upper').textContent    = '$' + data.upper;
+    document.getElementById('s-lower').textContent    = '$' + data.lower;
+
+    // Set candles
+    _candleSeries.setData(data.candles);
+
+    // Draw lines
+    drawLines(data.lines, data.current_price);
+
+    // Render orders list
+    renderOrders(data.lines);
+
+    // Fit visible range to last 100 candles
+    _chart.timeScale().scrollToRealTime();
+
+  } catch(e) {
+    document.getElementById('overlay').style.display = 'flex';
+    document.getElementById('overlay').textContent   = `❌ ${e.message}`;
+  } finally {
+    document.getElementById('btn-refresh').classList.remove('spin');
+  }
+}
+
+// ── Timeframe switcher ────────────────────────────────────────────────────────
+document.querySelectorAll('.tf-btn').forEach(btn => {
+  if (btn.dataset.tf === TF) btn.classList.add('active');
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tf-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    TF = btn.dataset.tf;
+    loadChart();
+  });
+});
+
+// ── Auto refresh every 30s ────────────────────────────────────────────────────
+function startAutoRefresh() {
+  if (_refreshTimer) clearInterval(_refreshTimer);
+  _refreshTimer = setInterval(loadChart, 30_000);
+}
+
+// ── Telegram WebApp ───────────────────────────────────────────────────────────
+if (window.Telegram?.WebApp) {
+  const tg = window.Telegram.WebApp;
+  tg.ready(); tg.expand();
+  const theme = localStorage.getItem('theme') || 'dark';
+  tg.setHeaderColor(theme === 'dark' ? '#0A0F1F' : '#F0F4FF');
+}
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+initChart();
+loadChart();
+startAutoRefresh();
+</script>
+</body>
+</html>
