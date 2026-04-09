@@ -139,9 +139,20 @@ function mockSpark(up) {
   return Array.from({length:7}, (_,i) => 100 + (up?1:-1)*i*2 + (Math.random()-.5)*3);
 }
 
-// ── Coin emoji map ────────────────────────────────────────────────────────────
-const COIN_EMOJI = {BTC:'🟠',ETH:'🔷',SOL:'🟣',BNB:'🟡',XRP:'🔵',ADA:'🔵',AVAX:'🔺',DOGE:'🐶',LINK:'🔗',DOT:'⚪',MATIC:'🟣',UNI:'🦄',ATOM:'⚛️',NEAR:'🟩',ARB:'🔵',OP:'🔴',INJ:'🔵',SUI:'🔵',TIA:'🌌',FET:'🤖',USDT:'💵'};
-function coinEmoji(sym) { return COIN_EMOJI[sym.toUpperCase()] || '🔹'; }
+// ── Coin logo ─────────────────────────────────────────────────────────────────
+const ICON_CDN = 'https://cdn.jsdelivr.net/npm/cryptocurrency-icons@0.18.1/svg/color';
+
+// بعض الرموز مختلفة في المكتبة
+const ICON_ALIAS = { MATIC:'matic', POL:'matic', NEAR:'near', ARB:'arb', OP:'op', INJ:'inj', SUI:'sui', TIA:'tia', FET:'fet' };
+
+function coinLogo(sym) {
+  const s = (ICON_ALIAS[sym.toUpperCase()] || sym.toLowerCase());
+  const url = `${ICON_CDN}/${s}.svg`;
+  return `<img class="coin-logo" src="${url}" alt="${sym}"
+    onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"
+    loading="lazy">
+  <div class="coin-logo-fallback" style="display:none">${sym.slice(0,3)}</div>`;
+}
 
 // ── Render portfolio ──────────────────────────────────────────────────────────
 function renderPortfolio(data) {
@@ -171,7 +182,7 @@ function renderCoins(coins) {
       ? `<span style="font-size:.68rem;color:${c.drift>0?'var(--red)':'var(--green)'}">${c.drift>0?'+':''}${c.drift.toFixed(1)}%</span>`
       : '';
     return `<div class="coin-row" style="animation-delay:${i*25}ms">
-      <div class="coin-emoji">${coinEmoji(c.symbol)}</div>
+      <div class="coin-emoji">${coinLogo(c.symbol)}</div>
       <div class="coin-info">
         <div class="coin-name">${c.symbol}</div>
         <div class="coin-bar-wrap">

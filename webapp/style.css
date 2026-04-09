@@ -86,7 +86,9 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Tahoma,Arial,
 .coin-row:last-child{border-bottom:none}
 .coin-row:hover{background:var(--bg-card2)}
 @keyframes rowIn{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
-.coin-emoji{font-size:1.2rem;text-align:center}
+.coin-emoji{font-size:1.2rem;text-align:center;display:flex;align-items:center;justify-content:center}
+.coin-logo{width:28px;height:28px;border-radius:50%;object-fit:contain;background:var(--bg-card2);padding:2px}
+.coin-logo-fallback{width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,#3B82F6,#6366F1);display:flex;align-items:center;justify-content:center;font-size:.65rem;font-weight:800;color:#fff;flex-shrink:0}
 .coin-info{display:flex;flex-direction:column;gap:4px;min-width:0}
 .coin-name{font-weight:700;font-size:.86rem}
 .coin-bar-wrap{display:flex;align-items:center;gap:5px}
