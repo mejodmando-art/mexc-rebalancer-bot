@@ -260,56 +260,106 @@ def build_app() -> Application:
 
 
 async def main():
+    import os
+    import threading
+    from bot.api_server import app as flask_app, set_bot_loop
+
     await db.init()
     await grid_monitor.load_from_db()
-    app = build_app()
-    scheduler = await start_scheduler(app)
+    tg_app = build_app()
+    scheduler = await start_scheduler(tg_app)
 
     # Grid Bot job
     scheduler.add_job(
         run_grid_monitor,
         trigger="interval",
         seconds=30,
-        args=[app],
+        args=[tg_app],
         id="grid_monitor",
         replace_existing=True,
     )
 
-    # ── Flask API server (runs in a background thread) ──────────────────────
-    import threading
-    import os
-    from bot.api_server import app as flask_app, set_bot_loop
+    webhook_url = os.environ.get("WEBHOOK_URL", "").strip()
+    flask_port  = int(os.environ.get("PORT", os.environ.get("API_PORT", 8080)))
 
     set_bot_loop(asyncio.get_event_loop())
-    flask_port = int(os.environ.get("API_PORT", 8080))
 
-    flask_thread = threading.Thread(
-        target=lambda: flask_app.run(
-            host="0.0.0.0",
-            port=flask_port,
-            debug=False,
-            use_reloader=False,
-        ),
-        daemon=True,
-        name="flask-api",
-    )
-    flask_thread.start()
-    logger.info("🌐 Flask API started on port %d", flask_port)
-    # ────────────────────────────────────────────────────────────────────────
+    if webhook_url:
+        # ── Webhook mode ────────────────────────────────────────────────────
+        # Telegram sends updates to POST /webhook/<token>
+        token = config.telegram_token
+        webhook_path = f"/webhook/{token}"
+        full_webhook_url = webhook_url.rstrip("/") + webhook_path
 
-    logger.info("🤖 Bot started polling...")
-    async with app:
-        await app.start()
-        await app.updater.start_polling(
-            allowed_updates=Update.ALL_TYPES,
-            drop_pending_updates=True,
+        from telegram import Update as TGUpdate
+
+        @flask_app.route(webhook_path, methods=["POST"])
+        def telegram_webhook():
+            from flask import request as flask_request
+            import json
+            data = flask_request.get_json(force=True, silent=True)
+            if data:
+                update = TGUpdate.de_json(data, tg_app.bot)
+                asyncio.run_coroutine_threadsafe(
+                    tg_app.process_update(update), asyncio.get_event_loop()
+                )
+            return "", 200
+
+        flask_thread = threading.Thread(
+            target=lambda: flask_app.run(
+                host="0.0.0.0",
+                port=flask_port,
+                debug=False,
+                use_reloader=False,
+            ),
+            daemon=True,
+            name="flask-api",
         )
-        try:
-            await asyncio.Event().wait()
-        finally:
-            await app.updater.stop()
-            await app.stop()
-            scheduler.shutdown(wait=False)
+        flask_thread.start()
+        logger.info("Flask started on port %d", flask_port)
+
+        async with tg_app:
+            await tg_app.start()
+            await tg_app.bot.set_webhook(
+                url=full_webhook_url,
+                allowed_updates=TGUpdate.ALL_TYPES,
+                drop_pending_updates=True,
+            )
+            logger.info("Webhook set: %s", full_webhook_url)
+            try:
+                await asyncio.Event().wait()
+            finally:
+                await tg_app.bot.delete_webhook()
+                await tg_app.stop()
+                scheduler.shutdown(wait=False)
+    else:
+        # ── Polling mode (local dev) ─────────────────────────────────────────
+        flask_thread = threading.Thread(
+            target=lambda: flask_app.run(
+                host="0.0.0.0",
+                port=flask_port,
+                debug=False,
+                use_reloader=False,
+            ),
+            daemon=True,
+            name="flask-api",
+        )
+        flask_thread.start()
+        logger.info("Flask started on port %d (polling mode)", flask_port)
+
+        async with tg_app:
+            await tg_app.start()
+            await tg_app.updater.start_polling(
+                allowed_updates=Update.ALL_TYPES,
+                drop_pending_updates=True,
+            )
+            logger.info("Bot started polling...")
+            try:
+                await asyncio.Event().wait()
+            finally:
+                await tg_app.updater.stop()
+                await tg_app.stop()
+                scheduler.shutdown(wait=False)
 
 
 if __name__ == "__main__":
