@@ -197,68 +197,44 @@ def portfolio_actions_kb(
             callback_data=f"portfolio_switch:{portfolio_id}"
         )])
 
-    # ── العملات (عمودان) ──
-    if allocations:
-        coin_buttons = []
-        for a in allocations:
-            sym = a["symbol"]
-            pct = a["target_percentage"]
-            val = capital_usdt * pct / 100 if capital_usdt > 0 else 0.0
-            val_str = f"${val:,.0f}" if val > 0 else f"{pct:.0f}%"
-            logo = coin_emoji(sym)
-            label = f"{logo} {sym}  {pct:.0f}%  {val_str}"
-            coin_buttons.append(
-                InlineKeyboardButton(label, callback_data=f"portfolio_edit_allocs:{portfolio_id}")
-            )
-        for i in range(0, len(coin_buttons), 2):
-            buttons.append(coin_buttons[i:i + 2])
+    # ── فولدر العملات (زر واحد يفتح القائمة) ──
+    coin_count = len(allocations) if allocations else 0
+    coins_label = f"🪙  العملات  ({coin_count})" if coin_count else "🪙  لا توجد عملات"
+    buttons.append([
+        InlineKeyboardButton(coins_label, callback_data=f"pf_alloc_list:{portfolio_id}"),
+    ])
 
-    # ── الإجراءات الرئيسية ──
+    # ── الإجراءات الرئيسية (نص عرض الشاشة) ──
     buttons.append([
         InlineKeyboardButton("🔄  إعادة التوازن", callback_data=f"pf_rebalance:{portfolio_id}"),
         InlineKeyboardButton("📊  الرصيد الحي",   callback_data=f"pf_balance:{portfolio_id}"),
     ])
 
-    # ── إدارة العملات ──
+    # ── إدارة العملات + توزيع ذكي ──
     buttons.append([
-        InlineKeyboardButton("✏️  تعديل العملات",    callback_data=f"portfolio_edit_allocs:{portfolio_id}"),
-        InlineKeyboardButton("🤖  توزيع ذكي",        callback_data=f"auto_alloc_menu:{portfolio_id}"),
+        InlineKeyboardButton("✏️  تعديل العملات", callback_data=f"portfolio_edit_allocs:{portfolio_id}"),
+        InlineKeyboardButton("🤖  توزيع ذكي",     callback_data=f"auto_alloc_menu:{portfolio_id}"),
     ])
 
-    # ── الاستراتيجيات ──
+    # ── Grid Bot ──
     buttons.append([
-        InlineKeyboardButton("⚡  Momentum",  callback_data="momentum:menu"),
-        InlineKeyboardButton("🔲  Grid Bot",  callback_data="grid:menu"),
+        InlineKeyboardButton("🔲  Grid Bot", callback_data="grid:menu"),
     ])
 
-    # ── الإعدادات ──
-    auto_icon = "🟢" if auto_enabled else "🔴"
+    # ── رأس المال ──
     buttons.append([
-        InlineKeyboardButton("💰  رأس المال",                   callback_data=f"portfolio_edit_capital:{portfolio_id}"),
-        InlineKeyboardButton(f"🎯  الانحراف: {threshold:.0f}%", callback_data=f"portfolio_set_threshold:{portfolio_id}"),
-    ])
-    buttons.append([
-        InlineKeyboardButton(f"{auto_icon}  تلقائي: {'شغّال' if auto_enabled else 'معطّل'}  ({auto_interval}س)",
-                             callback_data=f"portfolio_toggle_auto:{portfolio_id}"),
+        InlineKeyboardButton("💰  رأس المال", callback_data=f"portfolio_edit_capital:{portfolio_id}"),
     ])
 
-    # ── الحماية ──
+    # ── بيع ──
     buttons.append([
-        InlineKeyboardButton("🏆  أهداف الربح / وقف الخسارة", callback_data=f"portfolio_tp_menu:{portfolio_id}"),
-    ])
-    buttons.append([
-        InlineKeyboardButton("🔴  بيع الكل",       callback_data=f"portfolio_sell_all:{portfolio_id}"),
-        InlineKeyboardButton("🗑  بيع عملة",        callback_data=f"portfolio_sell_one:{portfolio_id}"),
+        InlineKeyboardButton("🔴  بيع الكل",  callback_data=f"portfolio_sell_all:{portfolio_id}"),
+        InlineKeyboardButton("🗑  بيع عملة",  callback_data=f"portfolio_sell_one:{portfolio_id}"),
     ])
 
-    # ── إدارة المحفظة ──
+    # ── حذف المحفظة ──
     buttons.append([
-        InlineKeyboardButton("✏️  الاسم",         callback_data=f"portfolio_edit_name:{portfolio_id}"),
-        InlineKeyboardButton("⏱  فترة التوازن",  callback_data=f"portfolio_set_interval:{portfolio_id}"),
-    ])
-    buttons.append([
-        InlineKeyboardButton("🗑  حذف المحفظة",  callback_data=f"portfolio_delete:{portfolio_id}"),
-        InlineKeyboardButton("◀️  رجوع",          callback_data="portfolios"),
+        InlineKeyboardButton("🗑  حذف المحفظة", callback_data=f"portfolio_delete:{portfolio_id}"),
     ])
 
     return InlineKeyboardMarkup(buttons)
