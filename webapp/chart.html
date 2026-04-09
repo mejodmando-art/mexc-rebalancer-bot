@@ -162,7 +162,7 @@ const THEME = {
   layout:    { background: { color: isDark ? '#0A0F1F' : '#F0F4FF' }, textColor: isDark ? '#94A3B8' : '#475569' },
   grid:      { vertLines: { color: 'rgba(255,255,255,.04)' }, horzLines: { color: 'rgba(255,255,255,.04)' } },
   crosshair: { mode: 1 },
-  timeScale: { borderColor: isDark ? '#1E293B' : '#CBD5E1', timeVisible: true, secondsVisible: false },
+  timeScale: { borderColor: isDark ? '#1E293B' : '#CBD5E1', timeVisible: true, secondsVisible: false, lockVisibleTimeRangeOnResize: true },
   rightPriceScale: { borderColor: isDark ? '#1E293B' : '#CBD5E1' },
 };
 
@@ -282,10 +282,13 @@ async function loadChart() {
     document.getElementById('chart-title').textContent = `🔲 ${data.symbol}`;
     updatePriceDisplay(data.current_price);
     updateStats(data.lines, data);
+    const wasEmpty = !_chart.timeScale().getVisibleRange();
     _candleSeries.setData(data.candles);
+    // تحريك للنهاية عند أول تحميل فقط
+    if (wasEmpty) _chart.timeScale().scrollToRealTime();
     drawLines(data.lines, data.current_price);
     renderOrders(data.lines);
-    _chart.timeScale().scrollToRealTime();
+    // لا نحرك الشارت تلقائياً — المستخدم يتحكم بالموضع
     if (_symbol !== data.symbol) { _symbol = data.symbol; startPriceFeed(_symbol); }
   } catch(e) {
     document.getElementById('overlay').style.display = 'flex';
