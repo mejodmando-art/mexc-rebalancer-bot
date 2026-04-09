@@ -281,15 +281,160 @@ function initChart() {
       height: container.clientHeight,
     });
   }).observe(container);
+
+  // ── Drag to edit: سحب خط الأمر لتعديل سعره ──────────────────────
+  _setupDragToEdit();
+}
+
+// متغيرات السحب
+let _dragLine   = null;   // الـ priceLine المسحوب حالياً
+let _dragStartY = 0;
+let _dragStartPrice = 0;
+let _isDragging = false;
+
+function _setupDragToEdit() {
+  const container = document.getElementById('chart');
+
+  // ── لمس / ماوس: بداية السحب ──────────────────────────────────────
+  function onDragStart(clientY) {
+    if (!_orderLines.length) return;
+    const rect  = container.getBoundingClientRect();
+    const y     = clientY - rect.top;
+    const price = _chart.priceScale('right').coordinateToPrice(y);
+    if (!price) return;
+
+    // ابحث عن أقرب خط أمر (شراء أو بيع) في نطاق 0.3% من السعر
+    let closest = null, minDist = Infinity;
+    for (const pl of _orderLines) {
+      const d = pl._orderData;
+      if (!d || (d.type !== 'buy' && d.type !== 'sell') || d.filled) continue;
+      const dist = Math.abs(d.price - price) / price;
+      if (dist < 0.003 && dist < minDist) {
+        minDist  = dist;
+        closest  = pl;
+      }
+    }
+    if (!closest) return;
+
+    _dragLine       = closest;
+    _dragStartY     = clientY;
+    _dragStartPrice = closest._orderData.price;
+    _isDragging     = true;
+    container.style.cursor = 'ns-resize';
+  }
+
+  // ── أثناء السحب ──────────────────────────────────────────────────
+  function onDragMove(clientY) {
+    if (!_isDragging || !_dragLine) return;
+    const rect     = container.getBoundingClientRect();
+    const y        = clientY - rect.top;
+    const newPrice = _chart.priceScale('right').coordinateToPrice(y);
+    if (!newPrice || newPrice <= 0) return;
+
+    // تحديث الخط مؤقتاً على الشارت
+    _dragLine._orderData.price = newPrice;
+    _candleSeries.removePriceLine(_dragLine);
+    const d = _dragLine._orderData;
+    const side = d.type === 'buy' ? '▲' : '▼';
+    const qtyStr = d.qty ? Number(d.qty).toPrecision(4) : '';
+    const newPl = _candleSeries.createPriceLine({
+      price:           newPrice,
+      color:           d.color,
+      lineWidth:       2,
+      lineStyle:       d.type === 'buy'
+        ? LightweightCharts.LineStyle.Dashed
+        : LightweightCharts.LineStyle.Solid,
+      axisLabelVisible: true,
+      title: `${side} ${d.type === 'buy' ? 'شراء' : 'بيع'} ${qtyStr} ✏️`,
+    });
+    newPl._orderData = d;
+    const idx = _orderLines.indexOf(_dragLine);
+    if (idx !== -1) _orderLines[idx] = newPl;
+    _dragLine = newPl;
+  }
+
+  // ── نهاية السحب: تأكيد أو إلغاء ─────────────────────────────────
+  function onDragEnd() {
+    if (!_isDragging || !_dragLine) return;
+    _isDragging = false;
+    container.style.cursor = '';
+
+    const d        = _dragLine._orderData;
+    const newPrice = d.price;
+    const diff     = Math.abs(newPrice - _dragStartPrice) / _dragStartPrice;
+
+    // إذا تحرك أقل من 0.05% → إلغاء (نقرة عادية)
+    if (diff < 0.0005) {
+      d.price = _dragStartPrice;
+      _dragLine = null;
+      return;
+    }
+
+    // تأكيد التعديل
+    const side = d.type === 'buy' ? 'شراء' : 'بيع';
+    const fmt  = p => Number(p).toPrecision(6);
+    if (confirm(`تعديل أمر ${side}؟
+
+من: $${fmt(_dragStartPrice)}
+إلى: $${fmt(newPrice)}`)) {
+      _applyOrderEdit(d, newPrice);
+    } else {
+      // تراجع
+      d.price = _dragStartPrice;
+      drawLines(
+        _orderLines.map(pl => pl._orderData).filter(Boolean),
+        _lastPrice
+      );
+    }
+    _dragLine = null;
+  }
+
+  // ── ربط الأحداث ──────────────────────────────────────────────────
+  container.addEventListener('mousedown',  e => onDragStart(e.clientY));
+  container.addEventListener('mousemove',  e => onDragMove(e.clientY));
+  container.addEventListener('mouseup',    () => onDragEnd());
+  container.addEventListener('mouseleave', () => { if (_isDragging) onDragEnd(); });
+
+  container.addEventListener('touchstart', e => onDragStart(e.touches[0].clientY), {passive:true});
+  container.addEventListener('touchmove',  e => { e.preventDefault(); onDragMove(e.touches[0].clientY); }, {passive:false});
+  container.addEventListener('touchend',   () => onDragEnd());
+}
+
+// ── إرسال تعديل الأمر إلى الـ API ────────────────────────────────────────────
+async function _applyOrderEdit(orderData, newPrice) {
+  await _configReady;
+  try {
+    const res = await fetch(`${BASE_URL}/api/grids/${GRID_ID}/order/edit`, {
+      method:  'POST',
+      headers: { ...apiHeaders(), 'Content-Type': 'application/json' },
+      body:    JSON.stringify({
+        order_id:  orderData.order_id || '',
+        side:      orderData.type,
+        old_price: _dragStartPrice,
+        new_price: newPrice,
+      }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      // إعادة تحميل الشارت لتحديث الخطوط
+      loadChart();
+    } else {
+      alert('❌ فشل التعديل: ' + (data.error || 'خطأ غير معروف'));
+      // تراجع
+      orderData.price = _dragStartPrice;
+      drawLines(_orderLines.map(pl => pl._orderData).filter(Boolean), _lastPrice);
+    }
+  } catch(e) {
+    alert('❌ خطأ في الاتصال');
+  }
 }
 
 // ── Draw order lines ──────────────────────────────────────────────────────────
 function drawLines(lines, currentPrice) {
-  // Remove old lines
   _orderLines.forEach(l => _candleSeries.removePriceLine(l));
   _orderLines = [];
 
-  // Current price line
+  // خط السعر الحالي
   if (_priceLine) _candleSeries.removePriceLine(_priceLine);
   _priceLine = _candleSeries.createPriceLine({
     price:     currentPrice,
@@ -300,20 +445,45 @@ function drawLines(lines, currentPrice) {
     title: `▶ ${currentPrice}`,
   });
 
-  // Order lines
   lines.forEach(l => {
-    const lineStyle = l.style === 'dashed'
-      ? LightweightCharts.LineStyle.Dashed
-      : LightweightCharts.LineStyle.Solid;
+    // ── شكل الخط حسب النوع ──────────────────────────────────────────
+    // شراء مفتوح  → منقط أخضر
+    // بيع مفتوح   → متصل أحمر
+    // منفذ         → متقطع (SparseDotted) بلون باهت
+    // مركز/TP/SL  → متصل
+    let lineStyle;
+    if (l.filled) {
+      lineStyle = LightweightCharts.LineStyle.SparseDotted;
+    } else if (l.type === 'buy') {
+      lineStyle = LightweightCharts.LineStyle.Dashed;
+    } else {
+      lineStyle = LightweightCharts.LineStyle.Solid;
+    }
+
+    // ── سُمك الخط ────────────────────────────────────────────────────
+    const lineWidth = (l.type === 'tp' || l.type === 'sl') ? 2
+                    : (l.type === 'center') ? 1
+                    : 2;
+
+    // ── label يحمل: النوع + السعر + الكمية ───────────────────────────
+    let title = l.label || '';
+    if ((l.type === 'buy' || l.type === 'sell') && l.qty) {
+      const qtyStr = Number(l.qty).toPrecision(4);
+      const side   = l.type === 'buy' ? '▲' : '▼';
+      const status = l.filled ? ' ✅' : '';
+      title = `${side} ${l.type === 'buy' ? 'شراء' : 'بيع'} ${qtyStr}${status}`;
+    }
 
     const pl = _candleSeries.createPriceLine({
-      price:     l.price,
-      color:     l.filled ? l.color + '88' : l.color,
-      lineWidth: l.type === 'center' ? 1 : (l.type === 'tp' || l.type === 'sl' ? 2 : 1),
-      lineStyle: lineStyle,
+      price:           l.price,
+      color:           l.filled ? l.color + '66' : l.color,
+      lineWidth,
+      lineStyle,
       axisLabelVisible: true,
-      title: l.label,
+      title,
     });
+    // حفظ بيانات الأمر على الـ priceLine لاستخدامها في drag
+    pl._orderData = l;
     _orderLines.push(pl);
   });
 }

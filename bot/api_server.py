@@ -567,6 +567,92 @@ def get_grid_chart(grid_id):
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/grids/<int:grid_id>/order/edit", methods=["POST"])
+@require_auth
+def edit_grid_order(grid_id):
+    """
+    تعديل سعر أمر مفتوح عبر سحب الخط على الشارت.
+    Body: { side, old_price, new_price, order_id (optional) }
+    """
+    user_id = _get_user_id()
+    body = request.get_json(silent=True) or {}
+
+    side      = body.get("side", "")
+    old_price = float(body.get("old_price", 0))
+    new_price = float(body.get("new_price", 0))
+
+    if side not in ("buy", "sell") or old_price <= 0 or new_price <= 0:
+        return jsonify({"error": "بيانات غير صحيحة"}), 400
+
+    async def _edit():
+        from bot.grid.monitor import grid_monitor
+        g = grid_monitor.active_grids.get(grid_id)
+        if not g:
+            return {"error": "الشبكة غير موجودة"}
+        if g.get("user_id") and g["user_id"] != user_id:
+            return {"error": "غير مصرح"}
+
+        settings = await db.get_settings(user_id)
+        if not settings or not settings.get("mexc_api_key"):
+            return {"error": "MEXC API غير مربوط"}
+
+        from bot.mexc_client import MexcClient
+        client = MexcClient(settings["mexc_api_key"], settings["mexc_secret_key"])
+        try:
+            symbol     = g["symbol"]
+            order_list = g.get(f"{side}_orders", [])
+
+            # إيجاد الأمر بالسعر القديم
+            target = None
+            for o in order_list:
+                if abs(o["price"] - old_price) / old_price < 0.001 and o.get("status") == "open":
+                    target = o
+                    break
+
+            if not target:
+                return {"error": "الأمر غير موجود أو منفذ بالفعل"}
+
+            # إلغاء الأمر القديم
+            old_id = target.get("order_id") or target.get("id")
+            if old_id:
+                try:
+                    await client.exchange.cancel_order(str(old_id), symbol)
+                except Exception:
+                    pass  # ربما انتهى بالفعل
+
+            # حساب الكمية بالسعر الجديد
+            step_size      = (g["upper"] - g["lower"]) / g["steps"]
+            size_per_level = g["order_size_usdt"] / g["steps"]
+            qty            = round(size_per_level / new_price, 8)
+
+            # وضع أمر جديد بالسعر الجديد
+            if side == "buy":
+                new_order = await client.exchange.create_limit_buy_order(symbol, qty, new_price)
+            else:
+                new_order = await client.exchange.create_limit_sell_order(symbol, qty, new_price)
+
+            # تحديث القائمة في الذاكرة
+            target["price"]    = new_price
+            target["qty"]      = qty
+            target["order_id"] = new_order.get("id")
+            target["status"]   = "open"
+
+            await db.update_grid(g)
+            return {"ok": True, "new_price": new_price, "qty": qty}
+
+        finally:
+            await client.close()
+
+    try:
+        result = _run(_edit())
+        if "error" in result:
+            return jsonify(result), 400
+        return jsonify(result)
+    except Exception as e:
+        logger.exception("edit_grid_order error")
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/grids/<int:grid_id>/stop", methods=["POST"])
 @require_auth
 def stop_grid(grid_id):
@@ -734,6 +820,212 @@ def create_grid():
     except Exception as e:
         logger.exception("create_grid error")
         return jsonify({"error": str(e)}), 500
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TradingView Broker API — endpoints متوافقة مع مواصفات TV Broker API
+# Docs: https://www.tradingview.com/broker-api-docs/
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _build_tv_orders(grid: dict) -> list:
+    """تحويل أوامر الشبكة إلى صيغة TradingView Broker API."""
+    orders = []
+    for o in grid.get("buy_orders", []):
+        orders.append({
+            "id":       str(o.get("id") or o.get("order_id", "")),
+            "symbol":   grid["symbol"].replace("/", ""),
+            "type":     "limit",
+            "side":     "buy",
+            "qty":      o.get("qty", 0),
+            "price":    o["price"],
+            "status":   "filled" if o.get("status") == "filled" else "working",
+            "filledQty": o.get("qty", 0) if o.get("status") == "filled" else 0,
+        })
+    for o in grid.get("sell_orders", []):
+        orders.append({
+            "id":       str(o.get("id") or o.get("order_id", "")),
+            "symbol":   grid["symbol"].replace("/", ""),
+            "type":     "limit",
+            "side":     "sell",
+            "qty":      o.get("qty", 0),
+            "price":    o["price"],
+            "status":   "filled" if o.get("status") == "filled" else "working",
+            "filledQty": o.get("qty", 0) if o.get("status") == "filled" else 0,
+        })
+    return orders
+
+
+@app.route("/api/tv/orders")
+@require_auth
+def tv_orders():
+    """
+    TradingView Broker API — /orders
+    يُرجع جميع أوامر الشبكات النشطة بصيغة TV Broker API.
+    """
+    async def _fetch():
+        from bot.grid.monitor import grid_monitor
+        all_orders = []
+        for g in grid_monitor.active_grids.values():
+            all_orders.extend(_build_tv_orders(g))
+        return {"s": "ok", "d": all_orders}
+
+    try:
+        return jsonify(_run(_fetch()))
+    except Exception as e:
+        return jsonify({"s": "error", "errmsg": str(e)}), 500
+
+
+@app.route("/api/tv/orders/<int:grid_id>")
+@require_auth
+def tv_orders_by_grid(grid_id):
+    """أوامر شبكة محددة بصيغة TV Broker API."""
+    async def _fetch():
+        from bot.grid.monitor import grid_monitor
+        g = grid_monitor.active_grids.get(grid_id)
+        if not g:
+            return {"s": "error", "errmsg": "الشبكة غير موجودة"}
+        return {"s": "ok", "d": _build_tv_orders(g)}
+
+    try:
+        return jsonify(_run(_fetch()))
+    except Exception as e:
+        return jsonify({"s": "error", "errmsg": str(e)}), 500
+
+
+@app.route("/api/tv/positions")
+@require_auth
+def tv_positions():
+    """
+    TradingView Broker API — /positions
+    يُرجع الشبكات النشطة كـ "positions" (كل شبكة = position واحدة).
+    """
+    async def _fetch():
+        from bot.grid.monitor import grid_monitor
+        positions = []
+        for gid, g in grid_monitor.active_grids.items():
+            # حساب إجمالي الكمية المشتراة من الأوامر المنفذة
+            filled_qty = sum(
+                o.get("qty", 0)
+                for o in g.get("buy_orders", [])
+                if o.get("status") == "filled"
+            )
+            positions.append({
+                "id":           str(gid),
+                "symbol":       g["symbol"].replace("/", ""),
+                "qty":          filled_qty,
+                "side":         "buy",
+                "avgPrice":     g.get("center", 0),
+                "unrealizedPl": 0,  # يمكن حسابه لاحقاً
+                "message":      f"Grid Bot #{gid} — {g.get('total_trades', 0)} صفقة",
+            })
+        return {"s": "ok", "d": positions}
+
+    try:
+        return jsonify(_run(_fetch()))
+    except Exception as e:
+        return jsonify({"s": "error", "errmsg": str(e)}), 500
+
+
+@app.route("/api/tv/executions")
+@require_auth
+def tv_executions():
+    """
+    TradingView Broker API — /executions
+    يُرجع الأوامر المنفذة (filled) كـ executions.
+    """
+    async def _fetch():
+        from bot.grid.monitor import grid_monitor
+        executions = []
+        for gid, g in grid_monitor.active_grids.items():
+            all_orders = g.get("buy_orders", []) + g.get("sell_orders", [])
+            for o in all_orders:
+                if o.get("status") != "filled":
+                    continue
+                executions.append({
+                    "id":      str(o.get("id") or o.get("order_id", "")),
+                    "symbol":  g["symbol"].replace("/", ""),
+                    "price":   o["price"],
+                    "qty":     o.get("qty", 0),
+                    "side":    "buy" if o in g.get("buy_orders", []) else "sell",
+                    "time":    int(time.time() * 1000),
+                })
+        return {"s": "ok", "d": executions}
+
+    try:
+        return jsonify(_run(_fetch()))
+    except Exception as e:
+        return jsonify({"s": "error", "errmsg": str(e)}), 500
+
+
+# ── SSE: تحديث لحظي لبيانات الشارت ──────────────────────────────────────────
+import json
+import threading
+from queue import Queue, Empty
+
+# قائمة المشتركين في SSE لكل grid_id
+_sse_subscribers: dict[int, list[Queue]] = {}
+_sse_lock = threading.Lock()
+
+
+def notify_grid_update(grid_id: int, data: dict):
+    """
+    استدعِ هذه الدالة من GridMonitor عند تغيير حالة الشبكة.
+    ترسل التحديث لجميع المتصلين عبر SSE.
+    """
+    with _sse_lock:
+        queues = _sse_subscribers.get(grid_id, [])
+        dead = []
+        for q in queues:
+            try:
+                q.put_nowait(data)
+            except Exception:
+                dead.append(q)
+        for q in dead:
+            queues.remove(q)
+
+
+@app.route("/api/grids/<int:grid_id>/stream")
+@require_auth
+def grid_stream(grid_id):
+    """
+    SSE endpoint — يبث تحديثات الشبكة لحظياً للمتصلين.
+    الاستخدام في JS:
+        const es = new EventSource('/api/grids/1/stream?api_key=SECRET');
+        es.onmessage = e => { const data = JSON.parse(e.data); ... };
+    """
+    def event_stream():
+        q = Queue(maxsize=50)
+        with _sse_lock:
+            _sse_subscribers.setdefault(grid_id, []).append(q)
+        try:
+            # إرسال ping أولي للتأكيد
+            yield f"data: {json.dumps({'type': 'connected', 'grid_id': grid_id})}\n\n"
+            while True:
+                try:
+                    data = q.get(timeout=25)
+                    yield f"data: {json.dumps(data)}\n\n"
+                except Empty:
+                    # keepalive ping كل 25 ثانية
+                    yield ": keepalive\n\n"
+        finally:
+            with _sse_lock:
+                subs = _sse_subscribers.get(grid_id, [])
+                if q in subs:
+                    subs.remove(q)
+
+    # SSE يحتاج api_key في query string لأن EventSource لا يدعم headers
+    api_key = request.args.get("api_key", "")
+    if _WEB_SECRET and api_key != _WEB_SECRET:
+        return jsonify({"error": "unauthorized"}), 401
+
+    return app.response_class(
+        event_stream(),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control":   "no-cache",
+            "X-Accel-Buffering": "no",   # مهم لـ Nginx/Railway
+        },
+    )
 
 
 # ── Static files (webapp/) ────────────────────────────────────────────────────
