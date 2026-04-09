@@ -307,7 +307,10 @@ def grid_menu_kb(grids: list) -> InlineKeyboardMarkup:
 
 def grid_detail_kb(grid_id: int) -> InlineKeyboardMarkup:
     """شاشة تفاصيل الشبكة — أزرار مربعة متساوية."""
+    from telegram import WebAppInfo
+    chart_url = WEBAPP_URL.rstrip("/").rstrip("webapp").rstrip("/") + f"/webapp/chart?id={grid_id}"
     return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📊  عرض الشارت",        web_app=WebAppInfo(url=chart_url))],
         [InlineKeyboardButton("📡  متابعة حية",        callback_data=f"grid_live:{grid_id}")],
         [
             InlineKeyboardButton("🎯  تعديل TP/SL",    callback_data=f"grid_edit_tpsl:{grid_id}"),

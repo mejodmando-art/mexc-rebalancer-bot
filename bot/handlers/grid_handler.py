@@ -285,10 +285,14 @@ async def grid_live_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.answer("❌ السعر غير متاح", show_alert=True)
         return
 
+    from bot.keyboards import WEBAPP_URL
+    from telegram import WebAppInfo
+    chart_url = WEBAPP_URL.rstrip("/").rstrip("webapp").rstrip("/") + f"/webapp/chart?id={grid_id}"
     await query.edit_message_text(
         _fmt_grid_live(grid, price),
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("📊 عرض الشارت", web_app=WebAppInfo(url=chart_url))],
             [InlineKeyboardButton("🔄 تحديث", callback_data=f"grid_live:{grid_id}")],
             [InlineKeyboardButton("🛑 إيقاف الشبكة", callback_data=f"grid_stop:{grid_id}")],
             [InlineKeyboardButton("◀️ رجوع", callback_data=f"grid_detail:{grid_id}")],

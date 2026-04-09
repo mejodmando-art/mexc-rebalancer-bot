@@ -165,11 +165,14 @@
 
 <!-- Stats -->
 <div class="stats-bar" id="stats-bar">
-  <div class="stat"><span>الخطوات</span><strong id="s-steps">—</strong></div>
+  <div class="stat"><span>الأوامر</span><strong id="s-steps">—</strong></div>
   <div class="stat"><span>ربح/خطوة</span><strong id="s-step-pct">—</strong></div>
-  <div class="stat"><span>الصفقات</span><strong id="s-trades">—</strong></div>
+  <div class="stat"><span>صفقات منفذة</span><strong id="s-trades">—</strong></div>
   <div class="stat"><span>الحد العلوي</span><strong id="s-upper">—</strong></div>
   <div class="stat"><span>الحد السفلي</span><strong id="s-lower">—</strong></div>
+  <div class="stat"><span>🟢 شراء</span><strong id="s-buys">—</strong></div>
+  <div class="stat"><span>🔴 بيع</span><strong id="s-sells">—</strong></div>
+  <div class="stat"><span>✅ منفذ</span><strong id="s-filled">—</strong></div>
 </div>
 
 <!-- Timeframe -->
@@ -317,13 +320,23 @@ function renderOrders(lines) {
     return;
   }
 
-  el.innerHTML = orders.map(o => `
-    <div class="order-row">
-      <span class="side-${o.type}${o.filled ? ' filled' : ''}">${o.type === 'buy' ? '🟢 شراء' : '🔴 بيع'}</span>
-      <span style="font-family:monospace">$${o.price.toFixed ? o.price.toFixed(6).replace(/\.?0+$/, '') : o.price}</span>
-      <span style="color:var(--text-muted)">${o.qty ? o.qty.toFixed(6).replace(/\.?0+$/, '') : ''}</span>
-      <span style="color:${o.filled ? 'var(--green)' : 'var(--text-muted)'}">${o.filled ? '✅ منفذ' : '⏳ مفتوح'}</span>
-    </div>`).join('');
+  el.innerHTML = orders.map(o => {
+    const price   = o.price ? Number(o.price).toPrecision(6) : '—';
+    const qty     = o.qty   ? Number(o.qty).toPrecision(4)   : '—';
+    const side    = o.type === 'buy' ? '🟢 شراء' : '🔴 بيع';
+    const bgColor = o.filled
+      ? 'rgba(34,197,94,.08)'
+      : (o.type === 'buy' ? 'rgba(34,197,94,.03)' : 'rgba(239,68,68,.03)');
+    const status  = o.filled
+      ? `<span style="color:var(--green);font-size:.75rem">✅ منفذ</span>`
+      : `<span style="color:var(--text-muted);font-size:.75rem">⏳ مفتوح</span>`;
+    return `<div class="order-row" style="background:${bgColor}">
+      <span class="side-${o.type}">${side}</span>
+      <span style="font-family:monospace;font-weight:600;font-size:.82rem">$${price}</span>
+      <span style="color:var(--text-muted);font-size:.72rem">${qty}</span>
+      ${status}
+    </div>`;
+  }).join('');
 }
 
 // ── Update price display ──────────────────────────────────────────────────────
@@ -357,11 +370,18 @@ async function loadChart() {
     updatePriceDisplay(data.current_price);
 
     // Update stats
-    document.getElementById('s-steps').textContent    = data.lines.filter(l => l.type === 'buy' || l.type === 'sell').length + ' أمر';
+    const orderLines = data.lines.filter(l => l.type === 'buy' || l.type === 'sell');
+    const buyCount    = orderLines.filter(l => l.type === 'buy'  && !l.filled).length;
+    const sellCount   = orderLines.filter(l => l.type === 'sell' && !l.filled).length;
+    const filledCount = orderLines.filter(l => l.filled).length;
+    document.getElementById('s-steps').textContent    = orderLines.length + ' أمر';
     document.getElementById('s-step-pct').textContent = data.step_pct + '%';
     document.getElementById('s-trades').textContent   = data.trades;
     document.getElementById('s-upper').textContent    = '$' + data.upper;
     document.getElementById('s-lower').textContent    = '$' + data.lower;
+    document.getElementById('s-buys').textContent     = buyCount;
+    document.getElementById('s-sells').textContent    = sellCount;
+    document.getElementById('s-filled').textContent   = filledCount;
 
     // Set candles
     _candleSeries.setData(data.candles);
@@ -394,7 +414,102 @@ document.querySelectorAll('.tf-btn').forEach(btn => {
   });
 });
 
-// ── Auto refresh every 30s ────────────────────────────────────────────────────
+// ── SSE: تحديث لحظي عبر Server-Sent Events ───────────────────────────────────
+let _sse = null;
+
+function buildOrderLines(buyOrders, sellOrders, grid) {
+  const lines = [];
+
+  // خط المركز
+  if (grid.center) {
+    lines.push({
+      price: grid.center, color: '#94A3B8', style: 'dashed',
+      label: `مركز $${grid.center}`, type: 'center',
+    });
+  }
+
+  buyOrders.forEach(o => {
+    const filled = o.status === 'filled';
+    lines.push({
+      price: o.price,
+      color: filled ? '#16A34A' : '#22C55E',
+      style: filled ? 'dashed' : 'solid',
+      label: `شراء $${o.price}` + (filled ? ' ✅' : ''),
+      type: 'buy', filled, qty: o.qty,
+    });
+  });
+
+  sellOrders.forEach(o => {
+    const filled = o.status === 'filled';
+    lines.push({
+      price: o.price,
+      color: filled ? '#DC2626' : '#EF4444',
+      style: filled ? 'dashed' : 'solid',
+      label: `بيع $${o.price}` + (filled ? ' ✅' : ''),
+      type: 'sell', filled, qty: o.qty,
+    });
+  });
+
+  if (grid.take_profit) {
+    lines.push({ price: grid.take_profit, color: '#A855F7', style: 'solid', label: `TP $${grid.take_profit}`, type: 'tp' });
+  }
+  if (grid.stop_loss) {
+    lines.push({ price: grid.stop_loss, color: '#F97316', style: 'solid', label: `SL $${grid.stop_loss}`, type: 'sl' });
+  }
+  return lines;
+}
+
+function startSSE() {
+  if (!GRID_ID) return;
+  if (_sse) { _sse.close(); _sse = null; }
+
+  // EventSource لا يدعم headers — نمرر api_key في query string
+  const url = `${BASE_URL}/api/grids/${GRID_ID}/stream?api_key=${encodeURIComponent(_apiKey)}`;
+  _sse = new EventSource(url);
+
+  _sse.onmessage = (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      if (data.type !== 'grid_update') return;
+
+      // تحديث السعر
+      updatePriceDisplay(data.current_price);
+
+      // تحديث الإحصائيات
+      const bo = data.buy_orders  || [];
+      const so = data.sell_orders || [];
+      const totalOrders  = bo.length + so.length;
+      const buyOpen      = bo.filter(o => o.status !== 'filled').length;
+      const sellOpen     = so.filter(o => o.status !== 'filled').length;
+      const filledOrders = [...bo, ...so].filter(o => o.status === 'filled').length;
+      document.getElementById('s-steps').textContent  = totalOrders + ' أمر';
+      document.getElementById('s-trades').textContent = data.total_trades;
+      document.getElementById('s-upper').textContent  = '$' + data.upper;
+      document.getElementById('s-lower').textContent  = '$' + data.lower;
+      document.getElementById('s-buys').textContent   = buyOpen;
+      document.getElementById('s-sells').textContent  = sellOpen;
+      document.getElementById('s-filled').textContent = filledOrders;
+
+      // إعادة رسم خطوط الأوامر فقط (بدون إعادة تحميل الشمعات)
+      const lines = buildOrderLines(data.buy_orders || [], data.sell_orders || [], data);
+      drawLines(lines, data.current_price);
+      renderOrders(lines);
+
+    } catch (err) {
+      console.warn('SSE parse error:', err);
+    }
+  };
+
+  _sse.onerror = () => {
+    // إعادة الاتصال تلقائياً بعد 5 ثوانٍ عند الانقطاع
+    console.warn('SSE disconnected — reconnecting in 5s');
+    _sse.close();
+    _sse = null;
+    setTimeout(startSSE, 5000);
+  };
+}
+
+// ── Auto refresh every 30s (fallback إذا لم يعمل SSE) ────────────────────────
 function startAutoRefresh() {
   if (_refreshTimer) clearInterval(_refreshTimer);
   _refreshTimer = setInterval(loadChart, 30_000);
@@ -410,7 +525,12 @@ if (window.Telegram?.WebApp) {
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 initChart();
-loadChart();
+// تحميل الشمعات والأوامر أول مرة
+loadChart().then(() => {
+  // بعد التحميل الأولي: ابدأ SSE للتحديثات اللحظية
+  _configReady.then(startSSE);
+});
+// polling كـ fallback كل 30 ثانية (يغطي حالة عدم دعم SSE)
 startAutoRefresh();
 </script>
 </body>
