@@ -5,7 +5,7 @@ import type { SettingsData, AllocationItem } from "../api";
 import Spinner from "../components/Spinner";
 import toast from "react-hot-toast";
 
-export default function Settings() {
+export default function Settings({ onNavigate }: { onNavigate?: (p: string) => void }) {
   const [settings, setSettings] = useState<SettingsData | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -48,9 +48,9 @@ export default function Settings() {
     setSavingKeys(true);
     try {
       await api.saveApiKeys(apiKey, secretKey);
-      toast.success("تم حفظ المفاتيح والتحقق منها");
+      toast.success("✅ تم حفظ مفاتيح API والتحقق منها بنجاح!");
       setApiKey(""); setSecretKey("");
-      load();
+      await load();
     } catch (e: unknown) {
       toast.error((e as any)?.response?.data?.detail || "فشل حفظ المفاتيح");
     } finally {
@@ -152,7 +152,14 @@ export default function Settings() {
               <p className="text-xs text-slate-500">مفعّل: {settings.api_key_preview}</p>
             )}
           </div>
-          {settings?.has_api_keys && <span className="badge-green mr-auto">مفعّل</span>}
+          {settings?.has_api_keys && (
+            <div className="mr-auto flex items-center gap-2">
+              <span className="badge-green">مفعّل</span>
+              <button onClick={() => onNavigate?.("portfolio")} className="text-xs text-brand-400 hover:text-brand-300 underline">
+                عرض المحفظة
+              </button>
+            </div>
+          )}
         </div>
         <div className="space-y-3">
           <div>

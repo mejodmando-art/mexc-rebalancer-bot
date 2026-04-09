@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from "recharts";
-import { RefreshCw, DollarSign, Target, TrendingUp, AlertTriangle } from "lucide-react";
+import { RefreshCw, DollarSign, Target, TrendingUp, AlertTriangle, Key } from "lucide-react";
 import { api } from "../api";
 import type { PortfolioData } from "../api";
 import StatCard from "../components/StatCard";
@@ -8,25 +8,35 @@ import Spinner from "../components/Spinner";
 import toast from "react-hot-toast";
 
 const COLORS = [
-  "#22c55e", "#3b82f6", "#f59e0b", "#ef4444", "#8b5cf6",
-  "#06b6d4", "#f97316", "#ec4899", "#14b8a6", "#a855f7",
-  "#84cc16", "#0ea5e9", "#fb923c", "#e879f9", "#2dd4bf",
+  "#22c55e","#3b82f6","#f59e0b","#ef4444","#8b5cf6",
+  "#06b6d4","#f97316","#ec4899","#14b8a6","#a855f7",
+  "#84cc16","#0ea5e9","#fb923c","#e879f9","#2dd4bf",
 ];
 
-export default function Portfolio() {
+export default function Portfolio({ onNavigate }: { onNavigate?: (p: string) => void }) {
   const [data, setData] = useState<PortfolioData | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [noKeys, setNoKeys] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const load = async (silent = false) => {
     if (!silent) setLoading(true);
     else setRefreshing(true);
+    setError(null);
+    setNoKeys(false);
     try {
       const res = await api.getPortfolio();
       setData(res.data);
     } catch (e: unknown) {
-      const msg = (e as any)?.response?.data?.detail || "فشل تحميل المحفظة";
-      toast.error(msg);
+      const detail = (e as any)?.response?.data?.detail || "";
+      if (detail.includes("API keys not configured") || detail.includes("مفاتيح")) {
+        setNoKeys(true);
+      } else {
+        const msg = detail || "فشل تحميل المحفظة";
+        setError(msg);
+        if (!silent) toast.error(msg);
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -46,37 +56,67 @@ export default function Portfolio() {
     );
   }
 
+  if (noKeys) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="card text-center max-w-sm w-full space-y-4">
+          <div className="w-14 h-14 bg-blue-500/10 rounded-2xl flex items-center justify-center mx-auto">
+            <Key size={28} className="text-blue-400" />
+          </div>
+          <div>
+            <h2 className="text-lg font-bold text-white mb-1">لم يتم ربط MEXC API</h2>
+            <p className="text-slate-400 text-sm">أضف مفاتيح API الخاصة بك لعرض بيانات المحفظة</p>
+          </div>
+          <button
+            onClick={() => onNavigate?.("settings")}
+            className="btn-primary w-full flex items-center justify-center gap-2"
+          >
+            <Key size={16} />
+            الذهاب إلى الإعدادات
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="card text-center max-w-sm w-full space-y-4">
+          <div className="w-14 h-14 bg-red-500/10 rounded-2xl flex items-center justify-center mx-auto">
+            <AlertTriangle size={28} className="text-red-400" />
+          </div>
+          <div>
+            <h2 className="text-lg font-bold text-white mb-1">خطأ في الاتصال</h2>
+            <p className="text-slate-400 text-sm">{error}</p>
+          </div>
+          <button onClick={() => load()} className="btn-secondary w-full">إعادة المحاولة</button>
+        </div>
+      </div>
+    );
+  }
+
   if (!data) return null;
 
   const pieData = data.assets
     .filter(a => a.value_usdt > 0)
-    .map((a, i) => ({
-      name: a.symbol,
-      value: parseFloat(a.value_usdt.toFixed(2)),
-      color: COLORS[i % COLORS.length],
-    }));
+    .map((a, i) => ({ name: a.symbol, value: parseFloat(a.value_usdt.toFixed(2)), color: COLORS[i % COLORS.length] }));
 
   const alertCount = data.assets.filter(a => a.needs_action).length;
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white">{data.portfolio_name}</h1>
           <p className="text-slate-400 text-sm mt-1">نظرة عامة على محفظتك</p>
         </div>
-        <button
-          onClick={() => load(true)}
-          disabled={refreshing}
-          className="btn-secondary flex items-center gap-2"
-        >
+        <button onClick={() => load(true)} disabled={refreshing} className="btn-secondary flex items-center gap-2">
           <RefreshCw size={16} className={refreshing ? "animate-spin" : ""} />
           تحديث
         </button>
       </div>
 
-      {/* Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           label="إجمالي الحساب"
@@ -108,54 +148,31 @@ export default function Portfolio() {
         />
       </div>
 
-      {/* Chart + Table */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Pie Chart */}
         <div className="card">
           <h2 className="text-base font-semibold text-white mb-4">توزيع المحفظة</h2>
           <ResponsiveContainer width="100%" height={280}>
             <PieChart>
-              <Pie
-                data={pieData}
-                cx="50%"
-                cy="50%"
-                innerRadius={70}
-                outerRadius={110}
-                paddingAngle={2}
-                dataKey="value"
-              >
-                {pieData.map((entry, i) => (
-                  <Cell key={i} fill={entry.color} stroke="transparent" />
-                ))}
+              <Pie data={pieData} cx="50%" cy="50%" innerRadius={70} outerRadius={110} paddingAngle={2} dataKey="value">
+                {pieData.map((entry, i) => <Cell key={i} fill={entry.color} stroke="transparent" />)}
               </Pie>
               <Tooltip
                 contentStyle={{ background: "#0f1629", border: "1px solid #2e3d60", borderRadius: 12 }}
                 formatter={((v: number) => [`$${Number(v).toFixed(2)}`, ""]) as any}
                 labelStyle={{ color: "#e2e8f0" }}
               />
-              <Legend
-                formatter={(value) => <span style={{ color: "#94a3b8", fontSize: 12 }}>{value}</span>}
-              />
+              <Legend formatter={(value) => <span style={{ color: "#94a3b8", fontSize: 12 }}>{value}</span>} />
             </PieChart>
           </ResponsiveContainer>
         </div>
 
-        {/* Assets Table */}
         <div className="card overflow-hidden">
           <h2 className="text-base font-semibold text-white mb-4">الأصول</h2>
           <div className="overflow-y-auto max-h-72 space-y-2">
             {data.assets.map((asset, i) => (
-              <div
-                key={asset.symbol}
-                className={`flex items-center justify-between p-3 rounded-xl ${
-                  asset.needs_action ? "bg-red-500/5 border border-red-500/20" : "bg-dark-700"
-                }`}
-              >
+              <div key={asset.symbol} className={`flex items-center justify-between p-3 rounded-xl ${asset.needs_action ? "bg-red-500/5 border border-red-500/20" : "bg-dark-700"}`}>
                 <div className="flex items-center gap-3">
-                  <div
-                    className="w-3 h-3 rounded-full flex-shrink-0"
-                    style={{ background: COLORS[i % COLORS.length] }}
-                  />
+                  <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ background: COLORS[i % COLORS.length] }} />
                   <div>
                     <p className="font-semibold text-white text-sm">{asset.symbol}</p>
                     <p className="text-xs text-slate-500">
@@ -188,7 +205,6 @@ export default function Portfolio() {
         </div>
       </div>
 
-      {/* Drift bars */}
       {data.assets.some(a => a.target_pct !== null) && (
         <div className="card">
           <h2 className="text-base font-semibold text-white mb-4">انحراف التوزيع</h2>
@@ -200,10 +216,7 @@ export default function Portfolio() {
                 <div key={asset.symbol} className="flex items-center gap-3">
                   <span className="text-sm font-medium text-slate-300 w-16 text-left flex-shrink-0">{asset.symbol}</span>
                   <div className="flex-1 bg-dark-700 rounded-full h-2 overflow-hidden">
-                    <div
-                      className={`h-full rounded-full transition-all ${asset.needs_action ? "bg-red-500" : "bg-brand-500"}`}
-                      style={{ width: `${Math.min(100, asset.current_pct)}%` }}
-                    />
+                    <div className={`h-full rounded-full transition-all ${asset.needs_action ? "bg-red-500" : "bg-brand-500"}`} style={{ width: `${Math.min(100, asset.current_pct)}%` }} />
                   </div>
                   <div className="flex items-center gap-2 w-28 flex-shrink-0 justify-end">
                     <span className="text-xs text-slate-400">{asset.current_pct.toFixed(1)}%</span>
