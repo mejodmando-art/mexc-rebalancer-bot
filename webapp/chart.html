@@ -419,7 +419,7 @@ const _confirm = document.getElementById('drag-confirm');
 function _findNearestLine(clientY) {
   const rect  = document.getElementById('chart').getBoundingClientRect();
   const y     = clientY - rect.top;
-  const price = _chart.priceScale('right').coordinateToPrice(y);
+  const price = _candleSeries.coordinateToPrice(y);
   if (!price) return null;
 
   let best = null, bestDist = Infinity;
@@ -427,14 +427,14 @@ function _findNearestLine(clientY) {
     const d = pl._data;
     if (!d || (d.type!=='buy' && d.type!=='sell') || d.filled) continue;
     const dist = Math.abs(d.price - price) / price;
-    if (dist < 0.005 && dist < bestDist) { bestDist = dist; best = pl; }
+    if (dist < 0.012 && dist < bestDist) { bestDist = dist; best = pl; }
   }
   return best;
 }
 
 function _priceAtY(clientY) {
   const rect = document.getElementById('chart').getBoundingClientRect();
-  return _chart.priceScale('right').coordinateToPrice(clientY - rect.top);
+  return _candleSeries.coordinateToPrice(clientY - rect.top);
 }
 
 function _showTooltip(clientX, clientY, text, color) {
@@ -566,7 +566,14 @@ async function _applyEdit(orderData, oldPrice, newPrice) {
 // ── ربط أحداث الماوس واللمس ──────────────────────────────────────────────────
 const _chartEl = document.getElementById('chart');
 
-_chartEl.addEventListener('mousedown',  e => _onStart(e.clientX, e.clientY));
+_chartEl.addEventListener('mousedown', e => {
+  const pl = _findNearestLine(e.clientY);
+  if (pl) {
+    e.stopPropagation();
+    e.preventDefault();
+  }
+  _onStart(e.clientX, e.clientY);
+});
 _chartEl.addEventListener('mousemove',  e => _onMove(e.clientX, e.clientY));
 _chartEl.addEventListener('mouseup',    () => _onEnd());
 _chartEl.addEventListener('mouseleave', () => { if (_drag.active) _onEnd(); _hideTooltip(); });
