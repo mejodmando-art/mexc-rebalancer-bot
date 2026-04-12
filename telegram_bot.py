@@ -107,21 +107,27 @@ def _portfolio_text(cfg: dict) -> str:
     return "\n".join(lines)
 
 
-def _history_text() -> str:
-    rows = get_rebalance_history(10)
+def _history_text(limit: int = 10) -> str:
+    rows = get_rebalance_history(limit)
     if not rows:
         return "📜 لا توجد عمليات إعادة توازن بعد."
-    lines = ["*آخر 10 عمليات إعادة توازن:*\n"]
+    lines = [f"*آخر {limit} عمليات إعادة توازن:*\n"]
     for r in rows:
         paper = " 🧪" if r["paper"] else ""
-        lines.append(f"🕐 `{r['ts']}`{paper} | `{r['mode']}` | `{r['total_usdt']:.2f} USDT`")
-        for d in r["details"]:
-            if d["action"] in ("BUY", "SELL"):
-                lines.append(
-                    f"  {'🟢' if d['action']=='BUY' else '🔴'} {d['symbol']}: "
-                    f"{d['action']} `{d['diff_usdt']:+.2f}` USDT "
-                    f"(dev `{d['deviation']:+.1f}%`)"
-                )
+        trades = [d for d in r["details"] if d["action"] in ("BUY", "SELL")]
+        lines.append(
+            f"🕐 `{r['ts']}`{paper}\n"
+            f"   Mode: `{r['mode']}` | Total: `{r['total_usdt']:.2f} USDT`"
+        )
+        for d in trades:
+            emoji = "🟢" if d["action"] == "BUY" else "🔴"
+            lines.append(
+                f"   {emoji} {d['action']} {d['symbol']}: "
+                f"`{d['diff_usdt']:+.2f}` USDT "
+                f"(dev `{d['deviation']:+.1f}%`)"
+            )
+        if not trades:
+            lines.append("   ✅ لا توجد تعديلات (المحفظة متوازنة)")
         lines.append("")
     return "\n".join(lines)
 
@@ -212,7 +218,18 @@ async def cmd_rebalance(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 async def cmd_history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not _allowed(update):
         return
-    await update.message.reply_text(_history_text(), parse_mode="Markdown", reply_markup=_main_menu())
+    # Allow /history 20 to get more records
+    limit = 10
+    if context.args:
+        try:
+            limit = max(1, min(50, int(context.args[0])))
+        except ValueError:
+            pass
+    text = _history_text(limit)
+    # Telegram message limit is 4096 chars
+    if len(text) > 4000:
+        text = text[:4000] + "\n...(مقتطع)"
+    await update.message.reply_text(text, parse_mode="Markdown", reply_markup=_main_menu())
 
 
 async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -249,17 +266,23 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not _allowed(update):
         return
     await update.message.reply_text(
+        "*🤖 MEXC Smart Portfolio Bot*\n\n"
         "*الأوامر المتاحة:*\n"
         "/start – القائمة الرئيسية\n"
-        "/status – عرض المحفظة الحالية\n"
-        "/rebalance – إعادة توازن يدوي\n"
-        "/settings – إعدادات المحفظة\n"
-        "/history – آخر 10 عمليات\n"
+        "/status – عرض المحفظة الحالية (النسب الحالية vs المستهدفة)\n"
+        "/rebalance – إعادة توازن يدوي فوري\n"
+        "/settings – إعداد المحفظة (عملات، نسب، وضع)\n"
+        "/history \\[N\\] – آخر N عملية (افتراضي 10، أقصى 50)\n"
         "/stats – إحصائيات وأرباح/خسائر\n"
         "/export – تحميل تقرير CSV\n"
         "/stop – إيقاف البوت\n"
-        "/help – هذه الرسالة",
+        "/help – هذه الرسالة\n\n"
+        "*ملاحظات:*\n"
+        "• البوت يعمل على Spot فقط\n"
+        "• جميع الأزواج بـ USDT\n"
+        "• الإشعارات تُرسل تلقائياً عند كل Rebalance",
         parse_mode="Markdown",
+        reply_markup=_main_menu(),
     )
 
 
@@ -539,17 +562,26 @@ def _run_loop(cfg: dict, app: Application) -> None:
             interval = cfg["rebalance"]["proportional"]["check_interval_minutes"] * 60
             while not _stop_event.is_set():
                 try:
+                    cfg = load_config()
                     if needs_rebalance_proportional(client, cfg):
-                        cfg = load_config()
                         details = execute_rebalance(client, cfg)
                         paper = " 🧪" if cfg.get("paper_trading") else ""
                         buys  = [d for d in details if d["action"] == "BUY"]
                         sells = [d for d in details if d["action"] == "SELL"]
-                        lines = [f"🔄 *Rebalance تلقائي*{paper}"]
+                        ts    = _dt.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+                        pnl   = get_pnl(cfg)
+                        sign  = "+" if pnl["pnl_usdt"] >= 0 else ""
+                        lines = [
+                            f"🔄 *Rebalance تلقائي*{paper}",
+                            f"🕐 `{ts}`",
+                            f"💰 الإجمالي: `{pnl['current_usdt']:.2f} USDT`",
+                            f"📊 P&L: `{sign}{pnl['pnl_usdt']:.2f} USDT` (`{sign}{pnl['pnl_pct']:.2f}%`)",
+                            "",
+                        ]
                         for d in sells:
-                            lines.append(f"🔴 SELL {d['symbol']}: `{d['diff_usdt']:+.2f}` USDT")
+                            lines.append(f"🔴 SELL {d['symbol']}: `{d['diff_usdt']:+.2f}` USDT  (انحراف `{d['deviation']:+.1f}%`)")
                         for d in buys:
-                            lines.append(f"🟢 BUY  {d['symbol']}: `{d['diff_usdt']:+.2f}` USDT")
+                            lines.append(f"🟢 BUY  {d['symbol']}: `{d['diff_usdt']:+.2f}` USDT  (انحراف `{d['deviation']:+.1f}%`)")
                         _sync_notify("\n".join(lines))
                 except Exception as e:
                     log.error("Loop error: %s", e)
@@ -557,15 +589,19 @@ def _run_loop(cfg: dict, app: Application) -> None:
                 _stop_event.wait(interval)
 
         elif mode == "timed":
-            frequency = cfg["rebalance"]["timed"]["frequency"]
-            next_run = next_run_time(frequency)
+            timed_cfg = cfg["rebalance"]["timed"]
+            frequency = timed_cfg["frequency"]
+            target_hour = timed_cfg.get("hour", 0)
+            next_run = next_run_time(frequency, target_hour=target_hour)
             while not _stop_event.is_set():
                 try:
                     if _dt.utcnow() >= next_run:
                         cfg = load_config()
                         details = execute_rebalance(client, cfg)
                         paper = " 🧪" if cfg.get("paper_trading") else ""
-                        next_run = next_run_time(frequency)
+                        frequency = cfg["rebalance"]["timed"]["frequency"]
+                        target_hour = cfg["rebalance"]["timed"].get("hour", 0)
+                        next_run = next_run_time(frequency, target_hour=target_hour)
                         buys  = [d for d in details if d["action"] == "BUY"]
                         sells = [d for d in details if d["action"] == "SELL"]
                         lines = [f"⏰ *Rebalance مجدول ({frequency})*{paper}"]

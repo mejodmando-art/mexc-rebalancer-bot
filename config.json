@@ -19,7 +19,8 @@
       "min_deviation_to_execute_pct": 3
     },
     "timed": {
-      "frequency": "daily"
+      "frequency": "daily",
+      "hour": 10
     },
     "unbalanced": {}
   },

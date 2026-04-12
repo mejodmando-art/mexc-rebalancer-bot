@@ -1,0 +1,39 @@
+// API base URL – reads from env or defaults to same-origin
+export const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+
+async function req<T>(path: string, opts?: RequestInit): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    headers: { 'Content-Type': 'application/json' },
+    ...opts,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail ?? res.statusText);
+  }
+  return res.json();
+}
+
+// ── Status & portfolio ──────────────────────────────────────────────────────
+export const getStatus   = ()            => req<any>('/api/status');
+export const getHistory  = (n = 50)      => req<any[]>(`/api/history?limit=${n}`);
+export const getSnapshots= (n = 90)      => req<any[]>(`/api/snapshots?limit=${n}`);
+export const getConfig   = ()            => req<any>('/api/config');
+
+// ── Config update ───────────────────────────────────────────────────────────
+export const updateConfig = (body: Record<string, unknown>) =>
+  req<{ ok: boolean }>('/api/config', { method: 'POST', body: JSON.stringify(body) });
+
+// ── Rebalance ───────────────────────────────────────────────────────────────
+export const triggerRebalance = () =>
+  req<{ ok: boolean; details: any[] }>('/api/rebalance', { method: 'POST' });
+
+// ── Bot control ─────────────────────────────────────────────────────────────
+export const getBotStatus = () => req<any>('/api/bot/status');
+export const startBot     = () => req<any>('/api/bot/start', { method: 'POST' });
+export const stopBot      = () => req<any>('/api/bot/stop',  { method: 'POST' });
+
+// ── Recommended portfolios ──────────────────────────────────────────────────
+export const getRecommended = () => req<any[]>('/api/recommended');
+
+// ── CSV export ──────────────────────────────────────────────────────────────
+export const exportCsvUrl = () => `${API_BASE}/api/export/csv`;

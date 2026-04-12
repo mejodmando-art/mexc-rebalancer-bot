@@ -83,14 +83,18 @@ def _rebalancer_loop() -> None:
                 _stop_event.wait(interval)
 
         elif mode == "timed":
-            frequency = cfg["rebalance"]["timed"]["frequency"]
-            next_run = next_run_time(frequency)
+            timed_cfg = cfg["rebalance"]["timed"]
+            frequency = timed_cfg["frequency"]
+            target_hour = timed_cfg.get("hour", 0)
+            next_run = next_run_time(frequency, target_hour=target_hour)
             while not _stop_event.is_set():
                 try:
                     if datetime.utcnow() >= next_run:
                         cfg = load_config()
                         execute_rebalance(client, cfg)
-                        next_run = next_run_time(frequency)
+                        frequency = cfg["rebalance"]["timed"]["frequency"]
+                        target_hour = cfg["rebalance"]["timed"].get("hour", 0)
+                        next_run = next_run_time(frequency, target_hour=target_hour)
                 except Exception as e:
                     log.error("Loop iteration error: %s", e)
                 _stop_event.wait(60)
@@ -151,6 +155,7 @@ class ConfigUpdate(BaseModel):
     rebalance_mode: Optional[str] = None
     threshold_pct: Optional[int] = None
     frequency: Optional[str] = None
+    timed_hour: Optional[int] = None
     sell_at_termination: Optional[bool] = None
     enable_asset_transfer: Optional[bool] = None
     paper_trading: Optional[bool] = None
@@ -258,6 +263,8 @@ def update_config(body: ConfigUpdate):
         cfg["rebalance"]["proportional"]["threshold_pct"] = body.threshold_pct
     if body.frequency is not None:
         cfg["rebalance"]["timed"]["frequency"] = body.frequency
+    if body.timed_hour is not None:
+        cfg["rebalance"]["timed"]["hour"] = max(0, min(23, body.timed_hour))
     if body.sell_at_termination is not None:
         cfg["termination"]["sell_at_termination"] = body.sell_at_termination
     if body.enable_asset_transfer is not None:
@@ -347,3 +354,53 @@ def bot_stop():
         return {"ok": False, "message": "البوت مش شغال"}
     _stop_event.set()
     return {"ok": True, "message": "تم إيقاف البوت"}
+
+
+# ---------------------------------------------------------------------------
+# Recommended portfolios
+# ---------------------------------------------------------------------------
+
+@app.get("/api/recommended")
+def get_recommended():
+    """Return pre-built portfolio templates (Bitget-style)."""
+    return [
+        {
+            "name": "Top 3 Coins",
+            "description": "BTC + ETH + BNB – أكثر العملات استقراراً",
+            "assets": [
+                {"symbol": "BTC", "allocation_pct": 50},
+                {"symbol": "ETH", "allocation_pct": 30},
+                {"symbol": "BNB", "allocation_pct": 20},
+            ],
+        },
+        {
+            "name": "DeFi Portfolio",
+            "description": "عملات DeFi الرائدة",
+            "assets": [
+                {"symbol": "ETH",  "allocation_pct": 40},
+                {"symbol": "SOL",  "allocation_pct": 30},
+                {"symbol": "AVAX", "allocation_pct": 30},
+            ],
+        },
+        {
+            "name": "Layer 1 Mix",
+            "description": "تنويع على شبكات Layer 1",
+            "assets": [
+                {"symbol": "BTC",  "allocation_pct": 35},
+                {"symbol": "ETH",  "allocation_pct": 25},
+                {"symbol": "SOL",  "allocation_pct": 20},
+                {"symbol": "AVAX", "allocation_pct": 20},
+            ],
+        },
+        {
+            "name": "Balanced 5",
+            "description": "محفظة متوازنة من 5 عملات",
+            "assets": [
+                {"symbol": "BTC",  "allocation_pct": 30},
+                {"symbol": "ETH",  "allocation_pct": 25},
+                {"symbol": "SOL",  "allocation_pct": 20},
+                {"symbol": "BNB",  "allocation_pct": 15},
+                {"symbol": "AVAX", "allocation_pct": 10},
+            ],
+        },
+    ]

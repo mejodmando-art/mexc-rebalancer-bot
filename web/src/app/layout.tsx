@@ -2,8 +2,8 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'MEXC Portfolio Rebalancer',
-  description: 'Smart portfolio auto-rebalancing dashboard',
+  title: 'MEXC Smart Portfolio',
+  description: 'Smart portfolio auto-rebalancing – Bitget-style on MEXC',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
