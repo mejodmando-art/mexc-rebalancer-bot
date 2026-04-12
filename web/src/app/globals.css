@@ -7,8 +7,16 @@ body { @apply bg-gray-950 text-gray-100 font-sans; }
 
 @layer components {
   .btn-primary {
-    @apply bg-brand text-black font-semibold px-4 py-2 rounded-xl
+    @apply bg-brand text-black font-bold px-4 py-2 rounded-xl
            hover:bg-brand-dark transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-secondary {
+    @apply bg-gray-800 text-gray-100 font-semibold px-4 py-2 rounded-xl border border-gray-700
+           hover:bg-gray-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-danger {
+    @apply bg-red-600 text-white font-semibold px-4 py-2 rounded-xl
+           hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
   }
   .icon-btn {
     @apply p-2 rounded-xl border border-gray-700 text-gray-400
@@ -20,5 +28,11 @@ body { @apply bg-gray-950 text-gray-100 font-sans; }
   }
   .label {
     @apply block text-xs text-gray-400 mb-1 font-medium;
+  }
+  .card {
+    @apply bg-gray-900 border border-gray-800 rounded-2xl p-5;
+  }
+  .badge {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold;
   }
 }

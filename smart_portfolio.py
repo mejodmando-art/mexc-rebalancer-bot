@@ -381,15 +381,31 @@ def needs_rebalance_proportional(client: MEXCClient, cfg: dict) -> bool:
 # Timed schedule helper
 # ---------------------------------------------------------------------------
 
-def next_run_time(frequency: str, from_dt: Optional[datetime] = None) -> datetime:
+def next_run_time(
+    frequency: str,
+    from_dt: Optional[datetime] = None,
+    target_hour: int = 0,
+) -> datetime:
+    """Return the next scheduled run datetime.
+
+    target_hour: UTC hour (0-23) at which the rebalance should fire.
+    """
     now = from_dt or datetime.utcnow()
     if frequency == "daily":
-        return now + timedelta(days=1)
+        candidate = now.replace(hour=target_hour, minute=0, second=0, microsecond=0)
+        if candidate <= now:
+            candidate += timedelta(days=1)
+        return candidate
     elif frequency == "weekly":
-        return now + timedelta(weeks=1)
+        candidate = now.replace(hour=target_hour, minute=0, second=0, microsecond=0)
+        if candidate <= now:
+            candidate += timedelta(weeks=1)
+        return candidate
     elif frequency == "monthly":
-        # Approximate: add 30 days
-        return now + timedelta(days=30)
+        candidate = now.replace(hour=target_hour, minute=0, second=0, microsecond=0)
+        if candidate <= now:
+            candidate += timedelta(days=30)
+        return candidate
     raise ValueError(f"Unknown frequency: {frequency}")
 
 
@@ -444,8 +460,10 @@ def run(cfg: dict) -> None:
             terminate(client, cfg)
 
     elif mode == "timed":
-        frequency = cfg["rebalance"]["timed"]["frequency"]
-        next_run = next_run_time(frequency)
+        timed_cfg = cfg["rebalance"]["timed"]
+        frequency = timed_cfg["frequency"]
+        target_hour = timed_cfg.get("hour", 0)
+        next_run = next_run_time(frequency, target_hour=target_hour)
         log.info("First rebalance scheduled at %s UTC", next_run.isoformat())
         try:
             while True:
@@ -453,7 +471,10 @@ def run(cfg: dict) -> None:
                 if now >= next_run:
                     log.info("--- Timed rebalance (%s) ---", frequency)
                     execute_rebalance(client, cfg)
-                    next_run = next_run_time(frequency)
+                    cfg = load_config()
+                    frequency = cfg["rebalance"]["timed"]["frequency"]
+                    target_hour = cfg["rebalance"]["timed"].get("hour", 0)
+                    next_run = next_run_time(frequency, target_hour=target_hour)
                     log.info("Next rebalance at %s UTC", next_run.isoformat())
                 time.sleep(60)
         except KeyboardInterrupt:
