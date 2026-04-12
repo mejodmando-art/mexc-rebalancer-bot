@@ -25,7 +25,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from mexc_client import MEXCClient
-from database import init_db, record_rebalance, record_snapshot, get_rebalance_history
+from database import init_db, record_rebalance, record_snapshot, get_rebalance_history, get_snapshots
 
 logging.basicConfig(
     level=logging.INFO,
