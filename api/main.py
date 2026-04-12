@@ -79,6 +79,31 @@ class ConfigUpdate(BaseModel):
 @app.get("/api/status")
 def get_status():
     cfg = load_config()
+    no_key = not os.environ.get("MEXC_API_KEY")
+    # Return config-only snapshot when API keys are missing
+    if no_key:
+        assets_out = [
+            {
+                "symbol": a["symbol"],
+                "balance": 0,
+                "price": 0,
+                "value_usdt": 0,
+                "actual_pct": a["allocation_pct"],
+                "target_pct": a["allocation_pct"],
+                "deviation": 0,
+            }
+            for a in cfg["portfolio"]["assets"]
+        ]
+        return {
+            "bot_name": cfg["bot"]["name"],
+            "total_usdt": cfg["portfolio"].get("total_usdt", 0),
+            "mode": cfg["rebalance"]["mode"],
+            "paper_trading": cfg.get("paper_trading", False),
+            "last_rebalance": cfg.get("last_rebalance"),
+            "assets": assets_out,
+            "pnl": {"initial_usdt": 0, "current_usdt": 0, "pnl_usdt": 0, "pnl_pct": 0},
+            "warning": "MEXC_API_KEY not set – showing config only",
+        }
     try:
         client = _client()
         portfolio = get_portfolio_value(client, cfg["portfolio"]["assets"])
