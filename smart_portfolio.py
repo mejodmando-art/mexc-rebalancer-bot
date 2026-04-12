@@ -1,5 +1,5 @@
 """
-Smart Portfolio – Bitget Spot Auto-Rebalancing Bot.
+Smart Portfolio – MEXC Spot Auto-Rebalancing Bot.
 
 Rebalance modes
 ---------------
@@ -25,6 +25,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from mexc_client import MEXCClient
+from database import init_db, record_rebalance, record_snapshot, get_rebalance_history
 
 logging.basicConfig(
     level=logging.INFO,
@@ -34,6 +35,9 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.json")
+
+# Initialise DB on import
+init_db()
 
 VALID_THRESHOLDS = {1, 3, 5}
 VALID_TIMED_FREQUENCIES = {"daily", "weekly", "monthly"}
@@ -231,22 +235,27 @@ def get_portfolio_value(client: MEXCClient, assets: list) -> dict:
 # Rebalance execution
 # ---------------------------------------------------------------------------
 
-def execute_rebalance(client: MEXCClient, cfg: dict) -> None:
+def execute_rebalance(client: MEXCClient, cfg: dict) -> list:
     """
     Calculate deviations and place market orders to restore target allocations.
     Sells overweight assets first, then buys underweight ones.
+
+    Returns a list of order detail dicts for notification/history.
+    When cfg['paper_trading'] is True, logs orders but does not place them.
     """
+    paper = cfg.get("paper_trading", False)
     assets_cfg = cfg["portfolio"]["assets"]
     portfolio = get_portfolio_value(client, assets_cfg)
     total_usdt = portfolio["total_usdt"]
 
-    log.info("Portfolio total: %.2f USDT", total_usdt)
+    log.info("Portfolio total: %.2f USDT%s", total_usdt, " [PAPER]" if paper else "")
 
     targets = {a["symbol"]: a["allocation_pct"] for a in assets_cfg}
     actuals = {r["symbol"]: r for r in portfolio["assets"]}
 
     sells = []
     buys = []
+    details = []
 
     for sym, target_pct in targets.items():
         actual = actuals[sym]
@@ -259,38 +268,91 @@ def execute_rebalance(client: MEXCClient, cfg: dict) -> None:
             sym, target_pct, actual["actual_pct"], deviation, diff_usdt,
         )
 
+        entry = {
+            "symbol": sym,
+            "target_pct": target_pct,
+            "actual_pct": round(actual["actual_pct"], 2),
+            "deviation": round(deviation, 2),
+            "diff_usdt": round(diff_usdt, 2),
+            "action": "SKIP",
+        }
+
         if diff_usdt > 0:
-            sells.append({"symbol": sym, "diff_usdt": diff_usdt, "price": actual["price"]})
+            sells.append({"symbol": sym, "diff_usdt": diff_usdt, "price": actual["price"], "entry": entry})
         elif diff_usdt < 0:
-            buys.append({"symbol": sym, "diff_usdt": abs(diff_usdt)})
+            buys.append({"symbol": sym, "diff_usdt": abs(diff_usdt), "entry": entry})
+        else:
+            details.append(entry)
 
     # Execute sells first to free up USDT
     for s in sells:
         sym = s["symbol"]
+        entry = s["entry"]
         if sym == "USDT":
+            entry["action"] = "SKIP"
+            details.append(entry)
             continue
         base_qty = s["diff_usdt"] / s["price"]
-        log.info("SELL %.8f %s (~%.2f USDT)", base_qty, sym, s["diff_usdt"])
-        try:
-            resp = client.place_market_sell(f"{sym}USDT", base_qty)
-            log.info("Sell order response: %s", resp)
-        except Exception as e:
-            log.error("Sell failed for %s: %s", sym, e)
+        log.info("%sSELL %.8f %s (~%.2f USDT)", "[PAPER] " if paper else "", base_qty, sym, s["diff_usdt"])
+        entry["action"] = "SELL"
+        if not paper:
+            try:
+                resp = client.place_market_sell(f"{sym}USDT", base_qty)
+                log.info("Sell order response: %s", resp)
+            except Exception as e:
+                log.error("Sell failed for %s: %s", sym, e)
+                entry["action"] = f"SELL_ERROR: {e}"
+        details.append(entry)
 
-    # Small pause to let orders settle
-    time.sleep(2)
+    if not paper:
+        time.sleep(2)
 
     # Execute buys
     for b in buys:
         sym = b["symbol"]
+        entry = b["entry"]
         if sym == "USDT":
+            entry["action"] = "SKIP"
+            details.append(entry)
             continue
-        log.info("BUY %.2f USDT of %s", b["diff_usdt"], sym)
-        try:
-            resp = client.place_market_buy(f"{sym}USDT", b["diff_usdt"])
-            log.info("Buy order response: %s", resp)
-        except Exception as e:
-            log.error("Buy failed for %s: %s", sym, e)
+        log.info("%sBUY %.2f USDT of %s", "[PAPER] " if paper else "", b["diff_usdt"], sym)
+        entry["action"] = "BUY"
+        if not paper:
+            try:
+                resp = client.place_market_buy(f"{sym}USDT", b["diff_usdt"])
+                log.info("Buy order response: %s", resp)
+            except Exception as e:
+                log.error("Buy failed for %s: %s", sym, e)
+                entry["action"] = f"BUY_ERROR: {e}"
+        details.append(entry)
+
+    # Persist to DB and config
+    mode = cfg["rebalance"]["mode"]
+    record_rebalance(mode, total_usdt, details, paper=paper)
+    record_snapshot(total_usdt, [
+        {"symbol": r["symbol"], "value_usdt": r["value_usdt"], "actual_pct": r["actual_pct"]}
+        for r in portfolio["assets"]
+    ])
+
+    cfg["last_rebalance"] = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+    save_config(cfg)
+
+    return details
+
+
+def get_pnl(cfg: dict) -> dict:
+    """Return simple P&L vs initial invested value."""
+    initial = cfg["portfolio"].get("initial_value_usdt", cfg["portfolio"].get("total_usdt", 0))
+    snapshots = get_snapshots(1)
+    current = snapshots[0]["total_usdt"] if snapshots else initial
+    pnl_usdt = current - initial
+    pnl_pct = (pnl_usdt / initial * 100) if initial else 0.0
+    return {
+        "initial_usdt": initial,
+        "current_usdt": current,
+        "pnl_usdt": round(pnl_usdt, 2),
+        "pnl_pct": round(pnl_pct, 2),
+    }
 
 
 # ---------------------------------------------------------------------------
