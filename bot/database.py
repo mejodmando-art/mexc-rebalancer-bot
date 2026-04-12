@@ -310,6 +310,36 @@ class Database:
                     volume_ratio REAL DEFAULT 0.0,
                     opened_at TEXT
                 )""")
+            # Smart Portfolio tables
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS smart_portfolios (
+                    user_id BIGINT PRIMARY KEY,
+                    rebalance_mode TEXT DEFAULT 'unbalanced',
+                    deviation_threshold_pct INTEGER DEFAULT 5,
+                    timed_interval TEXT DEFAULT 'weekly',
+                    capital_usdt REAL DEFAULT 0.0,
+                    sell_at_termination INTEGER DEFAULT 0,
+                    enable_asset_transfer INTEGER DEFAULT 1,
+                    is_running INTEGER DEFAULT 0,
+                    last_rebalance_at TEXT
+                )""")
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS smart_portfolio_coins (
+                    id SERIAL PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    symbol TEXT NOT NULL,
+                    target_percentage REAL NOT NULL,
+                    UNIQUE(user_id, symbol)
+                )""")
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS smart_portfolio_history (
+                    id SERIAL PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    timestamp TEXT,
+                    summary TEXT,
+                    total_traded_usdt REAL DEFAULT 0.0,
+                    success INTEGER DEFAULT 1
+                )""")
 
     async def _init_sqlite(self):
         async with self._conn() as conn:
@@ -467,6 +497,36 @@ class Database:
                     t1_hit INTEGER DEFAULT 0,
                     volume_ratio REAL DEFAULT 0.0,
                     opened_at TEXT
+                )""")
+            # Smart Portfolio tables
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS smart_portfolios (
+                    user_id INTEGER PRIMARY KEY,
+                    rebalance_mode TEXT DEFAULT 'unbalanced',
+                    deviation_threshold_pct INTEGER DEFAULT 5,
+                    timed_interval TEXT DEFAULT 'weekly',
+                    capital_usdt REAL DEFAULT 0.0,
+                    sell_at_termination INTEGER DEFAULT 0,
+                    enable_asset_transfer INTEGER DEFAULT 1,
+                    is_running INTEGER DEFAULT 0,
+                    last_rebalance_at TEXT
+                )""")
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS smart_portfolio_coins (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    symbol TEXT NOT NULL,
+                    target_percentage REAL NOT NULL,
+                    UNIQUE(user_id, symbol)
+                )""")
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS smart_portfolio_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    timestamp TEXT,
+                    summary TEXT,
+                    total_traded_usdt REAL DEFAULT 0.0,
+                    success INTEGER DEFAULT 1
                 )""")
             await conn.commit()
 
@@ -1063,6 +1123,134 @@ class Database:
                     (user_id, f"{today}%"),
                 )
         return float(row["total"]) if row else 0.0
+
+    # ── Smart Portfolio CRUD ───────────────────────────────────────────────────
+
+    async def get_smart_portfolio(self, user_id: int) -> dict:
+        async with self._conn() as conn:
+            if _USE_PG:
+                row = await conn.fetchone("SELECT * FROM smart_portfolios WHERE user_id=$1", user_id)
+            else:
+                row = await conn.fetchone("SELECT * FROM smart_portfolios WHERE user_id=?", (user_id,))
+            return dict(row) if row else {}
+
+    async def create_smart_portfolio(self, user_id: int) -> None:
+        async with self._conn() as conn:
+            if _USE_PG:
+                await conn.execute(
+                    "INSERT INTO smart_portfolios(user_id) VALUES($1) ON CONFLICT DO NOTHING",
+                    user_id,
+                )
+            else:
+                await conn.execute(
+                    "INSERT OR IGNORE INTO smart_portfolios(user_id) VALUES(?)",
+                    (user_id,),
+                )
+                await conn.commit()
+
+    async def update_smart_portfolio(self, user_id: int, **kwargs) -> None:
+        _ALLOWED = {
+            "rebalance_mode", "deviation_threshold_pct", "timed_interval",
+            "capital_usdt", "sell_at_termination", "enable_asset_transfer",
+            "is_running", "last_rebalance_at",
+        }
+        cols = {k: v for k, v in kwargs.items() if k in _ALLOWED}
+        if not cols:
+            return
+        async with self._conn() as conn:
+            if _USE_PG:
+                sets = ", ".join(f"{k}=${i+2}" for i, k in enumerate(cols))
+                await conn.execute(
+                    f"UPDATE smart_portfolios SET {sets} WHERE user_id=$1",
+                    user_id, *cols.values(),
+                )
+            else:
+                sets = ", ".join(f"{k}=?" for k in cols)
+                await conn.execute(
+                    f"UPDATE smart_portfolios SET {sets} WHERE user_id=?",
+                    (*cols.values(), user_id),
+                )
+                await conn.commit()
+
+    async def get_sp_coins(self, user_id: int) -> list:
+        async with self._conn() as conn:
+            if _USE_PG:
+                rows = await conn.fetchall(
+                    "SELECT symbol, target_percentage FROM smart_portfolio_coins WHERE user_id=$1 ORDER BY id",
+                    user_id,
+                )
+            else:
+                rows = await conn.fetchall(
+                    "SELECT symbol, target_percentage FROM smart_portfolio_coins WHERE user_id=? ORDER BY id",
+                    (user_id,),
+                )
+            return [dict(r) for r in rows]
+
+    async def add_sp_coin(self, user_id: int, symbol: str, target_percentage: float) -> None:
+        async with self._conn() as conn:
+            if _USE_PG:
+                await conn.execute(
+                    "INSERT INTO smart_portfolio_coins(user_id, symbol, target_percentage) VALUES($1,$2,$3) ON CONFLICT(user_id,symbol) DO UPDATE SET target_percentage=$3",
+                    user_id, symbol, target_percentage,
+                )
+            else:
+                await conn.execute(
+                    "INSERT OR REPLACE INTO smart_portfolio_coins(user_id, symbol, target_percentage) VALUES(?,?,?)",
+                    (user_id, symbol, target_percentage),
+                )
+                await conn.commit()
+
+    async def update_sp_coin(self, user_id: int, symbol: str, target_percentage: float) -> None:
+        async with self._conn() as conn:
+            if _USE_PG:
+                await conn.execute(
+                    "UPDATE smart_portfolio_coins SET target_percentage=$3 WHERE user_id=$1 AND symbol=$2",
+                    user_id, symbol, target_percentage,
+                )
+            else:
+                await conn.execute(
+                    "UPDATE smart_portfolio_coins SET target_percentage=? WHERE user_id=? AND symbol=?",
+                    (target_percentage, user_id, symbol),
+                )
+                await conn.commit()
+
+    async def delete_sp_coin(self, user_id: int, symbol: str) -> None:
+        async with self._conn() as conn:
+            if _USE_PG:
+                await conn.execute(
+                    "DELETE FROM smart_portfolio_coins WHERE user_id=$1 AND symbol=$2",
+                    user_id, symbol,
+                )
+            else:
+                await conn.execute(
+                    "DELETE FROM smart_portfolio_coins WHERE user_id=? AND symbol=?",
+                    (user_id, symbol),
+                )
+                await conn.commit()
+
+    async def add_sp_history(self, user_id: int, timestamp: str, summary: str,
+                              total_traded_usdt: float, success: int) -> None:
+        async with self._conn() as conn:
+            if _USE_PG:
+                await conn.execute(
+                    "INSERT INTO smart_portfolio_history(user_id,timestamp,summary,total_traded_usdt,success) VALUES($1,$2,$3,$4,$5)",
+                    user_id, timestamp, summary, total_traded_usdt, success,
+                )
+            else:
+                await conn.execute(
+                    "INSERT INTO smart_portfolio_history(user_id,timestamp,summary,total_traded_usdt,success) VALUES(?,?,?,?,?)",
+                    (user_id, timestamp, summary, total_traded_usdt, success),
+                )
+                await conn.commit()
+
+    async def get_all_running_smart_portfolios(self) -> list:
+        """Return all smart portfolios with is_running=1 for the scheduler."""
+        async with self._conn() as conn:
+            if _USE_PG:
+                rows = await conn.fetchall("SELECT * FROM smart_portfolios WHERE is_running=1")
+            else:
+                rows = await conn.fetchall("SELECT * FROM smart_portfolios WHERE is_running=1")
+            return [dict(r) for r in rows]
 
 
 db = Database()

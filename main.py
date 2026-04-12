@@ -72,6 +72,10 @@ from bot.handlers.momentum_handler import (
     run_momentum_scan,
     SET_SIZE, SET_MAX, SET_LOSS,
 )
+from bot.handlers.smart_portfolio_handler import (
+    sp_callback, build_sp_conversation,
+    sp_menu,
+)
 from bot.handlers.emergency_handler import (
     emergency_menu_callback,
     emergency_pick_coin_callback,
@@ -302,6 +306,10 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(emergency_exec_selected_callback,     pattern="^emergency:exec_selected$"))
     app.add_handler(CallbackQueryHandler(emergency_confirm_all_callback,       pattern="^emergency:confirm_all$"))
     app.add_handler(CallbackQueryHandler(emergency_exec_all_callback,          pattern="^emergency:exec_all$"))
+
+    # ── Smart Portfolio ────────────────────────────────────────────────────────
+    app.add_handler(build_sp_conversation())
+    app.add_handler(CallbackQueryHandler(sp_callback, pattern="^sp:"))
 
     return app
 
