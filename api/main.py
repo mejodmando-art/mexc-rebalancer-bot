@@ -119,6 +119,10 @@ def get_status():
             "assets": assets_out,
             "pnl": {"initial_usdt": 0, "current_usdt": 0, "pnl_usdt": 0, "pnl_pct": 0},
             "warning": "MEXC_API_KEY not set – showing config only",
+            "rebalance_config": {
+                "threshold_pct": cfg["rebalance"]["proportional"]["threshold_pct"],
+                "frequency": cfg["rebalance"]["timed"]["frequency"],
+            },
         }
     try:
         client = _client()
@@ -144,6 +148,10 @@ def get_status():
             "last_rebalance": cfg.get("last_rebalance"),
             "assets": assets_out,
             "pnl": pnl,
+            "rebalance_config": {
+                "threshold_pct": cfg["rebalance"]["proportional"]["threshold_pct"],
+                "frequency": cfg["rebalance"]["timed"]["frequency"],
+            },
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
