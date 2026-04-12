@@ -3,13 +3,20 @@ FastAPI backend – REST API for the web dashboard.
 
 Endpoints
 ---------
-GET  /api/status          – portfolio snapshot (live prices)
-GET  /api/history         – last N rebalance operations
-GET  /api/snapshots       – portfolio value over time (for line chart)
-GET  /api/config          – current config (assets, mode, settings)
-POST /api/config          – update config
-POST /api/rebalance       – trigger manual rebalance
-GET  /api/export/csv      – download CSV report
+GET  /api/status              – portfolio snapshot (live prices)
+GET  /api/history             – last N rebalance operations
+GET  /api/snapshots           – portfolio value over time (for line chart)
+GET  /api/config              – current config (assets, mode, settings)
+POST /api/config              – update config (assets, allocations, mode…)
+POST /api/rebalance           – trigger manual rebalance (returns job_id)
+POST /api/rebalance/cancel    – cancel a pending rebalance within 10 s
+GET  /api/export/csv          – download CSV report
+GET  /api/export/excel        – download Excel report
+GET  /api/bot/status          – rebalancer loop status
+POST /api/bot/start           – start rebalancer loop
+POST /api/bot/stop            – stop rebalancer loop
+GET  /api/notifications/config – Discord / Telegram notification settings
+POST /api/notifications/config – update notification settings
 """
 
 import asyncio
@@ -20,11 +27,11 @@ import sys
 import threading
 import time
 import logging
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Optional
 
-# Support both: running from repo root (Railway) and from api/ subdir
 _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _root not in sys.path:
     sys.path.insert(0, _root)
@@ -55,7 +62,6 @@ init_db()
 # ---------------------------------------------------------------------------
 
 async def _run_telegram_async() -> None:
-    """Run the Telegram bot using its async internals inside FastAPI's event loop."""
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
     if not token:
         log.info("TELEGRAM_BOT_TOKEN not set – Telegram bot disabled")
@@ -84,7 +90,7 @@ async def _run_telegram_async() -> None:
             Application.builder()
             .token(token)
             .post_init(_post_init)
-            .updater(None)          # disable built-in signal handling
+            .updater(None)
             .build()
         )
 
@@ -126,15 +132,14 @@ async def _run_telegram_async() -> None:
 
         async with tg_app:
             await tg_app.start()
-            log.info("Telegram bot polling started (async mode)")
+            log.info("Telegram bot polling started")
             await tg_app.updater.start_polling(drop_pending_updates=True)
-            # Keep running until FastAPI shuts down
-            import asyncio
             while True:
                 await asyncio.sleep(3600)
 
     except Exception as e:
         log.error("Telegram bot error: %s", e)
+
 
 # ---------------------------------------------------------------------------
 # Rebalancer loop manager
@@ -201,9 +206,60 @@ def _is_running() -> bool:
     return _loop_thread is not None and _loop_thread.is_alive()
 
 
+# ---------------------------------------------------------------------------
+# Pending rebalance cancel window (10 seconds)
+# ---------------------------------------------------------------------------
+# Maps job_id -> {"cancel": threading.Event, "done": threading.Event, "result": list | None}
+_pending_rebalances: dict[str, dict] = {}
+_pending_lock = threading.Lock()
+
+
+def _run_rebalance_with_cancel(job_id: str, client: MEXCClient, cfg: dict) -> None:
+    """Execute rebalance after a 10-second cancel window."""
+    entry = _pending_rebalances.get(job_id)
+    if not entry:
+        return
+    cancelled = entry["cancel"].wait(timeout=10)
+    if cancelled:
+        entry["result"] = None
+        entry["done"].set()
+        log.info("Rebalance %s cancelled by user", job_id)
+        return
+    try:
+        result = execute_rebalance(client, cfg)
+        entry["result"] = result
+    except Exception as e:
+        entry["result"] = [{"error": str(e)}]
+        log.error("Rebalance %s failed: %s", job_id, e)
+    finally:
+        entry["done"].set()
+        # Clean up after 60 s
+        def _cleanup():
+            time.sleep(60)
+            with _pending_lock:
+                _pending_rebalances.pop(job_id, None)
+        threading.Thread(target=_cleanup, daemon=True).start()
+
+
+# ---------------------------------------------------------------------------
+# Discord notifications
+# ---------------------------------------------------------------------------
+
+def _send_discord(webhook_url: str, message: str) -> None:
+    """Fire-and-forget Discord webhook notification."""
+    try:
+        import requests as _req
+        _req.post(webhook_url, json={"content": message}, timeout=5)
+    except Exception as e:
+        log.warning("Discord notification failed: %s", e)
+
+
+# ---------------------------------------------------------------------------
+# FastAPI app
+# ---------------------------------------------------------------------------
+
 @asynccontextmanager
 async def lifespan(app):
-    """Start Telegram bot as background task on FastAPI startup."""
     task = asyncio.create_task(_run_telegram_async())
     yield
     task.cancel()
@@ -213,7 +269,7 @@ async def lifespan(app):
         pass
 
 
-app = FastAPI(title="MEXC Portfolio Rebalancer API", version="2.0.0", lifespan=lifespan)
+app = FastAPI(title="MEXC Portfolio Rebalancer API", version="3.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -222,10 +278,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Serve Next.js static export
 _static_dir = os.path.join(_root, "static")
-
-# Mount /_next BEFORE any catch-all so JS/CSS chunks load correctly
 _next_dir = os.path.join(_static_dir, "_next")
 if os.path.isdir(_next_dir):
     app.mount("/_next", StaticFiles(directory=_next_dir), name="nextjs_assets")
@@ -265,15 +318,20 @@ class ConfigUpdate(BaseModel):
     paper_trading: Optional[bool] = None
 
 
+class NotificationConfig(BaseModel):
+    discord_webhook_url: Optional[str] = None
+    discord_enabled: Optional[bool] = None
+    telegram_enabled: Optional[bool] = None
+
+
 # ---------------------------------------------------------------------------
-# Routes
+# Routes – Status & portfolio
 # ---------------------------------------------------------------------------
 
 @app.get("/api/status")
 def get_status():
     cfg = load_config()
     no_key = not os.environ.get("MEXC_API_KEY")
-    # Return config-only snapshot when API keys are missing
     if no_key:
         assets_out = [
             {
@@ -344,10 +402,13 @@ def get_portfolio_snapshots(limit: int = 90):
     return get_snapshots(limit)
 
 
+# ---------------------------------------------------------------------------
+# Routes – Config
+# ---------------------------------------------------------------------------
+
 @app.get("/api/config")
 def get_config():
-    cfg = load_config()
-    return cfg
+    return load_config()
 
 
 @app.post("/api/config")
@@ -356,7 +417,14 @@ def update_config(body: ConfigUpdate):
     if body.bot_name is not None:
         cfg["bot"]["name"] = body.bot_name
     if body.assets is not None:
-        cfg["portfolio"]["assets"] = [a.dict() for a in body.assets]
+        # Duplicate symbol check
+        symbols = [a.symbol.strip().upper() for a in body.assets]
+        if len(symbols) != len(set(symbols)):
+            raise HTTPException(status_code=400, detail="لا يمكن تكرار رموز العملات")
+        cfg["portfolio"]["assets"] = [
+            {"symbol": s, "allocation_pct": a.allocation_pct}
+            for s, a in zip(symbols, body.assets)
+        ]
     if body.total_usdt is not None:
         cfg["portfolio"]["total_usdt"] = body.total_usdt
         if "initial_value_usdt" not in cfg["portfolio"]:
@@ -383,16 +451,115 @@ def update_config(body: ConfigUpdate):
     return {"ok": True}
 
 
+# ---------------------------------------------------------------------------
+# Routes – Rebalance (with 10-second cancel window)
+# ---------------------------------------------------------------------------
+
 @app.post("/api/rebalance")
 def trigger_rebalance():
+    """
+    Starts a rebalance with a 10-second cancel window.
+    Returns a job_id that can be passed to /api/rebalance/cancel.
+    """
     cfg = load_config()
     try:
         client = _client()
-        details = execute_rebalance(client, cfg)
-        return {"ok": True, "details": details}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+    job_id = str(uuid.uuid4())
+    entry = {
+        "cancel": threading.Event(),
+        "done": threading.Event(),
+        "result": None,
+    }
+    with _pending_lock:
+        _pending_rebalances[job_id] = entry
+
+    t = threading.Thread(
+        target=_run_rebalance_with_cancel,
+        args=(job_id, client, cfg),
+        daemon=True,
+    )
+    t.start()
+
+    return {"ok": True, "job_id": job_id, "cancel_window_seconds": 10}
+
+
+@app.post("/api/rebalance/cancel")
+def cancel_rebalance(job_id: str):
+    """Cancel a pending rebalance within the 10-second window."""
+    with _pending_lock:
+        entry = _pending_rebalances.get(job_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="لم يتم العثور على العملية أو انتهت مهلة الإلغاء")
+    if entry["done"].is_set():
+        raise HTTPException(status_code=409, detail="تم تنفيذ العملية بالفعل ولا يمكن إلغاؤها")
+    entry["cancel"].set()
+    return {"ok": True, "message": "تم إلغاء عملية Rebalance"}
+
+
+@app.get("/api/rebalance/status/{job_id}")
+def rebalance_job_status(job_id: str):
+    """Poll the status of a rebalance job."""
+    with _pending_lock:
+        entry = _pending_rebalances.get(job_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Job not found")
+    cancelled = entry["cancel"].is_set()
+    done = entry["done"].is_set()
+    return {
+        "job_id": job_id,
+        "cancelled": cancelled,
+        "done": done,
+        "result": entry.get("result") if done else None,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Routes – Notifications
+# ---------------------------------------------------------------------------
+
+@app.get("/api/notifications/config")
+def get_notification_config():
+    cfg = load_config()
+    notif = cfg.get("notifications", {})
+    return {
+        "discord_enabled": notif.get("discord_enabled", False),
+        "discord_webhook_url": notif.get("discord_webhook_url", ""),
+        "telegram_enabled": notif.get("telegram_enabled", bool(os.environ.get("TELEGRAM_BOT_TOKEN"))),
+    }
+
+
+@app.post("/api/notifications/config")
+def update_notification_config(body: NotificationConfig):
+    cfg = load_config()
+    if "notifications" not in cfg:
+        cfg["notifications"] = {}
+    if body.discord_webhook_url is not None:
+        cfg["notifications"]["discord_webhook_url"] = body.discord_webhook_url
+    if body.discord_enabled is not None:
+        cfg["notifications"]["discord_enabled"] = body.discord_enabled
+    if body.telegram_enabled is not None:
+        cfg["notifications"]["telegram_enabled"] = body.telegram_enabled
+    save_config(cfg)
+    return {"ok": True}
+
+
+@app.post("/api/notifications/test")
+def test_discord_notification():
+    cfg = load_config()
+    notif = cfg.get("notifications", {})
+    webhook = notif.get("discord_webhook_url", "")
+    if not webhook:
+        raise HTTPException(status_code=400, detail="Discord webhook URL غير مضبوط")
+    _send_discord(webhook, "✅ اختبار إشعار Discord من MEXC Smart Portfolio Bot")
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Routes – Export
+# ---------------------------------------------------------------------------
 
 @app.get("/api/export/csv")
 def export_csv():
@@ -417,14 +584,83 @@ def export_csv():
     )
 
 
+@app.get("/api/export/excel")
+def export_excel():
+    try:
+        import openpyxl
+        from openpyxl.styles import Font, PatternFill, Alignment
+        from openpyxl.utils import get_column_letter
+    except ImportError:
+        raise HTTPException(status_code=500, detail="openpyxl غير مثبت")
+
+    rows = get_rebalance_history(500)
+    wb = openpyxl.Workbook()
+
+    # ── Sheet 1: Rebalance History ──────────────────────────────────────────
+    ws = wb.active
+    ws.title = "سجل العمليات"
+
+    headers = ["الوقت", "الوضع", "الإجمالي (USDT)", "تجريبي",
+               "العملة", "الهدف%", "الحالي%", "الفرق%", "الفرق (USDT)", "الإجراء"]
+    header_fill = PatternFill("solid", fgColor="1F2937")
+    header_font = Font(bold=True, color="F0B90B")
+
+    for col, h in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col, value=h)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center")
+
+    row_num = 2
+    for r in rows:
+        for d in r["details"]:
+            action = d.get("action", "")
+            ws.cell(row=row_num, column=1, value=r["ts"])
+            ws.cell(row=row_num, column=2, value=r["mode"])
+            ws.cell(row=row_num, column=3, value=round(r["total_usdt"], 2))
+            ws.cell(row=row_num, column=4, value="نعم" if r["paper"] else "لا")
+            ws.cell(row=row_num, column=5, value=d.get("symbol", ""))
+            ws.cell(row=row_num, column=6, value=d.get("target_pct", 0))
+            ws.cell(row=row_num, column=7, value=d.get("actual_pct", 0))
+            ws.cell(row=row_num, column=8, value=d.get("deviation", 0))
+            ws.cell(row=row_num, column=9, value=d.get("diff_usdt", 0))
+            action_cell = ws.cell(row=row_num, column=10, value=action)
+            if action == "BUY":
+                action_cell.font = Font(color="10B981", bold=True)
+            elif action == "SELL":
+                action_cell.font = Font(color="EF4444", bold=True)
+            row_num += 1
+
+    for col in range(1, len(headers) + 1):
+        ws.column_dimensions[get_column_letter(col)].width = 18
+
+    # ── Sheet 2: Portfolio Snapshots ────────────────────────────────────────
+    ws2 = wb.create_sheet("أداء المحفظة")
+    ws2.cell(row=1, column=1, value="الوقت").font = header_font
+    ws2.cell(row=1, column=2, value="الإجمالي (USDT)").font = header_font
+    for i, snap in enumerate(get_snapshots(500), 2):
+        ws2.cell(row=i, column=1, value=snap["ts"])
+        ws2.cell(row=i, column=2, value=round(snap["total_usdt"], 2))
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    filename = f"portfolio_report_{datetime.utcnow().strftime('%Y%m%d_%H%M')}.xlsx"
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Routes – Health & bot control
+# ---------------------------------------------------------------------------
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
 
-
-# ---------------------------------------------------------------------------
-# Bot control endpoints
-# ---------------------------------------------------------------------------
 
 @app.get("/api/bot/status")
 def bot_status():
@@ -458,53 +694,3 @@ def bot_stop():
         return {"ok": False, "message": "البوت مش شغال"}
     _stop_event.set()
     return {"ok": True, "message": "تم إيقاف البوت"}
-
-
-# ---------------------------------------------------------------------------
-# Recommended portfolios
-# ---------------------------------------------------------------------------
-
-@app.get("/api/recommended")
-def get_recommended():
-    """Return pre-built portfolio templates (Bitget-style)."""
-    return [
-        {
-            "name": "Top 3 Coins",
-            "description": "BTC + ETH + BNB – أكثر العملات استقراراً",
-            "assets": [
-                {"symbol": "BTC", "allocation_pct": 50},
-                {"symbol": "ETH", "allocation_pct": 30},
-                {"symbol": "BNB", "allocation_pct": 20},
-            ],
-        },
-        {
-            "name": "DeFi Portfolio",
-            "description": "عملات DeFi الرائدة",
-            "assets": [
-                {"symbol": "ETH",  "allocation_pct": 40},
-                {"symbol": "SOL",  "allocation_pct": 30},
-                {"symbol": "AVAX", "allocation_pct": 30},
-            ],
-        },
-        {
-            "name": "Layer 1 Mix",
-            "description": "تنويع على شبكات Layer 1",
-            "assets": [
-                {"symbol": "BTC",  "allocation_pct": 35},
-                {"symbol": "ETH",  "allocation_pct": 25},
-                {"symbol": "SOL",  "allocation_pct": 20},
-                {"symbol": "AVAX", "allocation_pct": 20},
-            ],
-        },
-        {
-            "name": "Balanced 5",
-            "description": "محفظة متوازنة من 5 عملات",
-            "assets": [
-                {"symbol": "BTC",  "allocation_pct": 30},
-                {"symbol": "ETH",  "allocation_pct": 25},
-                {"symbol": "SOL",  "allocation_pct": 20},
-                {"symbol": "BNB",  "allocation_pct": 15},
-                {"symbol": "AVAX", "allocation_pct": 10},
-            ],
-        },
-    ]

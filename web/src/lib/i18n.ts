@@ -1,0 +1,116 @@
+// Bilingual translations: Arabic (ar) and English (en)
+
+export type Lang = 'ar' | 'en';
+
+export const t: Record<string, Record<Lang, string>> = {
+  // Navbar
+  dashboard:        { ar: 'لوحة التحكم',    en: 'Dashboard' },
+  createBot:        { ar: 'إنشاء بوت',       en: 'Create Bot' },
+  settings:         { ar: 'الإعدادات',       en: 'Settings' },
+  notifications:    { ar: 'الإشعارات',       en: 'Notifications' },
+  running:          { ar: 'شغال',            en: 'Running' },
+  stopped:          { ar: 'متوقف',           en: 'Stopped' },
+
+  // KPIs
+  totalPortfolio:   { ar: 'إجمالي المحفظة',  en: 'Total Portfolio' },
+  profitLoss:       { ar: 'الربح / الخسارة', en: 'Profit / Loss' },
+  lastRebalance:    { ar: 'آخر Rebalance',   en: 'Last Rebalance' },
+  assetCount:       { ar: 'عدد الأصول',      en: 'Assets' },
+  notYet:           { ar: 'لم يتم بعد',      en: 'Not yet' },
+  currency:         { ar: 'عملة',            en: 'coins' },
+
+  // Asset table
+  assetDist:        { ar: 'توزيع الأصول الحالي', en: 'Current Asset Distribution' },
+  portfolioPerf:    { ar: 'أداء المحفظة (USDT)',  en: 'Portfolio Performance (USDT)' },
+  noDataYet:        { ar: 'لا توجد بيانات كافية بعد', en: 'Not enough data yet' },
+  assetTable:       { ar: 'جدول الأصول',     en: 'Assets Table' },
+  history:          { ar: 'سجل العمليات',    en: 'History' },
+  coin:             { ar: 'العملة',          en: 'Coin' },
+  target:           { ar: 'الهدف%',          en: 'Target%' },
+  current:          { ar: 'الحالي%',         en: 'Current%' },
+  diff:             { ar: 'الفرق',           en: 'Diff' },
+  valueUsdt:        { ar: 'القيمة (USDT)',   en: 'Value (USDT)' },
+  balancePrice:     { ar: 'الرصيد / السعر', en: 'Balance / Price' },
+  noOps:            { ar: 'لا توجد عمليات بعد', en: 'No operations yet' },
+  time:             { ar: 'الوقت',           en: 'Time' },
+  mode:             { ar: 'الوضع',           en: 'Mode' },
+  total:            { ar: 'الإجمالي',        en: 'Total' },
+  operations:       { ar: 'العمليات',        en: 'Operations' },
+  paper:            { ar: 'تجريبي',          en: 'Paper' },
+
+  // Buttons
+  pause:            { ar: 'إيقاف مؤقت',     en: 'Pause' },
+  start:            { ar: 'تشغيل',           en: 'Start' },
+  rebalanceNow:     { ar: 'Rebalance يدوي',  en: 'Manual Rebalance' },
+  cancelRebalance:  { ar: 'إلغاء',           en: 'Cancel' },
+  exportExcel:      { ar: 'تصدير Excel',     en: 'Export Excel' },
+  exportCsv:        { ar: 'CSV',             en: 'CSV' },
+  loading:          { ar: 'جاري...',         en: 'Loading...' },
+  save:             { ar: 'حفظ الإعدادات',  en: 'Save Settings' },
+  saving:           { ar: 'جاري الحفظ...',  en: 'Saving...' },
+  addAsset:         { ar: '+ إضافة',         en: '+ Add' },
+  equalAlloc:       { ar: 'توزيع متساوي',   en: 'Equal Alloc' },
+  createBotBtn:     { ar: 'حفظ وإنشاء البوت', en: 'Save & Create Bot' },
+
+  // Settings
+  settingsTitle:    { ar: 'الإعدادات',       en: 'Settings' },
+  settingsDesc:     { ar: 'تعديل إعدادات المحفظة الذكية', en: 'Edit smart portfolio settings' },
+  botName:          { ar: 'اسم البوت',       en: 'Bot Name' },
+  botNameReadonly:  { ar: 'اسم البوت (لا يمكن تغييره)', en: 'Bot Name (read-only)' },
+  assetsAndAlloc:   { ar: 'الأصول والنسب',  en: 'Assets & Allocations' },
+  rebalanceMode:    { ar: 'وضع إعادة التوازن', en: 'Rebalance Mode' },
+  proportional:     { ar: 'نسبة مئوية',     en: 'Proportional' },
+  timed:            { ar: 'زمني',            en: 'Timed' },
+  manual:           { ar: 'يدوي',            en: 'Manual' },
+  deviationThresh:  { ar: 'عتبة الانحراف',  en: 'Deviation Threshold' },
+  frequency:        { ar: 'التكرار',         en: 'Frequency' },
+  daily:            { ar: 'يومي',            en: 'Daily' },
+  weekly:           { ar: 'أسبوعي',         en: 'Weekly' },
+  monthly:          { ar: 'شهري',           en: 'Monthly' },
+  hourUtc:          { ar: 'الساعة (UTC)',    en: 'Hour (UTC)' },
+  investedUsdt:     { ar: 'المبلغ المستثمر (USDT)', en: 'Invested Amount (USDT)' },
+  extraOptions:     { ar: 'خيارات إضافية',  en: 'Extra Options' },
+  sellOnStop:       { ar: 'البيع عند الإنهاء', en: 'Sell on Stop' },
+  sellOnStopDesc:   { ar: 'تحويل كل الأصول إلى USDT عند إيقاف البوت', en: 'Convert all assets to USDT when bot stops' },
+  assetTransfer:    { ar: 'تمكين تحويل الأصول', en: 'Enable Asset Transfer' },
+  assetTransferDesc:{ ar: 'استخدام رصيد المحفظة الحالي أولاً قبل الشراء', en: 'Use existing wallet balance before buying' },
+  paperMode:        { ar: 'وضع تجريبي',     en: 'Paper Trading' },
+  paperModeDesc:    { ar: 'تشغيل البوت بأموال وهمية', en: 'Run bot with simulated funds' },
+  totalSum:         { ar: 'المجموع',         en: 'Total' },
+  mustBe100:        { ar: '(يجب أن يساوي 100%)', en: '(must equal 100%)' },
+
+  // Notifications
+  notifTitle:       { ar: 'إعدادات الإشعارات', en: 'Notification Settings' },
+  discordWebhook:   { ar: 'Discord Webhook URL', en: 'Discord Webhook URL' },
+  discordEnabled:   { ar: 'تفعيل إشعارات Discord', en: 'Enable Discord Notifications' },
+  telegramEnabled:  { ar: 'تفعيل إشعارات Telegram', en: 'Enable Telegram Notifications' },
+  testDiscord:      { ar: 'اختبار Discord',  en: 'Test Discord' },
+  discordDesc:      { ar: 'احصل على Webhook من: Server Settings → Integrations → Webhooks', en: 'Get Webhook from: Server Settings → Integrations → Webhooks' },
+
+  // Create bot
+  createBotTitle:   { ar: 'إنشاء محفظة ذكية', en: 'Create Smart Portfolio' },
+  createBotSubtitle:{ ar: 'Spot – MEXC Exchange', en: 'Spot – MEXC Exchange' },
+  minRecommended:   { ar: 'الحد الأدنى الموصى به', en: 'Minimum recommended' },
+
+  // Errors / messages
+  errDuplicate:     { ar: 'لا يمكن تكرار العملات', en: 'Duplicate coin symbols not allowed' },
+  errSum:           { ar: 'مجموع النسب يجب أن يساوي 100%', en: 'Allocations must sum to 100%' },
+  errSymbol:        { ar: 'أدخل رمز كل عملة', en: 'Enter a symbol for each coin' },
+  errBotName:       { ar: 'أدخل اسم البوت', en: 'Enter a bot name' },
+  errAssetCount:    { ar: 'عدد العملات يجب أن يكون بين 2 و 10', en: 'Asset count must be between 2 and 10' },
+  errAmount:        { ar: 'أدخل مبلغ استثمار صحيح', en: 'Enter a valid investment amount' },
+  successSaved:     { ar: 'تم حفظ الإعدادات بنجاح', en: 'Settings saved successfully' },
+  successCreated:   { ar: 'تم إنشاء البوت وتشغيله بنجاح!', en: 'Bot created and started successfully!' },
+  successRebalance: { ar: 'تم تنفيذ إعادة التوازن بنجاح', en: 'Rebalance executed successfully' },
+  cancelledRebalance:{ ar: 'تم إلغاء عملية Rebalance', en: 'Rebalance cancelled' },
+  errLoad:          { ar: 'خطأ في تحميل البيانات', en: 'Error loading data' },
+  loadingData:      { ar: 'جاري التحميل...', en: 'Loading...' },
+  warning:          { ar: 'تحذير',           en: 'Warning' },
+  experimental:     { ar: 'تجريبي',          en: 'Experimental' },
+  cancelWindow:     { ar: 'يمكنك الإلغاء خلال', en: 'You can cancel within' },
+  seconds:          { ar: 'ثانية',           en: 'seconds' },
+};
+
+export function tr(key: string, lang: Lang): string {
+  return t[key]?.[lang] ?? key;
+}

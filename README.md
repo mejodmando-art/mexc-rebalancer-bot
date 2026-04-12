@@ -1,187 +1,204 @@
-# MEXC Smart Portfolio Bot
+<div dir="rtl" align="right">
 
-Auto-rebalancing spot portfolio on MEXC — Bitget-style interface, Python backend, React dashboard.
+# 🤖 MEXC Smart Portfolio — بوت إعادة التوازن الذكي
 
----
-
-## Features
-
-- **3 rebalance modes**: Proportional (deviation-based), Timed (daily/weekly/monthly at a set hour), Unbalanced (manual only)
-- **2–10 assets** with custom % allocations; equal-distribution button
-- **Recommended portfolios**: Top 3 Coins, DeFi, Layer 1 Mix, Balanced 5
-- **Paper Trading mode**: full simulation without real orders
-- **Web dashboard** (Next.js): Pie chart, P&L, asset table, history log, bot controls
-- **Telegram bot**: `/status`, `/rebalance`, `/settings`, `/history`, `/stats`, `/export`, `/stop`
-- **Auto-notifications**: Telegram message on every rebalance with details and P&L
-- **Sell at termination** and **Asset Transfer** options
-- SQLite history + CSV export
+بوت Python لإعادة توازن المحفظة تلقائياً على منصة MEXC Spot، مع واجهة ويب عربية/إنجليزية وبوت تليجرام.
 
 ---
 
-## Repository Layout
+## 📋 المحتويات
 
-```
-main.py              – CLI entry point
-mexc_client.py       – MEXC Spot REST API client (HMAC-SHA256)
-smart_portfolio.py   – Rebalance engine (all 3 modes)
-telegram_bot.py      – Telegram bot (python-telegram-bot >= 20)
-database.py          – SQLite layer (history + snapshots)
-api/main.py          – FastAPI REST API for the web dashboard
-web/                 – Next.js 14 dashboard (React + Tailwind + Recharts)
-config.json          – Runtime config (single source of truth)
-Procfile             – Railway process definitions
-requirements.txt     – Python dependencies
-```
+- [المتطلبات](#المتطلبات)
+- [التثبيت](#التثبيت)
+- [متغيرات البيئة](#متغيرات-البيئة)
+- [تشغيل البوت](#تشغيل-البوت)
+- [واجهة الويب](#واجهة-الويب)
+- [بوت تليجرام](#بوت-تليجرام)
+- [إشعارات Discord](#إشعارات-discord)
+- [أوضاع إعادة التوازن](#أوضاع-إعادة-التوازن)
+- [هيكل الملفات](#هيكل-الملفات)
+- [قاعدة البيانات](#قاعدة-البيانات)
 
 ---
 
-## Environment Variables
+## المتطلبات
 
-| Variable              | Required | Purpose                                    |
-|-----------------------|----------|--------------------------------------------|
-| MEXC_API_KEY          | Yes      | MEXC API key (Spot trading permissions)    |
-| MEXC_SECRET_KEY       | Yes      | MEXC API secret                            |
-| TELEGRAM_BOT_TOKEN    | Yes*     | BotFather token; triggers Telegram mode    |
-| TELEGRAM_CHAT_ID      | No       | Restrict bot to a single Telegram user ID  |
-
-*Required for Telegram mode (default Railway deployment).
+- Python 3.10+
+- Node.js 18+ (لبناء واجهة الويب)
+- حساب MEXC مع صلاحيات Spot Trading
 
 ---
 
-## Quick Start
-
-### 1. Install dependencies
+## التثبيت
 
 ```bash
+# 1. استنساخ المشروع
+git clone https://github.com/your-repo/mexc-rebalancer-bot.git
+cd mexc-rebalancer-bot
+
+# 2. تثبيت مكتبات Python
 pip install -r requirements.txt
+
+# 3. بناء واجهة الويب (اختياري — للإنتاج)
+cd web
+npm install
+npm run build
+cp -r out/* ../static/
+cd ..
 ```
 
-### 2. Set environment variables
+---
 
-```bash
-export MEXC_API_KEY=your_api_key
-export MEXC_SECRET_KEY=your_secret_key
-export TELEGRAM_BOT_TOKEN=your_bot_token
-export TELEGRAM_CHAT_ID=your_telegram_user_id
+## متغيرات البيئة
+
+أنشئ ملف `.env` في جذر المشروع:
+
+```env
+# مطلوب — مفاتيح MEXC API
+MEXC_API_KEY=your_api_key_here
+MEXC_SECRET_KEY=your_secret_key_here
+
+# اختياري — تفعيل بوت تليجرام
+TELEGRAM_BOT_TOKEN=your_bot_token_here
+TELEGRAM_CHAT_ID=your_chat_id_here   # لتقييد الوصول لمستخدم واحد
+
+# اختياري — وضع تجريبي (لا ينفذ صفقات حقيقية)
+PAPER_TRADING=false
 ```
 
-### 3. Run
+> **كيف تحصل على مفاتيح MEXC؟**
+> 1. سجّل دخول على [mexc.com](https://www.mexc.com)
+> 2. اذهب إلى: الحساب ← API Management
+> 3. أنشئ مفتاحاً جديداً بصلاحية **Spot Trading**
+> 4. احفظ `API Key` و `Secret Key`
+
+---
+
+## تشغيل البوت
 
 ```bash
-# Telegram bot (default)
-python main.py --telegram
+# تشغيل الخادم (API + واجهة الويب + تليجرام)
+python main.py
 
-# FastAPI web dashboard backend
+# أو مباشرة عبر uvicorn
 uvicorn api.main:app --host 0.0.0.0 --port 8000
+```
 
-# Web frontend (development)
-cd web && npm install && npm run dev
+افتح المتصفح على: `http://localhost:8000`
 
-# One-off manual rebalance
-python main.py --rebalance-now
+---
 
-# Portfolio snapshot (no trading)
-python main.py --status
+## واجهة الويب
+
+### الميزات
+| الميزة | الوصف |
+|--------|-------|
+| **لوحة التحكم** | عرض المحفظة الحية مع الرسوم البيانية |
+| **تعديل الأصول** | إضافة/حذف/تعديل العملات والنسب مباشرة من الداشبورد |
+| **منع التكرار** | خطأ أحمر فوري عند إدخال عملة مكررة |
+| **عمود الفرق** | يعرض (الحالي% - الهدف%) بألوان |
+| **Rebalance + إلغاء** | زر Rebalance مع نافذة إلغاء 10 ثواني |
+| **تصدير Excel** | تقرير كامل بالعمليات والأداء |
+| **تصدير CSV** | ملف CSV للعمليات |
+| **Dark/Light Mode** | زر تبديل في الشريط العلوي |
+| **عربي/إنجليزي** | تبديل اللغة من الشريط العلوي |
+| **إشعارات Discord** | ضبط Webhook واختباره |
+
+### الصفحات
+- **📊 لوحة التحكم** — المحفظة الحية، الرسوم البيانية، جدول الأصول، سجل العمليات
+- **➕ إنشاء بوت** — إعداد محفظة جديدة من الصفر
+- **⚙️ الإعدادات** — تعديل الأصول والنسب ووضع إعادة التوازن
+- **🔔 الإشعارات** — ضبط Discord وتليجرام
+
+---
+
+## بوت تليجرام
+
+### الأوامر المتاحة
+
+| الأمر | الوظيفة |
+|-------|---------|
+| `/start` | عرض القائمة الرئيسية |
+| `/status` | عرض حالة المحفظة الحالية |
+| `/rebalance` | تنفيذ إعادة توازن يدوي |
+| `/history` | عرض آخر 10 عمليات |
+| `/stats` | إحصائيات الأداء والربح/الخسارة |
+| `/export` | تصدير سجل العمليات CSV |
+| `/settings` | تعديل إعدادات المحفظة |
+| `/stop` | إيقاف البوت |
+| `/help` | عرض المساعدة |
+
+> **ملاحظة:** البوت يقرأ المفاتيح من متغيرات البيئة فقط — لا يطلبها عبر المحادثة.
+
+---
+
+## إشعارات Discord
+
+1. افتح سيرفر Discord الخاص بك
+2. اذهب إلى: **Server Settings ← Integrations ← Webhooks**
+3. أنشئ Webhook جديد وانسخ الرابط
+4. في واجهة الويب: **🔔 الإشعارات ← Discord ← الصق الرابط ← اختبار**
+
+---
+
+## أوضاع إعادة التوازن
+
+### 📊 نسبة مئوية (Proportional)
+البوت يفحص المحفظة كل 5 دقائق. إذا انحرف أي أصل عن هدفه بمقدار العتبة المحددة (1% أو 3% أو 5%)، يُنفّذ إعادة التوازن تلقائياً.
+
+**مثال:** هدف BTC = 50%، الحالي = 56% → انحراف 6% → يُباع الزائد.
+
+### ⏰ زمني (Timed)
+إعادة التوازن تتم في وقت محدد:
+- **يومي** — كل يوم في الساعة المحددة (UTC)
+- **أسبوعي** — مرة كل أسبوع
+- **شهري** — مرة كل 30 يوم
+
+### 🔓 يدوي (Unbalanced)
+لا يوجد إعادة توازن تلقائي. تنفّذه يدوياً من لوحة التحكم أو عبر تليجرام.
+
+---
+
+## هيكل الملفات
+
+```
+mexc-rebalancer-bot/
+├── api/
+│   └── main.py          # FastAPI backend (REST API)
+├── web/
+│   └── src/
+│       ├── app/         # Next.js pages
+│       ├── components/  # React components
+│       └── lib/         # API client + i18n
+├── static/              # Next.js build output (served by FastAPI)
+├── database.py          # SQLite layer
+├── mexc_client.py       # MEXC REST API client
+├── smart_portfolio.py   # منطق إعادة التوازن
+├── telegram_bot.py      # بوت تليجرام
+├── main.py              # نقطة الدخول
+├── config.json          # إعدادات المحفظة
+└── requirements.txt     # مكتبات Python
 ```
 
 ---
 
-## Web Dashboard
+## قاعدة البيانات
 
-Set the API URL in `web/.env.local`:
+يستخدم البوت **SQLite** فقط (ملف `portfolio.db` في جذر المشروع).
 
-```
-NEXT_PUBLIC_API_URL=http://localhost:8000
-```
-
-### Pages
-
-| Tab | Description |
-|-----|-------------|
-| Dashboard | Pie chart, P&L cards, asset table, history log, manual rebalance |
-| Create Bot | Recommended or manual setup, paper trading toggle |
-| Settings | Edit assets, allocations, rebalance mode, amount at any time |
+### الجداول
+| الجدول | المحتوى |
+|--------|---------|
+| `rebalance_history` | سجل كل عمليات إعادة التوازن مع التفاصيل |
+| `portfolio_snapshots` | لقطات دورية لقيمة المحفظة (للرسم البياني) |
 
 ---
 
-## Telegram Commands
+## ملاحظات مهمة
 
-| Command | Description |
-|---------|-------------|
-| /start | Main menu with inline keyboard |
-| /status | Live portfolio: actual% vs target%, deviation |
-| /rebalance | Trigger immediate rebalance |
-| /settings | Guided wizard to reconfigure portfolio |
-| /history [N] | Last N rebalance operations (default 10, max 50) |
-| /stats | P&L, initial vs current value, total operations |
-| /export | Download CSV report |
-| /stop | Stop the rebalancer loop |
-| /help | Command reference |
+- **التداول الحقيقي:** تأكد من أن `PAPER_TRADING=false` في متغيرات البيئة قبل التشغيل الفعلي.
+- **الحد الأدنى للصفقة:** MEXC تشترط حداً أدنى لكل صفقة (عادةً 5-10 USDT). تأكد أن قيمة كل أصل كافية.
+- **الأمان:** لا تشارك مفاتيح API مع أحد. استخدم صلاحية Spot Trading فقط (بدون سحب).
+- **النسخ الاحتياطي:** احتفظ بنسخة من `config.json` و `portfolio.db`.
 
----
-
-## Rebalance Modes
-
-### Proportional
-- Checks every 5 minutes
-- Triggers only when any asset deviates >= min_deviation_to_execute_pct (default 3%)
-- Configurable threshold: 1%, 3%, or 5%
-
-### Timed
-- Runs on a fixed schedule: daily / weekly / monthly
-- Configurable UTC hour (e.g. 10:00 UTC)
-
-### Unbalanced
-- No automatic rebalancing
-- Use the dashboard button or /rebalance to trigger manually
-
----
-
-## config.json Schema
-
-```json
-{
-  "bot": { "name": "My MEXC Portfolio" },
-  "portfolio": {
-    "assets": [
-      { "symbol": "BTC", "allocation_pct": 50.0 },
-      { "symbol": "ETH", "allocation_pct": 30.0 },
-      { "symbol": "SOL", "allocation_pct": 20.0 }
-    ],
-    "total_usdt": 1000,
-    "initial_value_usdt": 1000
-  },
-  "rebalance": {
-    "mode": "proportional",
-    "proportional": {
-      "threshold_pct": 5,
-      "check_interval_minutes": 5,
-      "min_deviation_to_execute_pct": 3
-    },
-    "timed": { "frequency": "daily", "hour": 10 },
-    "unbalanced": {}
-  },
-  "termination": { "sell_at_termination": false },
-  "asset_transfer": { "enable_asset_transfer": false },
-  "paper_trading": false,
-  "last_rebalance": null
-}
-```
-
----
-
-## Deployment (Railway)
-
-1. Connect your GitHub repo to Railway
-2. Set all environment variables in Railway Variables
-3. Procfile runs: worker (Telegram bot) + web (FastAPI API)
-4. Deploy Next.js frontend on Vercel with NEXT_PUBLIC_API_URL pointing to Railway API URL
-
----
-
-## Notes
-
-- All trading pairs are {BASE}USDT (e.g. BTCUSDT)
-- Trading fees are standard MEXC Spot fees — no additional bot fees
-- Bot name cannot be changed after creation
-- All settings can be edited at any time via Settings page or /settings
+</div>

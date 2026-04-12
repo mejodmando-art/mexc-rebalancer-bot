@@ -14,10 +14,10 @@ async function req<T>(path: string, opts?: RequestInit): Promise<T> {
 }
 
 // ── Status & portfolio ──────────────────────────────────────────────────────
-export const getStatus   = ()            => req<any>('/api/status');
-export const getHistory  = (n = 50)      => req<any[]>(`/api/history?limit=${n}`);
-export const getSnapshots= (n = 90)      => req<any[]>(`/api/snapshots?limit=${n}`);
-export const getConfig   = ()            => req<any>('/api/config');
+export const getStatus    = ()       => req<any>('/api/status');
+export const getHistory   = (n = 50) => req<any[]>(`/api/history?limit=${n}`);
+export const getSnapshots = (n = 90) => req<any[]>(`/api/snapshots?limit=${n}`);
+export const getConfig    = ()       => req<any>('/api/config');
 
 // ── Config update ───────────────────────────────────────────────────────────
 export const updateConfig = (body: Record<string, unknown>) =>
@@ -25,15 +25,28 @@ export const updateConfig = (body: Record<string, unknown>) =>
 
 // ── Rebalance ───────────────────────────────────────────────────────────────
 export const triggerRebalance = () =>
-  req<{ ok: boolean; details: any[] }>('/api/rebalance', { method: 'POST' });
+  req<{ ok: boolean; job_id: string; cancel_window_seconds: number }>('/api/rebalance', { method: 'POST' });
+
+export const cancelRebalance = (jobId: string) =>
+  req<{ ok: boolean; message: string }>(`/api/rebalance/cancel?job_id=${jobId}`, { method: 'POST' });
+
+export const getRebalanceJobStatus = (jobId: string) =>
+  req<{ job_id: string; cancelled: boolean; done: boolean; result: any[] | null }>(
+    `/api/rebalance/status/${jobId}`
+  );
 
 // ── Bot control ─────────────────────────────────────────────────────────────
 export const getBotStatus = () => req<any>('/api/bot/status');
 export const startBot     = () => req<any>('/api/bot/start', { method: 'POST' });
 export const stopBot      = () => req<any>('/api/bot/stop',  { method: 'POST' });
 
-// ── Recommended portfolios ──────────────────────────────────────────────────
-export const getRecommended = () => req<any[]>('/api/recommended');
+// ── Notifications ───────────────────────────────────────────────────────────
+export const getNotifConfig    = ()                              => req<any>('/api/notifications/config');
+export const updateNotifConfig = (body: Record<string, unknown>) =>
+  req<{ ok: boolean }>('/api/notifications/config', { method: 'POST', body: JSON.stringify(body) });
+export const testDiscord = () =>
+  req<{ ok: boolean }>('/api/notifications/test', { method: 'POST' });
 
-// ── CSV export ──────────────────────────────────────────────────────────────
-export const exportCsvUrl = () => `${API_BASE}/api/export/csv`;
+// ── Export ──────────────────────────────────────────────────────────────────
+export const exportCsvUrl   = () => `${API_BASE}/api/export/csv`;
+export const exportExcelUrl = () => `${API_BASE}/api/export/excel`;
