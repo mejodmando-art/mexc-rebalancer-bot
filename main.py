@@ -61,8 +61,7 @@ def main() -> None:
     parser.add_argument("--terminate", action="store_true", help="Stop bot and optionally sell all assets")
     args = parser.parse_args()
 
-    # Auto-detect Telegram mode if token is set and no other flag given
-    if args.telegram or (os.environ.get("TELEGRAM_BOT_TOKEN") and not any([args.setup, args.status, args.rebalance_now, args.terminate])):
+    if args.telegram or os.environ.get("TELEGRAM_BOT_TOKEN"):
         from telegram_bot import start_telegram_bot
         start_telegram_bot()
         return
