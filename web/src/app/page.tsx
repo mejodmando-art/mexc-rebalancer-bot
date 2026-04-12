@@ -88,12 +88,14 @@ export default function Dashboard() {
   const [showSettings, setShowSettings] = useState(false);
   const [error, setError]       = useState<string | null>(null);
 
+  const API = process.env.NEXT_PUBLIC_API_URL || 'https://worker-production-5766.up.railway.app';
+
   const fetchAll = useCallback(async () => {
     try {
       const [s, sn, h] = await Promise.all([
-        fetch('/api/status').then(r => r.json()),
-        fetch('/api/snapshots?limit=60').then(r => r.json()),
-        fetch('/api/history?limit=10').then(r => r.json()),
+        fetch(`${API}/api/status`).then(r => r.json()),
+        fetch(`${API}/api/snapshots?limit=60`).then(r => r.json()),
+        fetch(`${API}/api/history?limit=10`).then(r => r.json()),
       ]);
       setStatus(s);
       setSnaps(sn);
@@ -115,14 +117,14 @@ export default function Dashboard() {
   const handleRebalance = async () => {
     setRebalancing(true);
     try {
-      await fetch('/api/rebalance', { method: 'POST' });
+      await fetch(`${API}/api/rebalance`, { method: 'POST' });
       await fetchAll();
     } finally {
       setRebalancing(false);
     }
   };
 
-  const handleExport = () => { window.open('/api/export/csv', '_blank'); };
+  const handleExport = () => { window.open(`${API}/api/export/csv`, '_blank'); };
 
   if (loading) {
     return (
@@ -351,9 +353,11 @@ function SettingsPanel({ onClose, onSaved }: { onClose: () => void; onSaved: () 
   const [cfg, setCfg]     = useState<Record<string, unknown> | null>(null);
   const [saving, setSaving] = useState(false);
 
+  const API = process.env.NEXT_PUBLIC_API_URL || 'https://worker-production-5766.up.railway.app';
+
   useEffect(() => {
-    fetch('/api/config').then(r => r.json()).then(setCfg);
-  }, []);
+    fetch(`${API}/api/config`).then(r => r.json()).then(setCfg);
+  }, [API]);
 
   if (!cfg) return null;
 
@@ -379,7 +383,7 @@ function SettingsPanel({ onClose, onSaved }: { onClose: () => void; onSaved: () 
 
   const save = async () => {
     setSaving(true);
-    await fetch('/api/config', {
+    await fetch(`${API}/api/config`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

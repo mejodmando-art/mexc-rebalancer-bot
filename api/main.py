@@ -18,14 +18,17 @@ import os
 import sys
 from typing import Optional
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+# Support both: running from repo root (Railway) and from api/ subdir
+_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _root not in sys.path:
+    sys.path.insert(0, _root)
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from database import get_rebalance_history, get_snapshots, init_db
+from database import get_rebalance_history, get_snapshots, init_db, record_snapshot
 from mexc_client import MEXCClient
 from smart_portfolio import (
     execute_rebalance,
