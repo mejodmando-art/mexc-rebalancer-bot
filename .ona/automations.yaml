@@ -1,0 +1,9 @@
+services:
+  smart-portfolio-bot:
+    name: Smart Portfolio Bot
+    description: MEXC Spot auto-rebalancing bot
+    commands:
+      start: pip install -q -r requirements.txt && python main.py
+      stop: ""
+    triggeredBy:
+      - postDevcontainerStart
