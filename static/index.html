@@ -269,8 +269,6 @@ async function triggerRebalance(){
 
 function exportCSV(){window.open('/api/export/csv','_blank');}
 
-let _botRunning=false;
-
 async function loadBotStatus(){
   try{
     const s=await api('/api/bot/status');
