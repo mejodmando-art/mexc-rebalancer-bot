@@ -12,6 +12,7 @@ POST /api/rebalance       – trigger manual rebalance
 GET  /api/export/csv      – download CSV report
 """
 
+import asyncio
 import io
 import csv
 import os
@@ -19,6 +20,7 @@ import sys
 import threading
 import time
 import logging
+from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Optional
 
@@ -49,26 +51,90 @@ from smart_portfolio import (
 init_db()
 
 # ---------------------------------------------------------------------------
-# Telegram bot – runs in background thread alongside FastAPI
+# Telegram bot – runs as asyncio background task inside FastAPI event loop
 # ---------------------------------------------------------------------------
 
-def _start_telegram_in_background() -> None:
-    """Start the Telegram bot in a daemon thread if token is available."""
+async def _run_telegram_async() -> None:
+    """Run the Telegram bot using its async internals inside FastAPI's event loop."""
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
     if not token:
         log.info("TELEGRAM_BOT_TOKEN not set – Telegram bot disabled")
         return
     try:
-        from telegram_bot import start_telegram_bot
-        t = threading.Thread(target=start_telegram_bot, daemon=True, name="telegram-bot")
-        t.start()
-        log.info("Telegram bot started in background thread")
+        from telegram import Update
+        from telegram.ext import Application
+        from telegram_bot import (
+            _post_init, button_handler, cmd_export, cmd_help,
+            cmd_history, cmd_rebalance, cmd_start, cmd_stats,
+            cmd_status, cmd_stop, settings_cancel, settings_start,
+            settings_assets_count, settings_asset_symbol, settings_asset_pct,
+            settings_equal_alloc, settings_usdt, settings_mode,
+            settings_threshold, settings_frequency, settings_sell_term,
+            settings_asset_transfer, settings_paper_mode,
+            ST_ASSETS_COUNT, ST_ASSET_SYMBOL, ST_ASSET_PCT, ST_EQUAL_ALLOC,
+            ST_USDT_AMOUNT, ST_REBALANCE_MODE, ST_THRESHOLD, ST_FREQUENCY,
+            ST_SELL_TERM, ST_ASSET_TRANSFER, ST_PAPER_MODE,
+        )
+        from telegram.ext import (
+            CallbackQueryHandler, CommandHandler,
+            ConversationHandler, MessageHandler, filters,
+        )
+
+        tg_app = (
+            Application.builder()
+            .token(token)
+            .post_init(_post_init)
+            .updater(None)          # disable built-in signal handling
+            .build()
+        )
+
+        settings_conv = ConversationHandler(
+            entry_points=[
+                CommandHandler("settings", settings_start),
+                CallbackQueryHandler(settings_start, pattern="^settings$"),
+            ],
+            states={
+                ST_ASSETS_COUNT:   [MessageHandler(filters.TEXT & ~filters.COMMAND, settings_assets_count)],
+                ST_ASSET_SYMBOL:   [MessageHandler(filters.TEXT & ~filters.COMMAND, settings_asset_symbol)],
+                ST_ASSET_PCT:      [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, settings_asset_pct),
+                    CallbackQueryHandler(settings_equal_alloc, pattern="^equal_alloc$"),
+                ],
+                ST_EQUAL_ALLOC:    [CallbackQueryHandler(settings_equal_alloc, pattern="^equal_alloc$")],
+                ST_USDT_AMOUNT:    [MessageHandler(filters.TEXT & ~filters.COMMAND, settings_usdt)],
+                ST_REBALANCE_MODE: [CallbackQueryHandler(settings_mode, pattern="^mode_")],
+                ST_THRESHOLD:      [CallbackQueryHandler(settings_threshold, pattern="^thr_")],
+                ST_FREQUENCY:      [CallbackQueryHandler(settings_frequency, pattern="^freq_")],
+                ST_SELL_TERM:      [CallbackQueryHandler(settings_sell_term, pattern="^sell_")],
+                ST_ASSET_TRANSFER: [CallbackQueryHandler(settings_asset_transfer, pattern="^transfer_")],
+                ST_PAPER_MODE:     [CallbackQueryHandler(settings_paper_mode, pattern="^paper_")],
+            },
+            fallbacks=[CommandHandler("cancel", settings_cancel)],
+            allow_reentry=True,
+        )
+
+        tg_app.add_handler(settings_conv)
+        tg_app.add_handler(CommandHandler("start",     cmd_start))
+        tg_app.add_handler(CommandHandler("status",    cmd_status))
+        tg_app.add_handler(CommandHandler("rebalance", cmd_rebalance))
+        tg_app.add_handler(CommandHandler("history",   cmd_history))
+        tg_app.add_handler(CommandHandler("stats",     cmd_stats))
+        tg_app.add_handler(CommandHandler("export",    cmd_export))
+        tg_app.add_handler(CommandHandler("stop",      cmd_stop))
+        tg_app.add_handler(CommandHandler("help",      cmd_help))
+        tg_app.add_handler(CallbackQueryHandler(button_handler))
+
+        async with tg_app:
+            await tg_app.start()
+            log.info("Telegram bot polling started (async mode)")
+            await tg_app.updater.start_polling(drop_pending_updates=True)
+            # Keep running until FastAPI shuts down
+            import asyncio
+            while True:
+                await asyncio.sleep(3600)
+
     except Exception as e:
-        log.error("Failed to start Telegram bot: %s", e)
-
-
-# Start Telegram bot immediately when this module loads (Railway web process)
-_start_telegram_in_background()
+        log.error("Telegram bot error: %s", e)
 
 # ---------------------------------------------------------------------------
 # Rebalancer loop manager
@@ -135,7 +201,19 @@ def _is_running() -> bool:
     return _loop_thread is not None and _loop_thread.is_alive()
 
 
-app = FastAPI(title="MEXC Portfolio Rebalancer API", version="2.0.0")
+@asynccontextmanager
+async def lifespan(app):
+    """Start Telegram bot as background task on FastAPI startup."""
+    task = asyncio.create_task(_run_telegram_async())
+    yield
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+
+app = FastAPI(title="MEXC Portfolio Rebalancer API", version="2.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
