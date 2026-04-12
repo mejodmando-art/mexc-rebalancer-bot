@@ -1,5 +1,10 @@
-// API base URL – reads from env or defaults to same-origin
-export const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+// API base URL:
+// - In dev: use NEXT_PUBLIC_API_URL env var (defaults to localhost:8000)
+// - In production build (static export): use empty string = same-origin
+export const API_BASE =
+  process.env.NODE_ENV === 'production'
+    ? (process.env.NEXT_PUBLIC_API_URL ?? '')
+    : (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000');
 
 async function req<T>(path: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
