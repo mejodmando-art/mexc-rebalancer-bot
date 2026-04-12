@@ -1,16 +1,15 @@
 {
   "bot": {
-    "name": "MySmartPortfolio",
-    "type": "smart_portfolio",
-    "market": "spot"
+    "name": "My MEXC Portfolio"
   },
-  "setup_mode": "manual",
   "portfolio": {
     "assets": [
       { "symbol": "BTC", "allocation_pct": 50.0 },
-      { "symbol": "ETH", "allocation_pct": 50.0 }
+      { "symbol": "ETH", "allocation_pct": 30.0 },
+      { "symbol": "SOL", "allocation_pct": 20.0 }
     ],
-    "total_usdt": 100.0
+    "total_usdt": 1000,
+    "initial_value_usdt": 1000
   },
   "rebalance": {
     "mode": "proportional",
@@ -29,5 +28,7 @@
   },
   "asset_transfer": {
     "enable_asset_transfer": false
-  }
+  },
+  "paper_trading": false,
+  "last_rebalance": null
 }
