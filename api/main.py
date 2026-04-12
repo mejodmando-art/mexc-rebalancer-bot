@@ -16,12 +16,18 @@ import io
 import csv
 import os
 import sys
+import threading
+import time
+import logging
+from datetime import datetime
 from typing import Optional
 
 # Support both: running from repo root (Railway) and from api/ subdir
 _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _root not in sys.path:
     sys.path.insert(0, _root)
+
+log = logging.getLogger("api")
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -41,6 +47,68 @@ from smart_portfolio import (
 )
 
 init_db()
+
+# ---------------------------------------------------------------------------
+# Rebalancer loop manager
+# ---------------------------------------------------------------------------
+_loop_thread: Optional[threading.Thread] = None
+_stop_event = threading.Event()
+_loop_error: Optional[str] = None
+_loop_started_at: Optional[str] = None
+
+
+def _rebalancer_loop() -> None:
+    global _loop_error, _loop_started_at
+    _loop_error = None
+    _loop_started_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+    try:
+        from smart_portfolio import (
+            execute_rebalance, needs_rebalance_proportional,
+            next_run_time, load_config,
+        )
+        cfg = load_config()
+        client = _client()
+        mode = cfg["rebalance"]["mode"]
+        log.info("Rebalancer loop started | mode: %s", mode)
+
+        if mode == "proportional":
+            interval = cfg["rebalance"]["proportional"]["check_interval_minutes"] * 60
+            while not _stop_event.is_set():
+                try:
+                    cfg = load_config()
+                    if needs_rebalance_proportional(client, cfg):
+                        execute_rebalance(client, cfg)
+                except Exception as e:
+                    log.error("Loop iteration error: %s", e)
+                _stop_event.wait(interval)
+
+        elif mode == "timed":
+            frequency = cfg["rebalance"]["timed"]["frequency"]
+            next_run = next_run_time(frequency)
+            while not _stop_event.is_set():
+                try:
+                    if datetime.utcnow() >= next_run:
+                        cfg = load_config()
+                        execute_rebalance(client, cfg)
+                        next_run = next_run_time(frequency)
+                except Exception as e:
+                    log.error("Loop iteration error: %s", e)
+                _stop_event.wait(60)
+
+        elif mode == "unbalanced":
+            _stop_event.wait()
+
+    except Exception as e:
+        _loop_error = str(e)
+        log.error("Rebalancer loop crashed: %s", e)
+
+    log.info("Rebalancer loop stopped")
+
+
+def _is_running() -> bool:
+    return _loop_thread is not None and _loop_thread.is_alive()
+
+
 app = FastAPI(title="MEXC Portfolio Rebalancer API", version="2.0.0")
 
 app.add_middleware(
@@ -241,3 +309,41 @@ def export_csv():
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# Bot control endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/api/bot/status")
+def bot_status():
+    return {
+        "running": _is_running(),
+        "started_at": _loop_started_at,
+        "error": _loop_error,
+        "mode": load_config()["rebalance"]["mode"],
+    }
+
+
+@app.post("/api/bot/start")
+def bot_start():
+    global _loop_thread
+    if _is_running():
+        return {"ok": False, "message": "البوت شغال بالفعل"}
+    cfg = load_config()
+    try:
+        validate_allocations(cfg["portfolio"]["assets"])
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    _stop_event.clear()
+    _loop_thread = threading.Thread(target=_rebalancer_loop, daemon=True)
+    _loop_thread.start()
+    return {"ok": True, "message": f"البوت بدأ | mode: {cfg['rebalance']['mode']}"}
+
+
+@app.post("/api/bot/stop")
+def bot_stop():
+    if not _is_running():
+        return {"ok": False, "message": "البوت مش شغال"}
+    _stop_event.set()
+    return {"ok": True, "message": "تم إيقاف البوت"}

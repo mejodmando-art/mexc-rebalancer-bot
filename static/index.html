@@ -163,12 +163,16 @@ async function api(path,opts={}){
 
 async function loadAll(){
   try{
-    const [status,snaps]=await Promise.all([api('/api/status'),api('/api/snapshots?limit=60')]);
+    const [status,snaps]=await Promise.all([
+      api('/api/status'),
+      api('/api/snapshots?limit=60'),
+    ]);
     renderStatus(status);
     renderCharts(status,snaps);
     _lastUpdate=new Date();
     updateLastUpdateText();
   }catch(e){console.error(e);}
+  loadBotStatus();
 }
 
 function updateLastUpdateText(){
@@ -253,23 +257,72 @@ async function triggerRebalance(){
   try{
     const res=await api('/api/rebalance',{method:'POST'});
     const details=(res.details||[]).filter(d=>d.action==='BUY'||d.action==='SELL');
-    let msg='✅ تم Rebalance!';
-    if(details.length) msg+='\n'+details.map(d=>`${d.action==='BUY'?'🟢':'🔴'} ${d.action} ${d.symbol}: ${d.diff_usdt>=0?'+':''}${d.diff_usdt.toFixed(2)} USDT`).join('\n');
-    alert(msg);
+    if(details.length){
+      showToast('✅ تم Rebalance: '+details.map(d=>`${d.action} ${d.symbol}`).join(', '),'#4ade80');
+    } else {
+      showToast('✅ تم Rebalance — لا توجد تعديلات مطلوبة','#4ade80');
+    }
     await loadAll();
-  }catch(e){alert('❌ خطأ: '+e.message);}
+  }catch(e){showToast('❌ خطأ: '+e.message,'#f87171');}
   finally{btns.forEach(b=>{if(b){b.disabled=false;b.textContent=b.id==='btn-rebalance'?'⚖️ Rebalance':'🔄 Rebalance يدوي';}});}
 }
 
 function exportCSV(){window.open('/api/export/csv','_blank');}
 
-let _botRunningState=false;
-function toggleBot(){
-  _botRunningState=!_botRunningState;
+let _botRunning=false;
+
+async function loadBotStatus(){
+  try{
+    const s=await api('/api/bot/status');
+    _botRunning=s.running;
+    updateBotBtn();
+    if(s.error){
+      document.getElementById('badges').innerHTML+=`<span class="badge" style="background:rgba(239,68,68,.15);color:#f87171">⚠️ ${s.error.slice(0,40)}</span>`;
+    }
+  }catch(e){}
+}
+
+function updateBotBtn(){
   const btn=document.getElementById('btn-toggle');
-  btn.textContent=_botRunningState?'⏸️ إيقاف':'▶️ تشغيل';
-  btn.style.borderColor=_botRunningState?'#4ade80':'#374151';
-  btn.style.color=_botRunningState?'#4ade80':'#f9fafb';
+  if(!btn)return;
+  btn.textContent=_botRunning?'⏸️ إيقاف':'▶️ تشغيل';
+  btn.style.borderColor=_botRunning?'#4ade80':'#374151';
+  btn.style.color=_botRunning?'#4ade80':'#f9fafb';
+}
+
+async function toggleBot(){
+  const btn=document.getElementById('btn-toggle');
+  btn.disabled=true;
+  try{
+    if(_botRunning){
+      const r=await api('/api/bot/stop',{method:'POST'});
+      _botRunning=false;
+      showToast(r.message||'تم الإيقاف','#f87171');
+    } else {
+      const r=await api('/api/bot/start',{method:'POST'});
+      if(r.ok){_botRunning=true;showToast(r.message||'تم التشغيل','#4ade80');}
+      else{showToast(r.message||'خطأ','#f87171');}
+    }
+    updateBotBtn();
+  }catch(e){showToast('خطأ: '+e.message,'#f87171');}
+  finally{btn.disabled=false;}
+}
+
+function showToast(msg,color='#4ade80'){
+  let t=document.getElementById('toast');
+  if(!t){
+    t=document.createElement('div');
+    t.id='toast';
+    t.style.cssText='position:fixed;bottom:1.5rem;left:50%;transform:translateX(-50%);padding:.6rem 1.25rem;border-radius:.75rem;font-weight:700;font-size:.875rem;z-index:999;transition:opacity .3s';
+    document.body.appendChild(t);
+  }
+  t.textContent=msg;
+  t.style.background=color==='#4ade80'?'rgba(74,222,128,.2)':'rgba(239,68,68,.2)';
+  t.style.color=color;
+  t.style.border=`1px solid ${color}`;
+  t.style.opacity='1';
+  clearTimeout(t._timer);
+  t._timer=setTimeout(()=>{t.style.opacity='0';},3000);
 }
 </script>
 
@@ -476,6 +529,7 @@ function closeHistory(){document.getElementById('history-modal').classList.remov
 loadAll();
 setInterval(loadAll,30000);
 setInterval(updateLastUpdateText,10000);
+setInterval(loadBotStatus,10000);
 </script>
 </body>
 </html>
