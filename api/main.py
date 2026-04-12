@@ -49,6 +49,28 @@ from smart_portfolio import (
 init_db()
 
 # ---------------------------------------------------------------------------
+# Telegram bot – runs in background thread alongside FastAPI
+# ---------------------------------------------------------------------------
+
+def _start_telegram_in_background() -> None:
+    """Start the Telegram bot in a daemon thread if token is available."""
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    if not token:
+        log.info("TELEGRAM_BOT_TOKEN not set – Telegram bot disabled")
+        return
+    try:
+        from telegram_bot import start_telegram_bot
+        t = threading.Thread(target=start_telegram_bot, daemon=True, name="telegram-bot")
+        t.start()
+        log.info("Telegram bot started in background thread")
+    except Exception as e:
+        log.error("Failed to start Telegram bot: %s", e)
+
+
+# Start Telegram bot immediately when this module loads (Railway web process)
+_start_telegram_in_background()
+
+# ---------------------------------------------------------------------------
 # Rebalancer loop manager
 # ---------------------------------------------------------------------------
 _loop_thread: Optional[threading.Thread] = None
