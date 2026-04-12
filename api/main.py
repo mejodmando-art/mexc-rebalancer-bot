@@ -25,7 +25,8 @@ if _root not in sys.path:
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from database import get_rebalance_history, get_snapshots, init_db, record_snapshot
@@ -48,6 +49,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Serve static dashboard
+_static_dir = os.path.join(_root, "static")
+if os.path.isdir(_static_dir):
+    app.mount("/static", StaticFiles(directory=_static_dir), name="static")
+
+@app.get("/", include_in_schema=False)
+def serve_dashboard():
+    index = os.path.join(_static_dir, "index.html")
+    if os.path.exists(index):
+        return FileResponse(index)
+    return {"message": "MEXC Rebalancer API", "docs": "/docs"}
 
 
 def _client() -> MEXCClient:

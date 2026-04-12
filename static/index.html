@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MEXC Portfolio Rebalancer</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  body { background:#030712; color:#f9fafb; font-family:system-ui,sans-serif; }
+  .card { background:#111827; border:1px solid #1f2937; border-radius:1rem; padding:1.25rem; }
+  .btn { background:#f0b90b; color:#000; font-weight:700; padding:.5rem 1.25rem; border-radius:.75rem; border:none; cursor:pointer; }
+  .btn:hover { background:#d4a009; }
+  .btn:disabled { opacity:.5; cursor:not-allowed; }
+  .badge { padding:.2rem .6rem; border-radius:.4rem; font-size:.75rem; font-weight:700; }
+  .tag-mode { background:rgba(240,185,11,.15); color:#f0b90b; }
+  .tag-paper { background:rgba(168,85,247,.15); color:#c084fc; }
+  table { width:100%; border-collapse:collapse; font-size:.875rem; }
+  th { color:#9ca3af; text-align:right; padding:.5rem .25rem; border-bottom:1px solid #1f2937; }
+  td { padding:.75rem .25rem; border-bottom:1px solid #111827; }
+  .dev-green { color:#4ade80; } .dev-yellow { color:#facc15; } .dev-red { color:#f87171; }
+  .spinner { animation:spin 1s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  .modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:50; align-items:center; justify-content:center; }
+  .modal.open { display:flex; }
+  input,select { background:#1f2937; border:1px solid #374151; border-radius:.75rem; padding:.5rem .75rem; color:#f9fafb; width:100%; font-size:.875rem; }
+  input:focus,select:focus { outline:none; border-color:#f0b90b; }
+  label { font-size:.75rem; color:#9ca3af; display:block; margin-bottom:.25rem; }
+</style>
+</head>
+<body class="min-h-screen p-4">
+
+<div id="app" class="max-w-5xl mx-auto space-y-5">
+
+  <!-- Header -->
+  <div class="flex flex-wrap items-center justify-between gap-3 pt-2">
+    <div>
+      <h1 id="bot-name" class="text-xl font-bold">MEXC Portfolio</h1>
+      <div class="flex gap-2 mt-1 flex-wrap" id="badges"></div>
+    </div>
+    <div class="flex gap-2 flex-wrap">
+      <button class="btn" onclick="triggerRebalance()" id="btn-rebalance">⚖️ Rebalance Now</button>
+      <button class="btn" style="background:#1f2937;color:#f9fafb" onclick="openSettings()">⚙️ إعدادات</button>
+      <button class="btn" style="background:#1f2937;color:#f9fafb" onclick="exportCSV()">📥 CSV</button>
+      <button class="btn" style="background:#1f2937;color:#f9fafb" onclick="loadAll()">🔄</button>
+    </div>
+  </div>
+
+  <!-- KPIs -->
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+    <div class="card"><p style="color:#9ca3af;font-size:.75rem">إجمالي المحفظة</p><p id="kpi-total" class="text-2xl font-bold mt-1">—</p></div>
+    <div class="card"><p style="color:#9ca3af;font-size:.75rem">الربح / الخسارة</p><p id="kpi-pnl" class="text-2xl font-bold mt-1">—</p><p id="kpi-pnl-pct" style="font-size:.75rem"></p></div>
+    <div class="card"><p style="color:#9ca3af;font-size:.75rem">عدد الأصول</p><p id="kpi-assets" class="text-2xl font-bold mt-1">—</p></div>
+    <div class="card"><p style="color:#9ca3af;font-size:.75rem">آخر Rebalance</p><p id="kpi-last" class="text-sm font-bold mt-1" style="color:#9ca3af">—</p></div>
+  </div>
+
+  <!-- Charts -->
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+    <div class="card"><p style="color:#9ca3af;font-size:.75rem;margin-bottom:.75rem">توزيع الأصول</p><canvas id="pie-chart" height="220"></canvas></div>
+    <div class="card"><p style="color:#9ca3af;font-size:.75rem;margin-bottom:.75rem">أداء المحفظة</p><canvas id="line-chart" height="220"></canvas></div>
+  </div>
+
+  <!-- Table -->
+  <div class="card">
+    <p style="color:#9ca3af;font-size:.75rem;margin-bottom:.75rem;text-transform:uppercase;letter-spacing:.05em">تفاصيل الأصول</p>
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr><th>الأصل</th><th>السعر</th><th>القيمة</th><th>الحالي%</th><th>الهدف%</th><th>الانحراف</th></tr></thead>
+        <tbody id="assets-table"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- History -->
+  <div class="card">
+    <p style="color:#9ca3af;font-size:.75rem;margin-bottom:.75rem;text-transform:uppercase;letter-spacing:.05em">آخر عمليات إعادة التوازن</p>
+    <div id="history-list"><p style="color:#6b7280;font-size:.875rem">لا توجد عمليات بعد.</p></div>
+  </div>
+
+</div>
+
+<!-- Settings Modal -->
+<div class="modal" id="settings-modal">
+  <div style="background:#111827;border:1px solid #374151;border-radius:1.25rem;padding:1.5rem;width:100%;max-width:480px;max-height:90vh;overflow-y:auto">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="font-bold text-lg">⚙️ الإعدادات</h2>
+      <button onclick="closeSettings()" style="color:#9ca3af;font-size:1.25rem;background:none;border:none;cursor:pointer">✕</button>
+    </div>
+    <div id="settings-body" class="space-y-4"></div>
+    <button class="btn w-full mt-4" onclick="saveSettings()">💾 حفظ</button>
+  </div>
+</div>
+
+<script>
+const COLORS = ['#f0b90b','#3b82f6','#10b981','#8b5cf6','#ef4444','#f97316','#06b6d4','#ec4899','#84cc16','#a78bfa'];
+let pieChart, lineChart, currentCfg = null;
+
+async function api(path, opts={}) {
+  const r = await fetch(path, opts);
+  return r.json();
+}
+
+async function loadAll() {
+  try {
+    const [status, snaps, history] = await Promise.all([
+      api('/api/status'), api('/api/snapshots?limit=60'), api('/api/history?limit=10')
+    ]);
+    renderStatus(status);
+    renderCharts(status, snaps);
+    renderHistory(history);
+  } catch(e) { console.error(e); }
+}
+
+function renderStatus(s) {
+  document.getElementById('bot-name').textContent = s.bot_name || 'MEXC Portfolio';
+  const badges = document.getElementById('badges');
+  badges.innerHTML = `<span class="badge tag-mode">${s.mode}</span>`;
+  if(s.paper_trading) badges.innerHTML += `<span class="badge tag-paper">🧪 Paper</span>`;
+  if(s.warning) badges.innerHTML += `<span class="badge" style="background:rgba(251,191,36,.1);color:#fbbf24">${s.warning}</span>`;
+
+  document.getElementById('kpi-total').textContent = (s.total_usdt||0).toFixed(2) + ' USDT';
+  const pnl = s.pnl || {};
+  const pos = (pnl.pnl_usdt||0) >= 0;
+  const sign = pos ? '+' : '';
+  document.getElementById('kpi-pnl').textContent = sign + (pnl.pnl_usdt||0).toFixed(2) + ' USDT';
+  document.getElementById('kpi-pnl').style.color = pos ? '#4ade80' : '#f87171';
+  document.getElementById('kpi-pnl-pct').textContent = sign + (pnl.pnl_pct||0).toFixed(2) + '%';
+  document.getElementById('kpi-pnl-pct').style.color = pos ? '#4ade80' : '#f87171';
+  document.getElementById('kpi-assets').textContent = (s.assets||[]).length;
+  document.getElementById('kpi-last').textContent = s.last_rebalance || '—';
+
+  const tbody = document.getElementById('assets-table');
+  tbody.innerHTML = (s.assets||[]).map((a,i) => {
+    const dev = a.deviation || 0;
+    const cls = Math.abs(dev)>3 ? 'dev-red' : Math.abs(dev)>1 ? 'dev-yellow' : 'dev-green';
+    return `<tr>
+      <td style="font-weight:600"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${COLORS[i%COLORS.length]};margin-left:6px"></span>${a.symbol}</td>
+      <td style="color:#d1d5db">$${(a.price||0).toFixed(4)}</td>
+      <td style="color:#d1d5db">${(a.value_usdt||0).toFixed(2)}</td>
+      <td>${(a.actual_pct||0).toFixed(2)}%</td>
+      <td style="color:#9ca3af">${(a.target_pct||0).toFixed(2)}%</td>
+      <td class="${cls} font-bold">${dev>=0?'+':''}${dev.toFixed(2)}%</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderCharts(s, snaps) {
+  const assets = s.assets || [];
+  if(pieChart) pieChart.destroy();
+  pieChart = new Chart(document.getElementById('pie-chart'), {
+    type:'doughnut',
+    data:{ labels:assets.map(a=>a.symbol), datasets:[{ data:assets.map(a=>a.actual_pct||a.target_pct), backgroundColor:COLORS }] },
+    options:{ plugins:{ legend:{ labels:{ color:'#9ca3af' } } }, cutout:'60%' }
+  });
+
+  if(lineChart) lineChart.destroy();
+  lineChart = new Chart(document.getElementById('line-chart'), {
+    type:'line',
+    data:{
+      labels: snaps.map(s=>s.ts.slice(5,16)),
+      datasets:[{ label:'USDT', data:snaps.map(s=>s.total_usdt), borderColor:'#f0b90b', backgroundColor:'rgba(240,185,11,.1)', fill:true, tension:.3, pointRadius:0 }]
+    },
+    options:{ plugins:{ legend:{ display:false } }, scales:{ x:{ ticks:{ color:'#6b7280', maxTicksLimit:6 } }, y:{ ticks:{ color:'#6b7280' } }, grid:{ color:'#1f2937' } } }
+  });
+}
+
+function renderHistory(rows) {
+  const el = document.getElementById('history-list');
+  if(!rows.length){ el.innerHTML='<p style="color:#6b7280;font-size:.875rem">لا توجد عمليات بعد.</p>'; return; }
+  el.innerHTML = rows.map(r => {
+    const orders = (r.details||[]).filter(d=>d.action==='BUY'||d.action==='SELL').map(d =>
+      `<span style="font-size:.75rem;padding:.2rem .5rem;border-radius:.5rem;background:${d.action==='BUY'?'rgba(74,222,128,.1)':'rgba(248,113,113,.1)'};color:${d.action==='BUY'?'#4ade80':'#f87171'}">${d.action} ${d.symbol} ${d.diff_usdt>=0?'+':''}${d.diff_usdt.toFixed(2)} USDT</span>`
+    ).join(' ');
+    return `<div style="background:rgba(31,41,55,.5);border-radius:.75rem;padding:.75rem;margin-bottom:.5rem">
+      <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:.4rem">
+        <span style="font-size:.75rem;color:#9ca3af">${r.ts}</span>
+        <span class="badge tag-mode">${r.mode}</span>
+        ${r.paper?'<span class="badge tag-paper">Paper</span>':''}
+        <span style="font-size:.75rem;color:#d1d5db">${(r.total_usdt||0).toFixed(2)} USDT</span>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:.3rem">${orders||'<span style="color:#6b7280;font-size:.75rem">لا توجد أوردرات</span>'}</div>
+    </div>`;
+  }).join('');
+}
+
+async function triggerRebalance() {
+  const btn = document.getElementById('btn-rebalance');
+  btn.disabled = true; btn.textContent = '⏳ جاري...';
+  try { await api('/api/rebalance', {method:'POST'}); await loadAll(); }
+  catch(e){ alert('خطأ: '+e.message); }
+  finally { btn.disabled=false; btn.textContent='⚖️ Rebalance Now'; }
+}
+
+function exportCSV() { window.open('/api/export/csv','_blank'); }
+
+async function openSettings() {
+  currentCfg = await api('/api/config');
+  const cfg = currentCfg;
+  const assets = cfg.portfolio.assets;
+  const mode = cfg.rebalance.mode;
+  const prop = cfg.rebalance.proportional;
+  const timed = cfg.rebalance.timed;
+
+  document.getElementById('settings-body').innerHTML = `
+    <div><label>اسم البوت</label><input id="s-name" value="${cfg.bot.name}"></div>
+    <div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.5rem">
+        <label style="margin:0">الأصول والنسب</label>
+        <button onclick="equalAlloc()" style="font-size:.75rem;color:#f0b90b;background:none;border:none;cursor:pointer">📐 توزيع متساوي</button>
+      </div>
+      <div id="s-assets">${assets.map((a,i)=>`
+        <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.4rem">
+          <span style="width:3rem;font-size:.875rem;color:#d1d5db;font-family:monospace">${a.symbol}</span>
+          <input type="number" id="s-pct-${i}" value="${a.allocation_pct}" min="0" max="100" step="0.01" style="flex:1">
+          <span style="color:#9ca3af;font-size:.875rem">%</span>
+        </div>`).join('')}
+      </div>
+      <p id="s-total-pct" style="font-size:.75rem;color:#9ca3af"></p>
+    </div>
+    <div><label>المبلغ الإجمالي (USDT)</label><input type="number" id="s-usdt" value="${cfg.portfolio.total_usdt}"></div>
+    <div><label>وضع إعادة التوازن</label>
+      <select id="s-mode" onchange="toggleModeFields()">
+        <option value="proportional" ${mode==='proportional'?'selected':''}>Proportional</option>
+        <option value="timed" ${mode==='timed'?'selected':''}>Timed</option>
+        <option value="unbalanced" ${mode==='unbalanced'?'selected':''}>Unbalanced</option>
+      </select>
+    </div>
+    <div id="s-prop-fields" style="${mode!=='proportional'?'display:none':''}">
+      <label>عتبة الانحراف</label>
+      <div style="display:flex;gap:.5rem">
+        ${[1,3,5].map(t=>`<button onclick="setThreshold(${t})" id="thr-${t}" style="flex:1;padding:.4rem;border-radius:.5rem;border:1px solid ${prop.threshold_pct===t?'#f0b90b':'#374151'};background:${prop.threshold_pct===t?'#f0b90b':'transparent'};color:${prop.threshold_pct===t?'#000':'#d1d5db'};cursor:pointer;font-weight:600">${t}%</button>`).join('')}
+      </div>
+    </div>
+    <div id="s-timed-fields" style="${mode!=='timed'?'display:none':''}">
+      <label>التكرار</label>
+      <select id="s-freq">
+        <option value="daily" ${timed.frequency==='daily'?'selected':''}>يومي</option>
+        <option value="weekly" ${timed.frequency==='weekly'?'selected':''}>أسبوعي</option>
+        <option value="monthly" ${timed.frequency==='monthly'?'selected':''}>شهري</option>
+      </select>
+    </div>
+    <label style="display:flex;justify-content:space-between;align-items:center;cursor:pointer">
+      <span style="font-size:.875rem;color:#d1d5db">بيع عند الإيقاف</span>
+      <input type="checkbox" id="s-sell" ${cfg.termination.sell_at_termination?'checked':''} style="width:1rem;height:1rem;accent-color:#f0b90b">
+    </label>
+    <label style="display:flex;justify-content:space-between;align-items:center;cursor:pointer">
+      <span style="font-size:.875rem;color:#d1d5db">تمكين تحويل الأصول</span>
+      <input type="checkbox" id="s-transfer" ${cfg.asset_transfer.enable_asset_transfer?'checked':''} style="width:1rem;height:1rem;accent-color:#f0b90b">
+    </label>
+    <label style="display:flex;justify-content:space-between;align-items:center;cursor:pointer">
+      <span style="font-size:.875rem;color:#d1d5db">🧪 وضع تجريبي (Paper Trading)</span>
+      <input type="checkbox" id="s-paper" ${cfg.paper_trading?'checked':''} style="width:1rem;height:1rem;accent-color:#f0b90b">
+    </label>
+  `;
+  updateTotalPct();
+  document.getElementById('settings-modal').classList.add('open');
+  document.querySelectorAll('[id^="s-pct-"]').forEach(el => el.addEventListener('input', updateTotalPct));
+}
+
+function updateTotalPct() {
+  const cfg = currentCfg;
+  const total = cfg.portfolio.assets.reduce((s,_,i) => s + (parseFloat(document.getElementById('s-pct-'+i)?.value)||0), 0);
+  const el = document.getElementById('s-total-pct');
+  if(el) { el.textContent = 'المجموع: ' + total.toFixed(2) + '%'; el.style.color = Math.abs(total-100)<0.1?'#4ade80':'#f87171'; }
+}
+
+function equalAlloc() {
+  const n = currentCfg.portfolio.assets.length;
+  const pct = (100/n).toFixed(4);
+  currentCfg.portfolio.assets.forEach((_,i) => {
+    const el = document.getElementById('s-pct-'+i);
+    if(el) el.value = i===n-1 ? (100-(pct*(n-1))).toFixed(4) : pct;
+  });
+  updateTotalPct();
+}
+
+let _threshold = null;
+function setThreshold(t) {
+  _threshold = t;
+  [1,3,5].forEach(v => {
+    const b = document.getElementById('thr-'+v);
+    if(b){ b.style.borderColor=v===t?'#f0b90b':'#374151'; b.style.background=v===t?'#f0b90b':'transparent'; b.style.color=v===t?'#000':'#d1d5db'; }
+  });
+}
+
+function toggleModeFields() {
+  const mode = document.getElementById('s-mode').value;
+  document.getElementById('s-prop-fields').style.display = mode==='proportional'?'':'none';
+  document.getElementById('s-timed-fields').style.display = mode==='timed'?'':'none';
+}
+
+async function saveSettings() {
+  const cfg = currentCfg;
+  const assets = cfg.portfolio.assets.map((a,i) => ({ symbol:a.symbol, allocation_pct:parseFloat(document.getElementById('s-pct-'+i).value)||0 }));
+  const total = assets.reduce((s,a)=>s+a.allocation_pct,0);
+  if(Math.abs(total-100)>0.1){ alert('المجموع لازم يكون 100% (الحالي: '+total.toFixed(2)+'%)'); return; }
+  const mode = document.getElementById('s-mode').value;
+  const body = {
+    bot_name: document.getElementById('s-name').value,
+    assets,
+    total_usdt: parseFloat(document.getElementById('s-usdt').value),
+    rebalance_mode: mode,
+    threshold_pct: _threshold || cfg.rebalance.proportional.threshold_pct,
+    frequency: document.getElementById('s-freq')?.value || cfg.rebalance.timed.frequency,
+    sell_at_termination: document.getElementById('s-sell').checked,
+    enable_asset_transfer: document.getElementById('s-transfer').checked,
+    paper_trading: document.getElementById('s-paper').checked,
+  };
+  await api('/api/config', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
+  closeSettings();
+  loadAll();
+}
+
+function closeSettings() { document.getElementById('settings-modal').classList.remove('open'); }
+
+loadAll();
+setInterval(loadAll, 30000);
+</script>
+</body>
+</html>
