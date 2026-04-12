@@ -243,7 +243,14 @@ def execute_rebalance(client: MEXCClient, cfg: dict) -> list:
     Returns a list of order detail dicts for notification/history.
     When cfg['paper_trading'] is True, logs orders but does not place them.
     """
-    paper = cfg.get("paper_trading", False)
+    # PAPER_TRADING env var overrides config (set to "false" on Railway for live trading)
+    env_paper = os.environ.get("PAPER_TRADING", "").lower()
+    if env_paper in ("true", "1", "yes"):
+        paper = True
+    elif env_paper in ("false", "0", "no"):
+        paper = False
+    else:
+        paper = cfg.get("paper_trading", False)
     assets_cfg = cfg["portfolio"]["assets"]
     portfolio = get_portfolio_value(client, assets_cfg)
     total_usdt = portfolio["total_usdt"]
