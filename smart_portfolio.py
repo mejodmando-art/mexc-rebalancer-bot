@@ -24,7 +24,7 @@ import time
 from datetime import datetime, timedelta
 from typing import Optional
 
-from bitget_client import BitgetClient
+from mexc_client import MEXCClient
 
 logging.basicConfig(
     level=logging.INFO,
@@ -189,7 +189,7 @@ def interactive_setup(cfg: dict) -> dict:
 # Portfolio valuation
 # ---------------------------------------------------------------------------
 
-def get_portfolio_value(client: BitgetClient, assets: list) -> dict:
+def get_portfolio_value(client: MEXCClient, assets: list) -> dict:
     """
     Returns:
         {
@@ -231,7 +231,7 @@ def get_portfolio_value(client: BitgetClient, assets: list) -> dict:
 # Rebalance execution
 # ---------------------------------------------------------------------------
 
-def execute_rebalance(client: BitgetClient, cfg: dict) -> None:
+def execute_rebalance(client: MEXCClient, cfg: dict) -> None:
     """
     Calculate deviations and place market orders to restore target allocations.
     Sells overweight assets first, then buys underweight ones.
@@ -297,7 +297,7 @@ def execute_rebalance(client: BitgetClient, cfg: dict) -> None:
 # Deviation check (proportional mode)
 # ---------------------------------------------------------------------------
 
-def needs_rebalance_proportional(client: BitgetClient, cfg: dict) -> bool:
+def needs_rebalance_proportional(client: MEXCClient, cfg: dict) -> bool:
     """Return True if any asset deviates >= min_deviation_to_execute_pct."""
     assets_cfg = cfg["portfolio"]["assets"]
     min_dev = cfg["rebalance"]["proportional"]["min_deviation_to_execute_pct"]
@@ -335,7 +335,7 @@ def next_run_time(frequency: str, from_dt: Optional[datetime] = None) -> datetim
 # Termination
 # ---------------------------------------------------------------------------
 
-def terminate(client: BitgetClient, cfg: dict) -> None:
+def terminate(client: MEXCClient, cfg: dict) -> None:
     """Stop the bot. If sell_at_termination is True, liquidate all assets to USDT."""
     log.info("Terminating bot '%s'", cfg["bot"]["name"])
     if cfg["termination"]["sell_at_termination"]:
@@ -361,7 +361,7 @@ def terminate(client: BitgetClient, cfg: dict) -> None:
 # ---------------------------------------------------------------------------
 
 def run(cfg: dict) -> None:
-    client = BitgetClient()
+    client = MEXCClient()
     mode = cfg["rebalance"]["mode"]
     bot_name = cfg["bot"]["name"]
 

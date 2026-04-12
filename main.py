@@ -3,13 +3,16 @@ Entry point for the Smart Portfolio bot.
 
 Usage
 -----
+# Run via Telegram bot (recommended):
+    python main.py --telegram
+
 # First-time setup (manual mode):
     python main.py --setup
 
-# Run the bot (uses config.json):
+# Run the bot loop directly (uses config.json):
     python main.py
 
-# Trigger a one-off manual rebalance (unbalanced mode):
+# Trigger a one-off manual rebalance:
     python main.py --rebalance-now
 
 # Show current portfolio snapshot without trading:
@@ -17,16 +20,17 @@ Usage
 
 Environment variables required
 -------------------------------
-    BITGET_API_KEY
-    BITGET_SECRET_KEY
-    BITGET_PASSPHRASE
+    MEXC_API_KEY         – not needed in --telegram mode (bot collects them)
+    MEXC_SECRET_KEY      – not needed in --telegram mode (bot collects them)
+    TELEGRAM_BOT_TOKEN   – required for --telegram mode
+    TELEGRAM_CHAT_ID     – optional whitelist for --telegram mode
 """
 
 import argparse
 import os
 import sys
 
-from bitget_client import BitgetClient
+from mexc_client import MEXCClient
 from smart_portfolio import (
     execute_rebalance,
     get_portfolio_value,
@@ -39,7 +43,7 @@ from smart_portfolio import (
 
 
 def check_env() -> None:
-    missing = [k for k in ("BITGET_API_KEY", "BITGET_SECRET_KEY", "BITGET_PASSPHRASE") if not os.environ.get(k)]
+    missing = [k for k in ("MEXC_API_KEY", "MEXC_SECRET_KEY") if not os.environ.get(k)]
     if missing:
         print(f"[ERROR] Missing environment variables: {', '.join(missing)}")
         print("Set them before running:")
@@ -49,12 +53,18 @@ def check_env() -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Bitget Smart Portfolio Bot")
+    parser = argparse.ArgumentParser(description="MEXC Smart Portfolio Bot")
+    parser.add_argument("--telegram", action="store_true", help="Start Telegram bot interface")
     parser.add_argument("--setup", action="store_true", help="Run interactive setup")
     parser.add_argument("--rebalance-now", action="store_true", help="Trigger a manual rebalance immediately")
     parser.add_argument("--status", action="store_true", help="Print current portfolio snapshot")
     parser.add_argument("--terminate", action="store_true", help="Stop bot and optionally sell all assets")
     args = parser.parse_args()
+
+    if args.telegram:
+        from telegram_bot import start_telegram_bot
+        start_telegram_bot()
+        return
 
     check_env()
     cfg = load_config()
@@ -65,7 +75,7 @@ def main() -> None:
         return
 
     validate_allocations(cfg["portfolio"]["assets"])
-    client = BitgetClient()
+    client = MEXCClient()
 
     if args.status:
         portfolio = get_portfolio_value(client, cfg["portfolio"]["assets"])
