@@ -129,6 +129,125 @@ async def _do_rebalance(app, user_id: int, portfolio_id: int = None, auto: bool 
         await client.close()
 
 
+async def smart_portfolio_job(app):
+    """
+    Smart Portfolio scheduler — runs every 5 minutes.
+
+    proportional  Rebalance when drift >= deviation_threshold_pct.
+    timed         Rebalance when the configured interval (daily/weekly/monthly) has elapsed.
+    unbalanced    No automatic action.
+    """
+    from smart_portfolio import SmartPortfolioExchange, calculate_trades
+
+    rows = await db.get_all_running_smart_portfolios()
+    now  = datetime.now(timezone.utc)
+
+    INTERVAL_DELTA = {
+        "daily":   timedelta(days=1),
+        "weekly":  timedelta(weeks=1),
+        "monthly": timedelta(days=30),
+    }
+
+    for row in rows:
+        user_id = row["user_id"]
+        mode    = row.get("rebalance_mode", "unbalanced")
+
+        if mode == "unbalanced":
+            continue  # manual only
+
+        try:
+            # ── Timed: check if interval elapsed ──────────────────────────────
+            if mode == "timed":
+                interval  = row.get("timed_interval", "weekly")
+                last_str  = row.get("last_rebalance_at")
+                delta     = INTERVAL_DELTA.get(interval, timedelta(weeks=1))
+                if last_str:
+                    try:
+                        last_dt = datetime.fromisoformat(last_str.replace(" UTC", "+00:00"))
+                        if now - last_dt < delta:
+                            continue
+                    except Exception:
+                        pass  # parse failure → run anyway
+
+            # ── Proportional: always fetch; skip if within threshold ───────────
+            settings = await db.get_settings(user_id)
+            if not settings or not settings.get("mexc_api_key"):
+                continue
+
+            coins = await db.get_sp_coins(user_id)
+            if len(coins) < 2:
+                continue
+
+            total_pct = sum(c["target_percentage"] for c in coins)
+            if abs(total_pct - 100) > 0.5:
+                continue
+
+            client = SmartPortfolioExchange(
+                settings["mexc_api_key"], settings["mexc_secret_key"]
+            )
+            try:
+                portfolio, _ = await client.get_portfolio()
+            except Exception as e:
+                logger.error("SP fetch error user=%s: %s", user_id, e)
+                await client.close()
+                continue
+
+            capital = float(row.get("capital_usdt") or 0)
+            alloc_symbols   = {c["symbol"] for c in coins}
+            portfolio_slice = {s: d for s, d in portfolio.items() if s in alloc_symbols}
+            usdt_val        = portfolio.get("USDT", {}).get("value_usdt", 0.0)
+            effective       = sum(d["value_usdt"] for d in portfolio_slice.values()) + usdt_val
+            if capital > 0:
+                effective = min(capital, effective)
+
+            if effective < 1.0:
+                await client.close()
+                continue
+
+            threshold = float(row.get("deviation_threshold_pct") or 5)
+            trades, _ = calculate_trades(portfolio_slice, effective, coins, threshold)
+
+            if not trades:
+                await client.close()
+                continue
+
+            results  = await client.execute_trades(trades)
+            await client.close()
+
+            ok  = sum(1 for r in results if r["status"] == "ok")
+            err = sum(1 for r in results if r["status"] == "error")
+            traded = sum(
+                t["usdt_amount"] for t in trades
+                if any(r["symbol"] == t["symbol"] and r["status"] == "ok" for r in results)
+            )
+
+            now_str = now.strftime("%Y-%m-%d %H:%M UTC")
+            await db.update_smart_portfolio(user_id, last_rebalance_at=now_str)
+            await db.add_sp_history(
+                user_id, now_str,
+                f"تلقائي ({mode}): {ok} ناجح، {err} خطأ",
+                traded, 1 if err == 0 else 0,
+            )
+
+            mode_label = "📊 نسبة" if mode == "proportional" else "⏰ زمني"
+            lines = [
+                f"🤖 *Smart Portfolio — {mode_label}*",
+                "━━━━━━━━━━━━━━━━━━━━━",
+                f"✅ ناجح: *{ok}* صفقة",
+            ]
+            if err:
+                lines.append(f"❌ خطأ: *{err}*")
+            lines.append(f"💵 إجمالي: `${traded:.2f}`")
+            lines.append(f"🕐 `{now_str}`")
+            try:
+                await app.bot.send_message(user_id, "\n".join(lines), parse_mode="Markdown")
+            except Exception:
+                pass
+
+        except Exception as e:
+            logger.error("SP job error user=%s: %s", user_id, e)
+
+
 async def start_scheduler(app) -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler()
     # Check every hour; each user's own interval is respected inside the job
@@ -138,6 +257,15 @@ async def start_scheduler(app) -> AsyncIOScheduler:
         hours=1,
         args=[app],
         id="auto_rebalance",
+        replace_existing=True,
+    )
+    # Smart Portfolio: proportional checks every 5 min, timed checks every 5 min
+    scheduler.add_job(
+        smart_portfolio_job,
+        trigger="interval",
+        minutes=5,
+        args=[app],
+        id="smart_portfolio",
         replace_existing=True,
     )
     scheduler.start()

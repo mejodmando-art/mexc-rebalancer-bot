@@ -231,6 +231,11 @@ def portfolio_actions_kb(
         InlineKeyboardButton("🤖  توزيع ذكي",     callback_data=f"auto_alloc_menu:{portfolio_id}"),
     ])
 
+    # ── Smart Portfolio ──
+    buttons.append([
+        InlineKeyboardButton("💼  Smart Portfolio", callback_data="sp:menu"),
+    ])
+
     # ── Grid Bot + Momentum ──
     buttons.append([
         InlineKeyboardButton("🔲  Grid Bot",  callback_data="grid:menu"),
