@@ -200,7 +200,7 @@ async def cmd_rebalance(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     msg = await update.message.reply_text("⏳ جاري تنفيذ الـ rebalance...")
     try:
         cfg = load_config()
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         details = await loop.run_in_executor(None, execute_rebalance, _client(), cfg)
         paper = " 🧪 (Paper)" if cfg.get("paper_trading") else ""
         buys  = [d for d in details if d["action"] == "BUY"]
@@ -535,7 +535,7 @@ async def settings_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 # Rebalancer background loop
 # ---------------------------------------------------------------------------
 
-def _run_loop(cfg: dict, app: Application) -> None:
+def _run_loop(cfg: dict, app: Application, loop: Optional[asyncio.AbstractEventLoop] = None) -> None:
     """Background thread: runs the rebalance loop and sends Telegram notifications."""
     from datetime import datetime as _dt
     _stop_event.clear()
@@ -554,8 +554,9 @@ def _run_loop(cfg: dict, app: Application) -> None:
                 log.error("Notify failed: %s", e)
 
     def _sync_notify(text: str) -> None:
-        if app and app.running:
-            asyncio.run_coroutine_threadsafe(_notify(text), app.loop)
+        # loop is the asyncio event loop running the Telegram Application
+        if app and app.running and loop is not None:
+            asyncio.run_coroutine_threadsafe(_notify(text), loop)
 
     try:
         if mode == "proportional":
@@ -654,7 +655,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await query.edit_message_text("⏳ جاري تنفيذ الـ rebalance...")
         try:
             cfg = load_config()
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             details = await loop.run_in_executor(None, execute_rebalance, _client(), cfg)
             paper = " 🧪 (Paper)" if cfg.get("paper_trading") else ""
             buys  = [d for d in details if d["action"] == "BUY"]
@@ -703,7 +704,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             cfg = load_config()
             validate_allocations(cfg["portfolio"]["assets"])
             _bot_thread = threading.Thread(
-                target=_run_loop, args=(cfg, _app_ref), daemon=True
+                target=_run_loop,
+                args=(cfg, _app_ref, asyncio.get_running_loop()),
+                daemon=True,
             )
             _bot_thread.start()
             paper = " 🧪 Paper" if cfg.get("paper_trading") else ""
@@ -734,7 +737,9 @@ async def _post_init(app: Application) -> None:
         cfg = load_config()
         validate_allocations(cfg["portfolio"]["assets"])
         _bot_thread = threading.Thread(
-            target=_run_loop, args=(cfg, app), daemon=True
+            target=_run_loop,
+            args=(cfg, app, asyncio.get_running_loop()),
+            daemon=True,
         )
         _bot_thread.start()
         log.info("Rebalancer auto-started | mode: %s", cfg["rebalance"]["mode"])

@@ -69,8 +69,9 @@ async def _run_telegram_async() -> None:
     try:
         from telegram import Update
         from telegram.ext import Application
+        import telegram_bot as _tg_module
         from telegram_bot import (
-            _post_init, button_handler, cmd_export, cmd_help,
+            button_handler, cmd_export, cmd_help,
             cmd_history, cmd_rebalance, cmd_start, cmd_stats,
             cmd_status, cmd_stop, settings_cancel, settings_start,
             settings_assets_count, settings_asset_symbol, settings_asset_pct,
@@ -86,11 +87,15 @@ async def _run_telegram_async() -> None:
             ConversationHandler, MessageHandler, filters,
         )
 
+        async def _api_post_init(app: Application) -> None:
+            """Store app reference in telegram_bot module for button callbacks.
+            The rebalancer loop is managed separately via /api/bot/start."""
+            _tg_module._app_ref = app
+
         tg_app = (
             Application.builder()
             .token(token)
-            .post_init(_post_init)
-            .updater(None)
+            .post_init(_api_post_init)
             .build()
         )
 
@@ -134,8 +139,8 @@ async def _run_telegram_async() -> None:
             await tg_app.start()
             log.info("Telegram bot polling started")
             await tg_app.updater.start_polling(drop_pending_updates=True)
-            while True:
-                await asyncio.sleep(3600)
+            # Keep running until the FastAPI lifespan cancels this task
+            await asyncio.Event().wait()
 
     except Exception as e:
         log.error("Telegram bot error: %s", e)

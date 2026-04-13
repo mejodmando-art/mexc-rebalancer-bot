@@ -87,7 +87,7 @@ export default function CreateBot({ lang, onCreated }: Props) {
         enable_asset_transfer: assetTransfer,
         paper_trading: paperTrading,
       });
-      await startBot();
+      await startBot().catch(() => {}); // ignore "already running" error
       setSuccess('✅ ' + tr('successCreated', lang));
       setTimeout(onCreated, 1500);
     } catch (e: any) {
