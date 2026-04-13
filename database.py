@@ -135,14 +135,24 @@ def init_db() -> None:
         ]
         with _conn() as conn:
             cur = conn.cursor()
+            # Drop and recreate tables that have incompatible schemas from
+            # older versions (e.g. extra user_id column with NOT NULL).
+            cur.execute("""
+                DO $$
+                BEGIN
+                    -- portfolios: recreate if user_id column exists (old schema)
+                    IF EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name='portfolios' AND column_name='user_id'
+                    ) THEN
+                        DROP TABLE IF EXISTS portfolios CASCADE;
+                    END IF;
+                END$$;
+            """)
             for stmt in stmts:
                 cur.execute(stmt)
-            # Migration: add missing columns to existing tables
+            # Safe migrations for rebalance_history and portfolio_snapshots
             migrations = [
-                "ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS ts_created TEXT NOT NULL DEFAULT ''",
-                "ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS name TEXT NOT NULL DEFAULT ''",
-                "ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS config_json TEXT NOT NULL DEFAULT '{}'",
-                "ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS active INTEGER NOT NULL DEFAULT 0",
                 "ALTER TABLE rebalance_history ADD COLUMN IF NOT EXISTS portfolio_id INTEGER NOT NULL DEFAULT 1",
                 "ALTER TABLE rebalance_history ADD COLUMN IF NOT EXISTS paper INTEGER NOT NULL DEFAULT 0",
                 "ALTER TABLE portfolio_snapshots ADD COLUMN IF NOT EXISTS portfolio_id INTEGER NOT NULL DEFAULT 1",
@@ -151,7 +161,7 @@ def init_db() -> None:
                 try:
                     cur.execute(m)
                 except Exception as e:
-                    log.debug("Migration skipped (%s): %s", m[:50], e)
+                    log.debug("Migration skipped: %s", e)
         log.info("PostgreSQL tables ready (Supabase)")
     else:
         with _conn() as conn:
