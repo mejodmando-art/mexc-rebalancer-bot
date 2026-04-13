@@ -222,8 +222,15 @@ def interactive_setup(cfg: dict) -> dict:
 # Portfolio valuation
 # ---------------------------------------------------------------------------
 
-def get_portfolio_value(client: MEXCClient, assets: list) -> dict:
+def get_portfolio_value(client: MEXCClient, assets: list, budget_usdt: float | None = None) -> dict:
     """
+    Returns the current value of the configured portfolio assets only.
+
+    budget_usdt: the USDT budget defined in config (total_usdt). When provided,
+    free USDT in the account is capped to this value so the rebalancer never
+    spends more than the user intended.  Pass None to use the raw account balance
+    (e.g. for informational status calls).
+
     Returns:
         {
           "total_usdt": float,
@@ -237,14 +244,26 @@ def get_portfolio_value(client: MEXCClient, assets: list) -> dict:
     total = 0.0
     invalid_symbols = []
 
-    # Always include free USDT balance in the total so the rebalancer
-    # knows how much it can spend when buying underweight assets.
     asset_symbols = {a["symbol"].upper() for a in assets}
+
+    # Include free USDT only when it is not already a tracked portfolio asset.
+    # Cap it to budget_usdt so the bot never over-spends the user's allocation.
     if "USDT" not in asset_symbols:
         try:
             usdt_free = client.get_asset_balance("USDT")
-            total += usdt_free
-            log.info("Free USDT (not in portfolio targets): %.2f", usdt_free)
+            if budget_usdt is not None:
+                # Only count USDT up to the configured budget.
+                # The rest belongs to other purposes and must not be touched.
+                usdt_counted = min(usdt_free, budget_usdt)
+                if usdt_free > budget_usdt:
+                    log.info(
+                        "Free USDT %.2f exceeds budget %.2f — capping to budget",
+                        usdt_free, budget_usdt,
+                    )
+            else:
+                usdt_counted = usdt_free
+            total += usdt_counted
+            log.info("Free USDT counted toward portfolio: %.2f", usdt_counted)
         except Exception as e:
             log.warning("Could not fetch free USDT balance: %s", e)
 
@@ -253,6 +272,8 @@ def get_portfolio_value(client: MEXCClient, assets: list) -> dict:
         try:
             if sym == "USDT":
                 balance = client.get_asset_balance("USDT")
+                if budget_usdt is not None:
+                    balance = min(balance, budget_usdt)
                 price = 1.0
             else:
                 balance = client.get_asset_balance(sym)
@@ -282,7 +303,7 @@ def get_portfolio_value(client: MEXCClient, assets: list) -> dict:
     if invalid_symbols:
         log.warning("Invalid symbols (not found on MEXC): %s", invalid_symbols)
 
-    log.info("Portfolio total (incl. free USDT): %.2f USDT", total)
+    log.info("Portfolio total (budget-capped): %.2f USDT", total)
     for r in result:
         r["actual_pct"] = (r["value_usdt"] / total * 100) if total > 0 else 0.0
 
@@ -310,7 +331,10 @@ def execute_rebalance(client: MEXCClient, cfg: dict) -> list:
     else:
         paper = cfg.get("paper_trading", False)
     assets_cfg = cfg["portfolio"]["assets"]
-    portfolio = get_portfolio_value(client, assets_cfg)
+    # Pass the configured budget so get_portfolio_value never counts more USDT
+    # than the user allocated, even if the account holds a larger balance.
+    budget_usdt = cfg["portfolio"].get("total_usdt")
+    portfolio = get_portfolio_value(client, assets_cfg, budget_usdt=budget_usdt)
     total_usdt = portfolio["total_usdt"]
 
     log.info("Portfolio total: %.2f USDT%s", total_usdt, " [PAPER]" if paper else "")
@@ -372,7 +396,8 @@ def execute_rebalance(client: MEXCClient, cfg: dict) -> list:
     if not paper:
         time.sleep(2)
 
-    # Execute buys
+    # Execute buys — re-check available USDT before each order to avoid
+    # spending more than the account actually holds after the sell phase.
     for b in buys:
         sym = b["symbol"]
         entry = b["entry"]
@@ -380,11 +405,34 @@ def execute_rebalance(client: MEXCClient, cfg: dict) -> list:
             entry["action"] = "SKIP"
             details.append(entry)
             continue
-        log.info("%sBUY %.2f USDT of %s", "[PAPER] " if paper else "", b["diff_usdt"], sym)
+
+        spend_usdt = b["diff_usdt"]
+
+        if not paper:
+            # Guard: never spend more USDT than is actually available,
+            # and never exceed the configured budget.
+            try:
+                available_usdt = client.get_asset_balance("USDT")
+                capped_budget = min(available_usdt, budget_usdt) if budget_usdt else available_usdt
+                if spend_usdt > capped_budget:
+                    log.warning(
+                        "BUY %s: wanted %.2f USDT but only %.2f available (budget cap %.2f) — adjusting",
+                        sym, spend_usdt, available_usdt, capped_budget,
+                    )
+                    spend_usdt = capped_budget
+                if spend_usdt <= 0:
+                    log.warning("BUY %s: no USDT available — skipping", sym)
+                    entry["action"] = "SKIP_NO_FUNDS"
+                    details.append(entry)
+                    continue
+            except Exception as e:
+                log.warning("Could not verify USDT balance before buying %s: %s", sym, e)
+
+        log.info("%sBUY %.2f USDT of %s", "[PAPER] " if paper else "", spend_usdt, sym)
         entry["action"] = "BUY"
         if not paper:
             try:
-                resp = client.place_market_buy(f"{sym}USDT", b["diff_usdt"])
+                resp = client.place_market_buy(f"{sym}USDT", spend_usdt)
                 log.info("Buy order response: %s", resp)
             except Exception as e:
                 log.error("Buy failed for %s: %s", sym, e)
@@ -453,7 +501,8 @@ def needs_rebalance_proportional(client: MEXCClient, cfg: dict) -> bool:
     """Return True if any asset deviates >= min_deviation_to_execute_pct."""
     assets_cfg = cfg["portfolio"]["assets"]
     min_dev = cfg["rebalance"]["proportional"]["min_deviation_to_execute_pct"]
-    portfolio = get_portfolio_value(client, assets_cfg)
+    budget_usdt = cfg["portfolio"].get("total_usdt")
+    portfolio = get_portfolio_value(client, assets_cfg, budget_usdt=budget_usdt)
     targets = {a["symbol"]: a["allocation_pct"] for a in assets_cfg}
 
     for r in portfolio["assets"]:
