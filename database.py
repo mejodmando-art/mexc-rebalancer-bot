@@ -22,9 +22,24 @@ _SQLITE_PATH = os.path.join(os.path.dirname(__file__), "portfolio.db")
 # Connection helpers
 # ---------------------------------------------------------------------------
 
-if _DATABASE_URL:
+def _try_postgres() -> bool:
+    """Return True if psycopg2 is available and DATABASE_URL connects."""
+    if not _DATABASE_URL:
+        return False
+    try:
+        import psycopg2  # noqa: F401
+        conn = psycopg2.connect(_DATABASE_URL)
+        conn.close()
+        return True
+    except Exception as e:
+        log.warning("PostgreSQL unavailable (%s) — falling back to SQLite", e)
+        return False
+
+
+_USE_POSTGRES = _try_postgres()
+
+if _USE_POSTGRES:
     import psycopg2
-    import psycopg2.extras
 
     @contextmanager
     def _conn() -> Generator:
