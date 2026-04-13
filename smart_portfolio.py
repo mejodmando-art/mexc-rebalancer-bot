@@ -222,58 +222,39 @@ def interactive_setup(cfg: dict) -> dict:
 # Portfolio valuation
 # ---------------------------------------------------------------------------
 
-def get_portfolio_value(client: MEXCClient, assets: list, budget_usdt: float | None = None) -> dict:
+def get_portfolio_value(
+    client: MEXCClient,
+    assets: list,
+    budget_usdt: float | None = None,
+) -> dict:
     """
     Returns the current value of the configured portfolio assets only.
 
-    budget_usdt: the USDT budget defined in config (total_usdt). When provided,
-    free USDT in the account is capped to this value so the rebalancer never
-    spends more than the user intended.  Pass None to use the raw account balance
-    (e.g. for informational status calls).
+    budget_usdt: when provided, this value is used as the authoritative
+    portfolio total instead of summing live asset values.  Percentages
+    (actual_pct) are calculated against budget_usdt, so the rebalancer
+    always works within the user-defined allocation and never touches
+    funds outside it.  Pass None for informational/status calls where
+    you want the true live value.
 
     Returns:
         {
           "total_usdt": float,
           "assets": [
-            {"symbol": str, "balance": float, "price": float, "value_usdt": float, "actual_pct": float},
+            {"symbol": str, "balance": float, "price": float,
+             "value_usdt": float, "actual_pct": float},
             ...
           ]
         }
     """
     result = []
-    total = 0.0
     invalid_symbols = []
-
-    asset_symbols = {a["symbol"].upper() for a in assets}
-
-    # Include free USDT only when it is not already a tracked portfolio asset.
-    # Cap it to budget_usdt so the bot never over-spends the user's allocation.
-    if "USDT" not in asset_symbols:
-        try:
-            usdt_free = client.get_asset_balance("USDT")
-            if budget_usdt is not None:
-                # Only count USDT up to the configured budget.
-                # The rest belongs to other purposes and must not be touched.
-                usdt_counted = min(usdt_free, budget_usdt)
-                if usdt_free > budget_usdt:
-                    log.info(
-                        "Free USDT %.2f exceeds budget %.2f — capping to budget",
-                        usdt_free, budget_usdt,
-                    )
-            else:
-                usdt_counted = usdt_free
-            total += usdt_counted
-            log.info("Free USDT counted toward portfolio: %.2f", usdt_counted)
-        except Exception as e:
-            log.warning("Could not fetch free USDT balance: %s", e)
 
     for a in assets:
         sym = a["symbol"]
         try:
             if sym == "USDT":
                 balance = client.get_asset_balance("USDT")
-                if budget_usdt is not None:
-                    balance = min(balance, budget_usdt)
                 price = 1.0
             else:
                 balance = client.get_asset_balance(sym)
@@ -291,7 +272,6 @@ def get_portfolio_value(client: MEXCClient, assets: list, budget_usdt: float | N
             })
             continue
         value = balance * price
-        total += value
         result.append({
             "symbol": sym,
             "balance": balance,
@@ -303,7 +283,25 @@ def get_portfolio_value(client: MEXCClient, assets: list, budget_usdt: float | N
     if invalid_symbols:
         log.warning("Invalid symbols (not found on MEXC): %s", invalid_symbols)
 
-    log.info("Portfolio total (budget-capped): %.2f USDT", total)
+    # When a budget is set, use it as the fixed total so that actual_pct
+    # reflects how each asset sits relative to the intended allocation.
+    # This prevents assets held outside the portfolio from inflating the
+    # total and causing the bot to over-trade.
+    if budget_usdt is not None:
+        total = budget_usdt
+        log.info("Portfolio total (fixed budget): %.2f USDT", total)
+    else:
+        # Informational mode: sum live values + free USDT not in portfolio.
+        total = sum(r["value_usdt"] for r in result)
+        asset_symbols = {a["symbol"].upper() for a in assets}
+        if "USDT" not in asset_symbols:
+            try:
+                usdt_free = client.get_asset_balance("USDT")
+                total += usdt_free
+            except Exception as e:
+                log.warning("Could not fetch free USDT balance: %s", e)
+        log.info("Portfolio total (live): %.2f USDT", total)
+
     for r in result:
         r["actual_pct"] = (r["value_usdt"] / total * 100) if total > 0 else 0.0
 
