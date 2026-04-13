@@ -314,13 +314,14 @@ def get_portfolio_value(
 
 def execute_rebalance(client: MEXCClient, cfg: dict) -> list:
     """
-    Calculate deviations and place market orders to restore target allocations.
-    Sells overweight assets first, then buys underweight ones.
+    Rebalance logic:
+    1. Sell ALL current holdings of every portfolio asset.
+    2. Wait for USDT to settle.
+    3. Buy each asset using exactly (budget * allocation_pct / 100) USDT.
 
-    Returns a list of order detail dicts for notification/history.
-    When cfg['paper_trading'] is True, logs orders but does not place them.
+    This guarantees the bot never spends more than the configured budget
+    and always splits it exactly as the user defined.
     """
-    # PAPER_TRADING env var overrides config (set to "false" on Railway for live trading)
     env_paper = os.environ.get("PAPER_TRADING", "").lower()
     if env_paper in ("true", "1", "yes"):
         paper = True
@@ -328,112 +329,92 @@ def execute_rebalance(client: MEXCClient, cfg: dict) -> list:
         paper = False
     else:
         paper = cfg.get("paper_trading", False)
+
     assets_cfg = cfg["portfolio"]["assets"]
-    # Pass the configured budget so get_portfolio_value never counts more USDT
-    # than the user allocated, even if the account holds a larger balance.
-    budget_usdt = cfg["portfolio"].get("total_usdt")
-    portfolio = get_portfolio_value(client, assets_cfg, budget_usdt=budget_usdt)
-    total_usdt = portfolio["total_usdt"]
-
-    log.info("Portfolio total: %.2f USDT%s", total_usdt, " [PAPER]" if paper else "")
-
-    targets = {a["symbol"]: a["allocation_pct"] for a in assets_cfg}
-    actuals = {r["symbol"]: r for r in portfolio["assets"]}
-
-    sells = []
-    buys = []
+    budget_usdt = cfg["portfolio"].get("total_usdt", 0)
     details = []
 
-    for sym, target_pct in targets.items():
-        actual = actuals[sym]
-        deviation = actual["actual_pct"] - target_pct
-        target_value = total_usdt * target_pct / 100
-        diff_usdt = actual["value_usdt"] - target_value
+    log.info("Rebalance start | budget=%.2f USDT | assets=%s%s",
+             budget_usdt, [a["symbol"] for a in assets_cfg], " [PAPER]" if paper else "")
 
-        log.info(
-            "%s | target=%.2f%% actual=%.2f%% deviation=%.2f%% diff=%.2f USDT",
-            sym, target_pct, actual["actual_pct"], deviation, diff_usdt,
-        )
-
-        entry = {
-            "symbol": sym,
-            "target_pct": target_pct,
-            "actual_pct": round(actual["actual_pct"], 2),
-            "deviation": round(deviation, 2),
-            "diff_usdt": round(diff_usdt, 2),
-            "action": "SKIP",
-        }
-
-        MIN_ORDER_USDT = 1.0  # MEXC minimum order size
-        if diff_usdt > MIN_ORDER_USDT:
-            sells.append({"symbol": sym, "diff_usdt": diff_usdt, "price": actual["price"], "entry": entry})
-        elif diff_usdt < -MIN_ORDER_USDT:
-            buys.append({"symbol": sym, "diff_usdt": abs(diff_usdt), "entry": entry})
-        else:
-            entry["action"] = "SKIP"
-            details.append(entry)
-
-    # Execute sells first to free up USDT
-    for s in sells:
-        sym = s["symbol"]
-        entry = s["entry"]
+    # ── Step 1: Sell everything ──────────────────────────────────────────
+    for a in assets_cfg:
+        sym = a["symbol"]
         if sym == "USDT":
-            entry["action"] = "SKIP"
-            details.append(entry)
             continue
-        base_qty = s["diff_usdt"] / s["price"]
-        log.info("%sSELL %.8f %s (~%.2f USDT)", "[PAPER] " if paper else "", base_qty, sym, s["diff_usdt"])
-        entry["action"] = "SELL"
+        try:
+            balance = client.get_asset_balance(sym)
+        except Exception as e:
+            log.warning("Could not fetch balance for %s: %s", sym, e)
+            balance = 0.0
+
+        if balance <= 0:
+            log.info("SELL %s: balance=0, skipping", sym)
+            details.append({"symbol": sym, "action": "SELL_SKIP", "diff_usdt": 0,
+                             "target_pct": a["allocation_pct"], "actual_pct": 0, "deviation": 0})
+            continue
+
+        try:
+            price = client.get_price(f"{sym}USDT")
+        except Exception as e:
+            log.warning("Could not fetch price for %s: %s", sym, e)
+            price = 0.0
+
+        value_usdt = balance * price
+        log.info("%sSELL ALL %.8f %s (~%.2f USDT)", "[PAPER] " if paper else "", balance, sym, value_usdt)
+
+        entry = {"symbol": sym, "action": "SELL", "diff_usdt": round(value_usdt, 2),
+                 "target_pct": a["allocation_pct"], "actual_pct": 100.0, "deviation": 0}
         if not paper:
             try:
-                resp = client.place_market_sell(f"{sym}USDT", base_qty)
-                log.info("Sell order response: %s", resp)
+                resp = client.place_market_sell(f"{sym}USDT", balance)
+                log.info("Sell response: %s", resp)
             except Exception as e:
                 log.error("Sell failed for %s: %s", sym, e)
                 entry["action"] = f"SELL_ERROR: {e}"
         details.append(entry)
 
+    # ── Step 2: Wait for sells to settle ────────────────────────────────
     if not paper:
-        time.sleep(2)
+        time.sleep(3)
 
-    # Execute buys — re-check available USDT before each order to avoid
-    # spending more than the account actually holds after the sell phase.
-    for b in buys:
-        sym = b["symbol"]
-        entry = b["entry"]
+    # ── Step 3: Buy each asset with its exact budget share ───────────────
+    for a in assets_cfg:
+        sym = a["symbol"]
         if sym == "USDT":
-            entry["action"] = "SKIP"
-            details.append(entry)
             continue
 
-        spend_usdt = b["diff_usdt"]
+        spend_usdt = round(budget_usdt * a["allocation_pct"] / 100, 2)
 
+        if spend_usdt < 1.0:
+            log.warning("BUY %s: %.2f USDT is below minimum — skipping", sym, spend_usdt)
+            details.append({"symbol": sym, "action": "SKIP_MIN", "diff_usdt": spend_usdt,
+                             "target_pct": a["allocation_pct"], "actual_pct": 0, "deviation": 0})
+            continue
+
+        # Verify we actually have enough USDT
         if not paper:
-            # Guard: never spend more USDT than is actually available,
-            # and never exceed the configured budget.
             try:
-                available_usdt = client.get_asset_balance("USDT")
-                capped_budget = min(available_usdt, budget_usdt) if budget_usdt else available_usdt
-                if spend_usdt > capped_budget:
-                    log.warning(
-                        "BUY %s: wanted %.2f USDT but only %.2f available (budget cap %.2f) — adjusting",
-                        sym, spend_usdt, available_usdt, capped_budget,
-                    )
-                    spend_usdt = capped_budget
-                if spend_usdt <= 0:
-                    log.warning("BUY %s: no USDT available — skipping", sym)
-                    entry["action"] = "SKIP_NO_FUNDS"
-                    details.append(entry)
+                available = client.get_asset_balance("USDT")
+                if available < spend_usdt:
+                    log.warning("BUY %s: need %.2f but only %.2f available — adjusting",
+                                sym, spend_usdt, available)
+                    spend_usdt = round(available, 2)
+                if spend_usdt < 1.0:
+                    log.warning("BUY %s: not enough USDT — skipping", sym)
+                    details.append({"symbol": sym, "action": "SKIP_NO_FUNDS", "diff_usdt": 0,
+                                     "target_pct": a["allocation_pct"], "actual_pct": 0, "deviation": 0})
                     continue
             except Exception as e:
-                log.warning("Could not verify USDT balance before buying %s: %s", sym, e)
+                log.warning("Could not verify USDT before buying %s: %s", sym, e)
 
         log.info("%sBUY %.2f USDT of %s", "[PAPER] " if paper else "", spend_usdt, sym)
-        entry["action"] = "BUY"
+        entry = {"symbol": sym, "action": "BUY", "diff_usdt": -spend_usdt,
+                 "target_pct": a["allocation_pct"], "actual_pct": 0, "deviation": 0}
         if not paper:
             try:
                 resp = client.place_market_buy(f"{sym}USDT", spend_usdt)
-                log.info("Buy order response: %s", resp)
+                log.info("Buy response: %s", resp)
             except Exception as e:
                 log.error("Buy failed for %s: %s", sym, e)
                 entry["action"] = f"BUY_ERROR: {e}"
@@ -441,10 +422,10 @@ def execute_rebalance(client: MEXCClient, cfg: dict) -> list:
 
     # Persist to DB and config
     mode = cfg["rebalance"]["mode"]
-    record_rebalance(mode, total_usdt, details, paper=paper)
-    record_snapshot(total_usdt, [
-        {"symbol": r["symbol"], "value_usdt": r["value_usdt"], "actual_pct": r["actual_pct"]}
-        for r in portfolio["assets"]
+    record_rebalance(mode, budget_usdt, details, paper=paper)
+    record_snapshot(budget_usdt, [
+        {"symbol": a["symbol"], "value_usdt": round(budget_usdt * a["allocation_pct"] / 100, 2), "actual_pct": a["allocation_pct"]}
+        for a in assets_cfg
     ])
 
     cfg["last_rebalance"] = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
