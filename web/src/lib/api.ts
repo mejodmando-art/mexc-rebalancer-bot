@@ -28,6 +28,9 @@ export const getConfig    = ()       => req<any>('/api/config');
 export const updateConfig = (body: Record<string, unknown>) =>
   req<{ ok: boolean }>('/api/config', { method: 'POST', body: JSON.stringify(body) });
 
+export const resetInitialValue = () =>
+  req<{ ok: boolean; initial_value_usdt: number }>('/api/config/reset-initial-value', { method: 'POST' });
+
 // ── Rebalance ───────────────────────────────────────────────────────────────
 export const triggerRebalance = () =>
   req<{ ok: boolean; job_id: string; cancel_window_seconds: number }>('/api/rebalance', { method: 'POST' });

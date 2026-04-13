@@ -512,8 +512,8 @@ def update_config(body: ConfigUpdate):
         ]
     if body.total_usdt is not None:
         cfg["portfolio"]["total_usdt"] = body.total_usdt
-        if "initial_value_usdt" not in cfg["portfolio"]:
-            cfg["portfolio"]["initial_value_usdt"] = body.total_usdt
+        # Always update initial baseline when user explicitly sets total_usdt
+        cfg["portfolio"]["initial_value_usdt"] = body.total_usdt
     if body.rebalance_mode is not None:
         cfg["rebalance"]["mode"] = body.rebalance_mode
     if body.threshold_pct is not None:
@@ -534,6 +534,26 @@ def update_config(body: ConfigUpdate):
         raise HTTPException(status_code=400, detail=str(e))
     save_config(cfg)
     return {"ok": True}
+
+
+@app.post("/api/config/reset-initial-value")
+def reset_initial_value():
+    """Reset initial_value_usdt to the current live portfolio value from MEXC."""
+    cfg = load_config()
+    try:
+        client = _client()
+        portfolio = get_portfolio_value(client, cfg["portfolio"]["assets"], budget_usdt=None)
+        live_total = portfolio["total_usdt"]
+        if live_total <= 0:
+            raise HTTPException(status_code=400, detail="القيمة الحالية صفر — تحقق من الرصيد")
+        cfg["portfolio"]["total_usdt"] = round(live_total, 2)
+        cfg["portfolio"]["initial_value_usdt"] = round(live_total, 2)
+        save_config(cfg)
+        return {"ok": True, "initial_value_usdt": round(live_total, 2)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ---------------------------------------------------------------------------
@@ -903,6 +923,16 @@ def api_activate_portfolio(portfolio_id: int):
         validate_allocations(cfg["portfolio"]["assets"])
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    # Snapshot real portfolio value from MEXC and store as initial baseline
+    try:
+        client = _client()
+        portfolio = get_portfolio_value(client, cfg["portfolio"]["assets"], budget_usdt=None)
+        live_total = portfolio["total_usdt"]
+        if live_total > 0:
+            cfg["portfolio"]["total_usdt"] = round(live_total, 2)
+            cfg["portfolio"]["initial_value_usdt"] = round(live_total, 2)
+    except Exception as e:
+        log.warning("activate: could not fetch live value: %s", e)
     set_active_portfolio(portfolio_id)
     save_config(cfg)
     return {"ok": True, "message": f"تم تفعيل المحفظة: {cfg['bot']['name']}"}
@@ -920,6 +950,18 @@ def api_start_portfolio(portfolio_id: int):
         raise HTTPException(status_code=400, detail=str(e))
     if _is_portfolio_running(portfolio_id):
         return {"ok": False, "message": "المحفظة شغالة بالفعل"}
+    # Sync real portfolio value before starting
+    try:
+        client = _client()
+        portfolio = get_portfolio_value(client, cfg["portfolio"]["assets"], budget_usdt=None)
+        live_total = portfolio["total_usdt"]
+        if live_total > 0:
+            cfg["portfolio"]["total_usdt"] = round(live_total, 2)
+            if "initial_value_usdt" not in cfg["portfolio"] or cfg["portfolio"].get("initial_value_usdt", 0) <= 0:
+                cfg["portfolio"]["initial_value_usdt"] = round(live_total, 2)
+            save_config(cfg)
+    except Exception as e:
+        log.warning("start: could not fetch live value: %s", e)
     _start_portfolio_loop(portfolio_id)
     return {"ok": True, "message": f"تم تشغيل المحفظة: {cfg['bot']['name']}"}
 

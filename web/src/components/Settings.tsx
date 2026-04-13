@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { getConfig, updateConfig, listPortfolios, getPortfolio, updatePortfolio } from '../lib/api';
+import { getConfig, updateConfig, listPortfolios, getPortfolio, updatePortfolio, resetInitialValue } from '../lib/api';
 import { Lang, tr } from '../lib/i18n';
 
 interface Asset { symbol: string; allocation_pct: number; }
@@ -21,6 +21,7 @@ export default function Settings({ lang, onSaved }: Props) {
   const [assetTransfer, setAssetTransfer] = useState(false);
   const [paperTrading, setPaperTrading]   = useState(false);
   const [saving, setSaving]           = useState(false);
+  const [resetting, setResetting]     = useState(false);
   const [msg, setMsg]                 = useState('');
 
   const applyConfig = (c: any) => {
@@ -314,6 +315,31 @@ export default function Settings({ lang, onSaved }: Props) {
             onChange={e => setTotalUsdt(parseFloat(e.target.value) || 0)} />
           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm" style={{ color: 'var(--text-muted)' }}>USDT</span>
         </div>
+        <p className="text-xs mt-2" style={{ color: 'var(--text-muted)' }}>
+          {lang === 'ar'
+            ? 'هذه القيمة تُستخدم لحساب الربح/الخسارة. اضغط الزر أدناه لمزامنتها مع رصيدك الحقيقي على MEXC.'
+            : 'Used to calculate P&L. Press the button below to sync with your real MEXC balance.'}
+        </p>
+        <button
+          onClick={async () => {
+            setResetting(true); setMsg('');
+            try {
+              const res = await resetInitialValue();
+              setTotalUsdt(res.initial_value_usdt);
+              setMsg(`✅ ${lang === 'ar' ? 'تم المزامنة: القيمة الابتدائية = $' : 'Synced: initial value = $'}${res.initial_value_usdt.toFixed(2)}`);
+            } catch (e: any) {
+              setMsg('❌ ' + e.message);
+            } finally {
+              setResetting(false);
+            }
+          }}
+          disabled={resetting}
+          className="btn-secondary w-full mt-3 py-2 text-sm"
+        >
+          {resetting
+            ? (lang === 'ar' ? '⏳ جاري المزامنة...' : '⏳ Syncing...')
+            : (lang === 'ar' ? '🔄 مزامنة القيمة الابتدائية مع MEXC' : '🔄 Sync initial value from MEXC')}
+        </button>
       </div>
 
       {/* Toggles */}
