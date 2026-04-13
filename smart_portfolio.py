@@ -364,11 +364,13 @@ def execute_rebalance(client: MEXCClient, cfg: dict) -> list:
             "action": "SKIP",
         }
 
-        if diff_usdt > 0:
+        MIN_ORDER_USDT = 1.0  # MEXC minimum order size
+        if diff_usdt > MIN_ORDER_USDT:
             sells.append({"symbol": sym, "diff_usdt": diff_usdt, "price": actual["price"], "entry": entry})
-        elif diff_usdt < 0:
+        elif diff_usdt < -MIN_ORDER_USDT:
             buys.append({"symbol": sym, "diff_usdt": abs(diff_usdt), "entry": entry})
         else:
+            entry["action"] = "SKIP"
             details.append(entry)
 
     # Execute sells first to free up USDT
