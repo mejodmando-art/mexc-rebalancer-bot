@@ -207,7 +207,12 @@ export default function Dashboard({ lang }: Props) {
   const assets = status?.assets ?? [];
   const pnl    = status?.pnl ?? {};
   const pnlPos = (pnl.pnl_usdt ?? 0) >= 0;
-  const pieData = assets.map((a: any) => ({ name: a.symbol, value: a.value_usdt }));
+  // When no API key, value_usdt is 0 for all assets – fall back to target allocation for the pie
+  const hasLiveData = assets.some((a: any) => a.value_usdt > 0);
+  const pieData = assets.map((a: any) => ({
+    name: a.symbol,
+    value: hasLiveData ? a.value_usdt : a.target_pct,
+  }));
 
   const modeLabel: Record<string, string> = {
     proportional: '📊 ' + tr('proportional', lang),
@@ -443,21 +448,31 @@ export default function Dashboard({ lang }: Props) {
                           </td>
                           <td className="py-3 px-4" style={{ color: 'var(--text-muted)' }}>{a.target_pct.toFixed(1)}%</td>
                           <td className="py-3 px-4">
-                            <div className="flex items-center gap-2">
-                              <div className="flex-1 rounded-full h-1.5 w-16" style={{ background: 'var(--bg-input)' }}>
-                                <div className="h-1.5 rounded-full bg-brand" style={{ width: `${Math.min(a.actual_pct, 100)}%` }} />
+                            {hasLiveData ? (
+                              <div className="flex items-center gap-2">
+                                <div className="flex-1 rounded-full h-1.5 w-16" style={{ background: 'var(--bg-input)' }}>
+                                  <div className="h-1.5 rounded-full bg-brand" style={{ width: `${Math.min(a.actual_pct, 100)}%` }} />
+                                </div>
+                                <span className="text-sm" style={{ color: 'var(--text-main)' }}>{a.actual_pct.toFixed(1)}%</span>
                               </div>
-                              <span className="text-sm" style={{ color: 'var(--text-main)' }}>{a.actual_pct.toFixed(1)}%</span>
-                            </div>
+                            ) : (
+                              <span className="text-xs" style={{ color: 'var(--text-muted)' }}>—</span>
+                            )}
                           </td>
                           <td className="py-3 px-4">
-                            <span className={`badge ${absdev < 1 ? 'bg-gray-800 text-gray-400' : isOver ? 'bg-red-900/60 text-red-400' : 'bg-green-900/60 text-green-400'}`}>
-                              {isOver ? '+' : ''}{dev.toFixed(1)}%
-                            </span>
+                            {hasLiveData ? (
+                              <span className={`badge ${absdev < 1 ? 'bg-gray-800 text-gray-400' : isOver ? 'bg-red-900/60 text-red-400' : 'bg-green-900/60 text-green-400'}`}>
+                                {isOver ? '+' : ''}{dev.toFixed(1)}%
+                              </span>
+                            ) : (
+                              <span className="text-xs" style={{ color: 'var(--text-muted)' }}>—</span>
+                            )}
                           </td>
-                          <td className="py-3 px-4" style={{ color: 'var(--text-muted)' }}>${a.value_usdt.toFixed(2)}</td>
+                          <td className="py-3 px-4" style={{ color: 'var(--text-muted)' }}>
+                            {hasLiveData ? `$${a.value_usdt.toFixed(2)}` : '—'}
+                          </td>
                           <td className="py-3 px-4 text-xs" style={{ color: 'var(--text-muted)' }}>
-                            {a.balance.toFixed(6)} @ ${a.price.toFixed(4)}
+                            {hasLiveData ? `${a.balance.toFixed(6)} @ $${a.price.toFixed(4)}` : '—'}
                           </td>
                         </tr>
                       );
