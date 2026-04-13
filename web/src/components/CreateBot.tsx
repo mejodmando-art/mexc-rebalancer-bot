@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { updateConfig, startBot, savePortfolio } from '../lib/api';
+import { startBot, savePortfolio, activatePortfolio } from '../lib/api';
 import { Lang, tr } from '../lib/i18n';
 
 interface Asset { symbol: string; allocation_pct: number; }
@@ -75,20 +75,6 @@ export default function CreateBot({ lang, onCreated }: Props) {
     if (err) { setError('❌ ' + err); return; }
     setError(''); setSaving(true);
     try {
-      const configPayload = {
-        bot_name: botName.trim(),
-        assets: assets.map(a => ({ symbol: a.symbol.trim().toUpperCase(), allocation_pct: a.allocation_pct })),
-        total_usdt: totalUsdt,
-        rebalance_mode: rebalMode,
-        threshold_pct: threshold,
-        frequency,
-        timed_hour: timedHour,
-        sell_at_termination: sellTerm,
-        enable_asset_transfer: assetTransfer,
-        paper_trading: paperTrading,
-      };
-      await updateConfig(configPayload);
-      // Save as a named portfolio in the portfolio list
       const fullConfig = {
         bot: { name: botName.trim() },
         portfolio: {
@@ -107,7 +93,10 @@ export default function CreateBot({ lang, onCreated }: Props) {
         paper_trading: paperTrading,
         last_rebalance: null,
       };
-      await savePortfolio(fullConfig);
+      // Save portfolio first — this is the only source of truth
+      const saved = await savePortfolio(fullConfig);
+      // Activate it immediately so config.json is updated and bot starts
+      await activatePortfolio(saved.id);
       await startBot().catch(() => {}); // ignore "already running" error
       setSuccess('✅ ' + tr('successCreated', lang));
       setTimeout(onCreated, 1500);
