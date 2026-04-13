@@ -315,12 +315,10 @@ def get_portfolio_value(
 def execute_rebalance(client: MEXCClient, cfg: dict) -> list:
     """
     Rebalance logic:
-    1. Sell ALL current holdings of every portfolio asset.
-    2. Wait for USDT to settle.
-    3. Buy each asset using exactly (budget * allocation_pct / 100) USDT.
-
-    This guarantees the bot never spends more than the configured budget
-    and always splits it exactly as the user defined.
+    - target for each asset = budget * allocation_pct / 100
+    - if current value > target → sell the difference
+    - if current value < target → buy the difference
+    - never touches funds outside the configured budget
     """
     env_paper = os.environ.get("PAPER_TRADING", "").lower()
     if env_paper in ("true", "1", "yes"):
@@ -334,89 +332,110 @@ def execute_rebalance(client: MEXCClient, cfg: dict) -> list:
     budget_usdt = cfg["portfolio"].get("total_usdt", 0)
     details = []
 
-    log.info("Rebalance start | budget=%.2f USDT | assets=%s%s",
-             budget_usdt, [a["symbol"] for a in assets_cfg], " [PAPER]" if paper else "")
+    log.info("Rebalance start | budget=%.2f USDT%s", budget_usdt, " [PAPER]" if paper else "")
 
-    # ── Step 1: Sell everything ──────────────────────────────────────────
+    # ── Fetch current prices and balances ───────────────────────────────
+    actuals = {}
     for a in assets_cfg:
         sym = a["symbol"]
+        try:
+            balance = client.get_asset_balance(sym) if sym != "USDT" else client.get_asset_balance("USDT")
+            price   = client.get_price(f"{sym}USDT") if sym != "USDT" else 1.0
+            actuals[sym] = {"balance": balance, "price": price, "value_usdt": balance * price}
+        except Exception as e:
+            log.warning("Cannot fetch %s: %s", sym, e)
+            actuals[sym] = {"balance": 0.0, "price": 0.0, "value_usdt": 0.0}
+
+    sells = []
+    buys  = []
+
+    for a in assets_cfg:
+        sym        = a["symbol"]
+        target_val = round(budget_usdt * a["allocation_pct"] / 100, 2)
+        actual_val = actuals[sym]["value_usdt"]
+        diff       = round(actual_val - target_val, 2)   # + = زيادة → بيع، - = ناقص → شراء
+
+        log.info("%s | actual=%.2f$ target=%.2f$ diff=%+.2f$", sym, actual_val, target_val, diff)
+
+        entry = {
+            "symbol":     sym,
+            "target_pct": a["allocation_pct"],
+            "actual_pct": round(actual_val / budget_usdt * 100, 2) if budget_usdt else 0,
+            "deviation":  round(diff / budget_usdt * 100, 2) if budget_usdt else 0,
+            "diff_usdt":  diff,
+            "action":     "SKIP",
+        }
+
+        if diff > 1.0:    # زيادة أكبر من 1$ → بيع
+            sells.append({"sym": sym, "diff": diff, "price": actuals[sym]["price"], "entry": entry})
+        elif diff < -1.0: # ناقص أكبر من 1$ → شراء
+            buys.append({"sym": sym, "diff": abs(diff), "entry": entry})
+        else:
+            details.append(entry)
+
+    # ── Sells first ──────────────────────────────────────────────────────
+    for s in sells:
+        sym, entry = s["sym"], s["entry"]
         if sym == "USDT":
+            details.append(entry)
             continue
-        try:
-            balance = client.get_asset_balance(sym)
-        except Exception as e:
-            log.warning("Could not fetch balance for %s: %s", sym, e)
-            balance = 0.0
-
-        if balance <= 0:
-            log.info("SELL %s: balance=0, skipping", sym)
-            details.append({"symbol": sym, "action": "SELL_SKIP", "diff_usdt": 0,
-                             "target_pct": a["allocation_pct"], "actual_pct": 0, "deviation": 0})
-            continue
-
-        try:
-            price = client.get_price(f"{sym}USDT")
-        except Exception as e:
-            log.warning("Could not fetch price for %s: %s", sym, e)
-            price = 0.0
-
-        value_usdt = balance * price
-        log.info("%sSELL ALL %.8f %s (~%.2f USDT)", "[PAPER] " if paper else "", balance, sym, value_usdt)
-
-        entry = {"symbol": sym, "action": "SELL", "diff_usdt": round(value_usdt, 2),
-                 "target_pct": a["allocation_pct"], "actual_pct": 100.0, "deviation": 0}
+        qty = round(s["diff"] / s["price"], 8)
+        log.info("%sSELL %.8f %s (~%.2f$)", "[PAPER] " if paper else "", qty, sym, s["diff"])
+        entry["action"] = "SELL"
         if not paper:
             try:
-                resp = client.place_market_sell(f"{sym}USDT", balance)
-                log.info("Sell response: %s", resp)
+                resp = client.place_market_sell(f"{sym}USDT", qty)
+                log.info("Sell OK: %s", resp)
             except Exception as e:
-                log.error("Sell failed for %s: %s", sym, e)
+                log.error("Sell failed %s: %s", sym, e)
                 entry["action"] = f"SELL_ERROR: {e}"
         details.append(entry)
 
-    # ── Step 2: Wait for sells to settle ────────────────────────────────
     if not paper:
         time.sleep(3)
 
-    # ── Step 3: Buy each asset with its exact budget share ───────────────
-    for a in assets_cfg:
-        sym = a["symbol"]
+    # ── Buys — track remaining USDT across orders ────────────────────────
+    if not paper:
+        try:
+            usdt_remaining = client.get_asset_balance("USDT")
+            log.info("USDT available for buys: %.2f", usdt_remaining)
+        except Exception as e:
+            log.warning("Could not fetch USDT: %s", e)
+            usdt_remaining = None
+    else:
+        usdt_remaining = None
+
+    for b in buys:
+        sym, entry = b["sym"], b["entry"]
         if sym == "USDT":
+            details.append(entry)
             continue
 
-        spend_usdt = round(budget_usdt * a["allocation_pct"] / 100, 2)
+        spend = b["diff"]
 
-        if spend_usdt < 1.0:
-            log.warning("BUY %s: %.2f USDT is below minimum — skipping", sym, spend_usdt)
-            details.append({"symbol": sym, "action": "SKIP_MIN", "diff_usdt": spend_usdt,
-                             "target_pct": a["allocation_pct"], "actual_pct": 0, "deviation": 0})
+        if not paper and usdt_remaining is not None:
+            if usdt_remaining <= 0:
+                entry["action"] = "SKIP_NO_FUNDS"
+                details.append(entry)
+                continue
+            if spend > usdt_remaining:
+                spend = round(usdt_remaining, 2)
+
+        if spend < 1.0:
+            entry["action"] = "SKIP_MIN"
+            details.append(entry)
             continue
 
-        # Verify we actually have enough USDT
+        log.info("%sBUY %.2f$ of %s", "[PAPER] " if paper else "", spend, sym)
+        entry["action"] = "BUY"
         if not paper:
             try:
-                available = client.get_asset_balance("USDT")
-                if available < spend_usdt:
-                    log.warning("BUY %s: need %.2f but only %.2f available — adjusting",
-                                sym, spend_usdt, available)
-                    spend_usdt = round(available, 2)
-                if spend_usdt < 1.0:
-                    log.warning("BUY %s: not enough USDT — skipping", sym)
-                    details.append({"symbol": sym, "action": "SKIP_NO_FUNDS", "diff_usdt": 0,
-                                     "target_pct": a["allocation_pct"], "actual_pct": 0, "deviation": 0})
-                    continue
+                resp = client.place_market_buy(f"{sym}USDT", spend)
+                log.info("Buy OK: %s", resp)
+                if usdt_remaining is not None:
+                    usdt_remaining -= spend
             except Exception as e:
-                log.warning("Could not verify USDT before buying %s: %s", sym, e)
-
-        log.info("%sBUY %.2f USDT of %s", "[PAPER] " if paper else "", spend_usdt, sym)
-        entry = {"symbol": sym, "action": "BUY", "diff_usdt": -spend_usdt,
-                 "target_pct": a["allocation_pct"], "actual_pct": 0, "deviation": 0}
-        if not paper:
-            try:
-                resp = client.place_market_buy(f"{sym}USDT", spend_usdt)
-                log.info("Buy response: %s", resp)
-            except Exception as e:
-                log.error("Buy failed for %s: %s", sym, e)
+                log.error("Buy failed %s: %s", sym, e)
                 entry["action"] = f"BUY_ERROR: {e}"
         details.append(entry)
 
