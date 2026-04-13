@@ -27,7 +27,7 @@ export default function Navbar({ active, onNav, botRunning, lang, onLangToggle, 
   return (
     <>
       <header className="navbar sticky top-0 z-50 h-14">
-        <div className="h-full px-4 flex items-center justify-between gap-3" style={{ paddingInlineStart: 'max(1rem, calc(240px + 1rem))' }}>
+        <div className="h-full px-4 lg:pl-4 flex items-center justify-between gap-3">
           {/* Mobile logo */}
           <div className="flex items-center gap-2 lg:hidden">
             <div className="w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs accent-gradient" style={{ color: '#0D1117' }}>

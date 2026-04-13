@@ -58,7 +58,7 @@ export default function App() {
       <div className="min-h-screen" style={{ background: 'var(--bg-base)' }}>
         <Sidebar active={tab} onNav={setTab} botRunning={botRunning} lang={lang} />
 
-        <div className="flex flex-col min-h-screen" style={{ paddingInlineStart: 'clamp(0px, 240px, 240px)' }}>
+        <div className="flex flex-col min-h-screen lg:pl-60 xl:pl-64">
           <Navbar
             active={tab} onNav={setTab} botRunning={botRunning}
             lang={lang} onLangToggle={toggleLang}

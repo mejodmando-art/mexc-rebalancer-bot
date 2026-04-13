@@ -22,8 +22,7 @@ const TABS: { key: Tab; icon: React.ElementType; labelKey: string }[] = [
 
 export default function Sidebar({ active, onNav, botRunning, lang }: SidebarProps) {
   return (
-    <aside className="sidebar hidden lg:flex flex-col w-60 xl:w-64 fixed top-0 bottom-0 z-40 py-5 px-3"
-           style={{ insetInlineStart: 0 }}>
+    <aside className="sidebar hidden lg:flex flex-col w-60 xl:w-64 fixed top-0 bottom-0 left-0 z-40 py-5 px-3">
       {/* Logo */}
       <div className="flex items-center gap-3 px-3 mb-8">
         <div className="w-9 h-9 rounded-xl flex items-center justify-center font-bold text-sm shrink-0 accent-gradient"

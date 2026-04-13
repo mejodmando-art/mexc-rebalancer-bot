@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useState, useCallback, useRef, ReactNode, useEffect } from 'react';
+import { createContext, useContext, useState, useCallback, useRef, ReactNode } from 'react';
 import { CheckCircle2, XCircle, Info, AlertTriangle, X } from 'lucide-react';
 
 type ToastType = 'success' | 'error' | 'info' | 'warning';
@@ -11,7 +11,6 @@ interface ToastItem {
   title: string;
   message?: string;
   duration?: number;
-  exiting?: boolean;
 }
 
 interface ToastContextValue {
@@ -22,7 +21,12 @@ interface ToastContextValue {
   warning: (title: string, message?: string) => void;
 }
 
-const ToastContext = createContext<ToastContextValue | null>(null);
+const noop = () => {};
+const fallback: ToastContextValue = {
+  toast: noop, success: noop, error: noop, info: noop, warning: noop,
+};
+
+const ToastContext = createContext<ToastContextValue>(fallback);
 
 const ICONS: Record<ToastType, React.ElementType> = {
   success: CheckCircle2,
@@ -72,7 +76,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               <Icon size={16} style={{ color: COLORS[t.type], flexShrink: 0, marginTop: 1 }} />
               <div className="flex-1 min-w-0">
                 <div className="font-semibold text-[13px]" style={{ color: 'var(--text-main)' }}>{t.title}</div>
-                {t.message && <div className="text-[12px] mt-0.5" style={{ color: 'var(--text-muted)' }}>{t.message}</div>}
+                {t.message && (
+                  <div className="text-[12px] mt-0.5" style={{ color: 'var(--text-muted)' }}>{t.message}</div>
+                )}
               </div>
               <button onClick={() => remove(t.id)} className="shrink-0 opacity-50 hover:opacity-100 transition-opacity">
                 <X size={14} />
@@ -85,8 +91,6 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   );
 }
 
-export function useToast() {
-  const ctx = useContext(ToastContext);
-  if (!ctx) throw new Error('useToast must be used inside ToastProvider');
-  return ctx;
+export function useToast(): ToastContextValue {
+  return useContext(ToastContext);
 }
