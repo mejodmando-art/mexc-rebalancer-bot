@@ -44,7 +44,11 @@ from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from database import get_rebalance_history, get_snapshots, init_db, record_snapshot
+from database import (
+    get_rebalance_history, get_snapshots, init_db, record_snapshot,
+    save_portfolio, list_portfolios, get_portfolio,
+    set_active_portfolio, delete_portfolio, update_portfolio_config,
+)
 from mexc_client import MEXCClient
 from smart_portfolio import (
     execute_rebalance,
@@ -699,3 +703,79 @@ def bot_stop():
         return {"ok": False, "message": "البوت مش شغال"}
     _stop_event.set()
     return {"ok": True, "message": "تم إيقاف البوت"}
+
+
+# ---------------------------------------------------------------------------
+# Routes – Multi-portfolio management
+# ---------------------------------------------------------------------------
+
+class PortfolioCreate(BaseModel):
+    config: dict
+
+
+@app.get("/api/portfolios")
+def api_list_portfolios():
+    """List all saved portfolios."""
+    return list_portfolios()
+
+
+@app.post("/api/portfolios")
+def api_save_portfolio(body: PortfolioCreate):
+    """Save current config as a new named portfolio."""
+    cfg = body.config
+    try:
+        validate_allocations(cfg["portfolio"]["assets"])
+    except (ValueError, KeyError) as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    name = cfg.get("bot", {}).get("name", "Portfolio")
+    pid = save_portfolio(name, cfg)
+    if pid < 0:
+        raise HTTPException(status_code=500, detail="فشل حفظ المحفظة")
+    return {"ok": True, "id": pid}
+
+
+@app.get("/api/portfolios/{portfolio_id}")
+def api_get_portfolio(portfolio_id: int):
+    cfg = get_portfolio(portfolio_id)
+    if cfg is None:
+        raise HTTPException(status_code=404, detail="المحفظة غير موجودة")
+    return cfg
+
+
+@app.post("/api/portfolios/{portfolio_id}/activate")
+def api_activate_portfolio(portfolio_id: int):
+    """Load a saved portfolio into config.json and make it active."""
+    cfg = get_portfolio(portfolio_id)
+    if cfg is None:
+        raise HTTPException(status_code=404, detail="المحفظة غير موجودة")
+    try:
+        validate_allocations(cfg["portfolio"]["assets"])
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    # Stop running loop before switching
+    if _is_running():
+        _stop_event.set()
+    save_config(cfg)
+    set_active_portfolio(portfolio_id)
+    return {"ok": True, "message": f"تم تفعيل المحفظة: {cfg['bot']['name']}"}
+
+
+@app.delete("/api/portfolios/{portfolio_id}")
+def api_delete_portfolio(portfolio_id: int):
+    delete_portfolio(portfolio_id)
+    return {"ok": True}
+
+
+@app.put("/api/portfolios/{portfolio_id}")
+def api_update_portfolio(portfolio_id: int, body: PortfolioCreate):
+    """Update a saved portfolio's config without activating it."""
+    cfg = body.config
+    try:
+        validate_allocations(cfg["portfolio"]["assets"])
+    except (ValueError, KeyError) as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    existing = get_portfolio(portfolio_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="المحفظة غير موجودة")
+    update_portfolio_config(portfolio_id, cfg)
+    return {"ok": True}

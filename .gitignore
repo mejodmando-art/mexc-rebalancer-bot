@@ -37,3 +37,7 @@ ENV/
 # Allow pre-built frontend for Railway deployment
 !web/frontend/dist/
 !web/frontend/dist/**
+web/.next/
+web/out/
+web/tsconfig.tsbuildinfo
+web/node_modules/

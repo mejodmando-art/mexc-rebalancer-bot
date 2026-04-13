@@ -92,6 +92,20 @@ export const t: Record<string, Record<Lang, string>> = {
   createBotSubtitle:{ ar: 'Spot – MEXC Exchange', en: 'Spot – MEXC Exchange' },
   minRecommended:   { ar: 'الحد الأدنى الموصى به', en: 'Minimum recommended' },
 
+  // Multi-portfolio
+  myPortfolios:       { ar: 'محافظي',                    en: 'My Portfolios' },
+  myPortfoliosDesc:   { ar: 'عرض وإدارة جميع المحافظ المحفوظة', en: 'View and manage all saved portfolios' },
+  portfolioCount:     { ar: 'محفظة',                     en: 'portfolios' },
+  noPortfolios:       { ar: 'لا توجد محافظ بعد',          en: 'No portfolios yet' },
+  noPortfoliosDesc:   { ar: 'أنشئ محفظتك الأولى من تبويب "إنشاء بوت"', en: 'Create your first portfolio from the "Create Bot" tab' },
+  activePortfolio:    { ar: 'نشطة',                      en: 'Active' },
+  activatePortfolio:  { ar: 'تفعيل',                     en: 'Activate' },
+  currentlyActive:    { ar: 'المحفظة الحالية',            en: 'Currently Active' },
+  deletePortfolio:    { ar: 'حذف المحفظة',               en: 'Delete Portfolio' },
+  confirmDelete:      { ar: 'تأكيد الحذف',               en: 'Confirm Delete' },
+  cantDeleteActive:   { ar: 'لا يمكن حذف المحفظة النشطة', en: 'Cannot delete the active portfolio' },
+  createdAt:          { ar: 'تاريخ الإنشاء',             en: 'Created' },
+
   // Errors / messages
   errDuplicate:     { ar: 'لا يمكن تكرار العملات', en: 'Duplicate coin symbols not allowed' },
   errSum:           { ar: 'مجموع النسب يجب أن يساوي 100%', en: 'Allocations must sum to 100%' },

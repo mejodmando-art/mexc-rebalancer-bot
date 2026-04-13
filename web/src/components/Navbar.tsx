@@ -3,8 +3,8 @@
 import { Lang, tr } from '../lib/i18n';
 
 interface NavbarProps {
-  active: 'dashboard' | 'create' | 'settings' | 'notifications';
-  onNav: (tab: 'dashboard' | 'create' | 'settings' | 'notifications') => void;
+  active: 'dashboard' | 'portfolios' | 'create' | 'settings' | 'notifications';
+  onNav: (tab: 'dashboard' | 'portfolios' | 'create' | 'settings' | 'notifications') => void;
   botRunning: boolean;
   lang: Lang;
   onLangToggle: () => void;
@@ -17,6 +17,7 @@ export default function Navbar({
 }: NavbarProps) {
   const tabs = [
     { key: 'dashboard'     as const, label: tr('dashboard', lang),     icon: '📊' },
+    { key: 'portfolios'    as const, label: tr('myPortfolios', lang),   icon: '📂' },
     { key: 'create'        as const, label: tr('createBot', lang),      icon: '➕' },
     { key: 'settings'      as const, label: tr('settings', lang),       icon: '⚙️' },
     { key: 'notifications' as const, label: tr('notifications', lang),  icon: '🔔' },

@@ -3,13 +3,14 @@
 import { useState, useEffect } from 'react';
 import Navbar from '../components/Navbar';
 import Dashboard from '../components/Dashboard';
+import Portfolios from '../components/Portfolios';
 import CreateBot from '../components/CreateBot';
 import Settings from '../components/Settings';
 import Notifications from '../components/Notifications';
 import { getBotStatus } from '../lib/api';
 import { Lang } from '../lib/i18n';
 
-type Tab = 'dashboard' | 'create' | 'settings' | 'notifications';
+type Tab = 'dashboard' | 'portfolios' | 'create' | 'settings' | 'notifications';
 
 export default function App() {
   const [tab, setTab]               = useState<Tab>('dashboard');
@@ -71,7 +72,8 @@ export default function App() {
       />
       <main className="max-w-7xl mx-auto px-4 py-6">
         {tab === 'dashboard'     && <Dashboard     lang={lang} />}
-        {tab === 'create'        && <CreateBot     lang={lang} onCreated={() => setTab('dashboard')} />}
+        {tab === 'portfolios'    && <Portfolios    lang={lang} onActivated={() => setTab('dashboard')} />}
+        {tab === 'create'        && <CreateBot     lang={lang} onCreated={() => setTab('portfolios')} />}
         {tab === 'settings'      && <Settings      lang={lang} onSaved={() => setTab('dashboard')} />}
         {tab === 'notifications' && <Notifications lang={lang} />}
       </main>

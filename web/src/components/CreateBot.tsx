@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { updateConfig, startBot } from '../lib/api';
+import { updateConfig, startBot, savePortfolio } from '../lib/api';
 import { Lang, tr } from '../lib/i18n';
 
 interface Asset { symbol: string; allocation_pct: number; }
@@ -75,7 +75,7 @@ export default function CreateBot({ lang, onCreated }: Props) {
     if (err) { setError('❌ ' + err); return; }
     setError(''); setSaving(true);
     try {
-      await updateConfig({
+      const configPayload = {
         bot_name: botName.trim(),
         assets: assets.map(a => ({ symbol: a.symbol.trim().toUpperCase(), allocation_pct: a.allocation_pct })),
         total_usdt: totalUsdt,
@@ -86,7 +86,28 @@ export default function CreateBot({ lang, onCreated }: Props) {
         sell_at_termination: sellTerm,
         enable_asset_transfer: assetTransfer,
         paper_trading: paperTrading,
-      });
+      };
+      await updateConfig(configPayload);
+      // Save as a named portfolio in the portfolio list
+      const fullConfig = {
+        bot: { name: botName.trim() },
+        portfolio: {
+          assets: assets.map(a => ({ symbol: a.symbol.trim().toUpperCase(), allocation_pct: a.allocation_pct })),
+          total_usdt: totalUsdt,
+          initial_value_usdt: totalUsdt,
+        },
+        rebalance: {
+          mode: rebalMode,
+          proportional: { threshold_pct: threshold, check_interval_minutes: 5, min_deviation_to_execute_pct: 3 },
+          timed: { frequency, hour: timedHour },
+          unbalanced: {},
+        },
+        termination: { sell_at_termination: sellTerm },
+        asset_transfer: { enable_asset_transfer: assetTransfer },
+        paper_trading: paperTrading,
+        last_rebalance: null,
+      };
+      await savePortfolio(fullConfig).catch(() => {}); // non-critical
       await startBot().catch(() => {}); // ignore "already running" error
       setSuccess('✅ ' + tr('successCreated', lang));
       setTimeout(onCreated, 1500);

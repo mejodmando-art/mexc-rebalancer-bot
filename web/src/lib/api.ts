@@ -55,3 +55,15 @@ export const testDiscord = () =>
 // ── Export ──────────────────────────────────────────────────────────────────
 export const exportCsvUrl   = () => `${API_BASE}/api/export/csv`;
 export const exportExcelUrl = () => `${API_BASE}/api/export/excel`;
+
+// ── Multi-portfolio ──────────────────────────────────────────────────────────
+export const listPortfolios    = ()                              => req<any[]>('/api/portfolios');
+export const savePortfolio     = (config: Record<string, unknown>) =>
+  req<{ ok: boolean; id: number }>('/api/portfolios', { method: 'POST', body: JSON.stringify({ config }) });
+export const getPortfolio      = (id: number)                   => req<any>(`/api/portfolios/${id}`);
+export const activatePortfolio = (id: number)                   =>
+  req<{ ok: boolean; message: string }>(`/api/portfolios/${id}/activate`, { method: 'POST' });
+export const deletePortfolio   = (id: number)                   =>
+  req<{ ok: boolean }>(`/api/portfolios/${id}`, { method: 'DELETE' });
+export const updatePortfolio   = (id: number, config: Record<string, unknown>) =>
+  req<{ ok: boolean }>(`/api/portfolios/${id}`, { method: 'PUT', body: JSON.stringify({ config }) });
