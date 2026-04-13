@@ -389,16 +389,24 @@ def execute_rebalance_equal(client: MEXCClient, cfg: dict) -> list:
     return execute_rebalance(client, cfg_eq)
 
 
-def get_pnl(cfg: dict) -> dict:
-    """Return simple P&L vs initial invested value."""
+def get_pnl(cfg: dict, current_usdt: float | None = None) -> dict:
+    """Return simple P&L vs initial invested value.
+
+    current_usdt: live portfolio value from MEXC. If not provided, falls back
+    to the last recorded snapshot (or initial value if no snapshots exist).
+    """
     initial = cfg["portfolio"].get("initial_value_usdt", cfg["portfolio"].get("total_usdt", 0))
-    snapshots = get_snapshots(1)
-    current = snapshots[0]["total_usdt"] if snapshots else initial
-    pnl_usdt = current - initial
+    if current_usdt is None:
+        snapshots = get_snapshots(1)
+        current_usdt = snapshots[0]["total_usdt"] if snapshots else initial
+    # Don't show P&L if we have no real data yet
+    if current_usdt == 0:
+        return {"initial_usdt": initial, "current_usdt": 0, "pnl_usdt": 0, "pnl_pct": 0}
+    pnl_usdt = current_usdt - initial
     pnl_pct = (pnl_usdt / initial * 100) if initial else 0.0
     return {
         "initial_usdt": initial,
-        "current_usdt": current,
+        "current_usdt": current_usdt,
         "pnl_usdt": round(pnl_usdt, 2),
         "pnl_pct": round(pnl_pct, 2),
     }

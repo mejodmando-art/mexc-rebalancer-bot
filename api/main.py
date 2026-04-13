@@ -363,7 +363,7 @@ def get_status():
             "last_rebalance": cfg.get("last_rebalance"),
             "assets": assets_out,
             "pnl": {"initial_usdt": 0, "current_usdt": 0, "pnl_usdt": 0, "pnl_pct": 0},
-            "warning": "MEXC_API_KEY not set – showing config only",
+            "warning": "MEXC API key not set — showing config values only",
             "rebalance_config": {
                 "threshold_pct": cfg["rebalance"]["proportional"]["threshold_pct"],
                 "frequency": cfg["rebalance"]["timed"]["frequency"],
@@ -373,7 +373,7 @@ def get_status():
         client = _client()
         portfolio = get_portfolio_value(client, cfg["portfolio"]["assets"])
         targets = {a["symbol"]: a["allocation_pct"] for a in cfg["portfolio"]["assets"]}
-        pnl = get_pnl(cfg)
+        pnl = get_pnl(cfg, current_usdt=portfolio["total_usdt"])
         assets_out = []
         for r in portfolio["assets"]:
             assets_out.append({
