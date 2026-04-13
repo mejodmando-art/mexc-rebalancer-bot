@@ -9,7 +9,7 @@ import {
 import {
   getStatus, getSnapshots, getBotStatus,
   startBot, stopBot, triggerRebalance, cancelRebalance,
-  getRebalanceJobStatus,
+  getRebalanceJobStatus, getAccountTotal,
 } from '../lib/api';
 import { Lang, tr } from '../lib/i18n';
 import { useToast } from './Toast';
@@ -54,10 +54,11 @@ function formatTime(iso: string | null, lang: Lang): string {
 export default function Dashboard({ lang }: Props) {
   const toast = useToast();
 
-  const [status,     setStatus]     = useState<StatusData | null>(null);
-  const [snapshots,  setSnapshots]  = useState<any[]>([]);
-  const [botRunning, setBotRunning] = useState(false);
-  const [loading,    setLoading]    = useState(true);
+  const [status,       setStatus]       = useState<StatusData | null>(null);
+  const [snapshots,    setSnapshots]    = useState<any[]>([]);
+  const [botRunning,   setBotRunning]   = useState(false);
+  const [loading,      setLoading]      = useState(true);
+  const [accountTotal, setAccountTotal] = useState<number | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const autoRefreshRef = useRef(autoRefresh);
@@ -80,6 +81,8 @@ export default function Dashboard({ lang }: Props) {
       setStatus(s);
       setSnapshots(snaps ?? []);
       setBotRunning(bot?.running ?? false);
+      // Fetch full account total separately (non-blocking)
+      getAccountTotal().then(r => setAccountTotal(r.total_usdt)).catch(() => {});
     } catch (err: any) {
       if (!silent) toast.error(tr('errLoad', lang), err?.message);
     } finally {
@@ -246,15 +249,23 @@ export default function Dashboard({ lang }: Props) {
         </div>
       </div>
 
-      {/* 4 Stat Cards */}
+      {/* Stat Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        <StatCard
+          title={lang === 'ar' ? 'إجمالي الحساب' : 'Account Total'}
+          value={accountTotal === null ? '—' : `$${accountTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+          change={lang === 'ar' ? 'كل الأصول على MEXC' : 'All MEXC assets'}
+          changePositive={null}
+          icon={DollarSign} iconColor="#58A6FF"
+          loading={loading && accountTotal === null} delay={0}
+        />
         <StatCard
           title={tr('totalPortfolio', lang)}
           value={loading ? '—' : `$${(status?.total_usdt ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
           change={loading ? undefined : `${(status?.assets?.length ?? 0)} ${tr('currency', lang)}`}
           changePositive={null}
-          icon={DollarSign} iconColor="#58A6FF"
-          loading={loading} delay={0}
+          icon={Layers} iconColor="#A78BFA"
+          loading={loading} delay={0.05}
         />
         <StatCard
           title={tr('profitLoss', lang)}
@@ -262,20 +273,12 @@ export default function Dashboard({ lang }: Props) {
           change={loading ? undefined : `${isProfit ? '+' : ''}${(status?.profit_pct ?? 0).toFixed(2)}%`}
           changePositive={loading ? null : isProfit}
           icon={TrendingUp} iconColor={isProfit ? '#00D4AA' : '#FF7B72'}
-          loading={loading} delay={0.05}
+          loading={loading} delay={0.1}
         />
         <StatCard
           title={tr('lastRebalance', lang)}
           value={loading ? '—' : formatTime(status?.last_rebalance ?? null, lang)}
-          icon={Clock} iconColor="#A78BFA"
-          loading={loading} delay={0.1}
-        />
-        <StatCard
-          title={tr('assetCount', lang)}
-          value={loading ? '—' : String(status?.assets?.length ?? 0)}
-          change={loading ? undefined : (lang === 'ar' ? 'أصول نشطة' : 'active assets')}
-          changePositive={null}
-          icon={Layers} iconColor="#F472B6"
+          icon={Clock} iconColor="#F472B6"
           loading={loading} delay={0.15}
         />
       </div>

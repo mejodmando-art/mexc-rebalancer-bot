@@ -536,6 +536,44 @@ def update_config(body: ConfigUpdate):
     return {"ok": True}
 
 
+@app.get("/api/account/total")
+def get_account_total():
+    """Return total account value across ALL assets on MEXC (not just portfolio)."""
+    try:
+        client = _client()
+        balances = client.get_spot_assets()
+        total = 0.0
+        assets_out = []
+        for b in balances:
+            sym = b.get("asset", "").upper()
+            free = float(b.get("free", 0))
+            locked = float(b.get("locked", 0))
+            qty = free + locked
+            if qty <= 0:
+                continue
+            if sym == "USDT":
+                price = 1.0
+            else:
+                try:
+                    price = client.get_price(f"{sym}USDT")
+                except Exception:
+                    continue  # skip assets with no USDT pair
+            value = qty * price
+            if value < 0.01:
+                continue
+            total += value
+            assets_out.append({
+                "symbol": sym,
+                "balance": qty,
+                "price_usdt": price,
+                "value_usdt": round(value, 4),
+            })
+        assets_out.sort(key=lambda x: x["value_usdt"], reverse=True)
+        return {"ok": True, "total_usdt": round(total, 2), "assets": assets_out}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/config/reset-initial-value")
 def reset_initial_value():
     """Reset initial_value_usdt to the current live portfolio value from MEXC."""
