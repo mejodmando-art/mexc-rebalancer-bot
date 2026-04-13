@@ -4,12 +4,12 @@ nixPkgs = ["python311", "nodejs_20"]
 [phases.install]
 cmds = [
   "pip install -r requirements.txt",
-  "cd web && npm ci"
+  "npm ci --prefix web"
 ]
 
 [phases.build]
 cmds = [
-  "cd web && npm run build",
+  "npm run build --prefix web",
   "cp -r web/out/. static/"
 ]
 

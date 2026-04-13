@@ -337,25 +337,6 @@ def serve_dashboard():
     return {"message": "MEXC Rebalancer API", "docs": "/docs"}
 
 
-@app.get("/{full_path:path}", include_in_schema=False)
-def serve_static(full_path: str):
-    # Don't intercept /api/* routes
-    if full_path.startswith("api/"):
-        raise HTTPException(status_code=404)
-    candidate = os.path.join(_static_dir, full_path)
-    if os.path.isfile(candidate):
-        return FileResponse(candidate)
-    # Next.js static export: try path/index.html
-    candidate_index = os.path.join(_static_dir, full_path, "index.html")
-    if os.path.isfile(candidate_index):
-        return FileResponse(candidate_index)
-    # SPA fallback
-    index = os.path.join(_static_dir, "index.html")
-    if os.path.exists(index):
-        return FileResponse(index)
-    raise HTTPException(status_code=404)
-
-
 def _client() -> MEXCClient:
     return MEXCClient()
 
@@ -1062,3 +1043,23 @@ def api_stop_and_sell(portfolio_id: int):
             results.append({"symbol": sym, "action": "ERROR", "error": str(e)})
 
     return {"ok": True, "results": results}
+
+
+# ---------------------------------------------------------------------------
+# Static file serving – must be LAST so API routes take priority
+# ---------------------------------------------------------------------------
+
+@app.get("/{full_path:path}", include_in_schema=False)
+def serve_static(full_path: str):
+    candidate = os.path.join(_static_dir, full_path)
+    if os.path.isfile(candidate):
+        return FileResponse(candidate)
+    # Next.js static export: try path/index.html
+    candidate_index = os.path.join(_static_dir, full_path, "index.html")
+    if os.path.isfile(candidate_index):
+        return FileResponse(candidate_index)
+    # SPA fallback
+    index = os.path.join(_static_dir, "index.html")
+    if os.path.exists(index):
+        return FileResponse(index)
+    raise HTTPException(status_code=404)
