@@ -756,10 +756,25 @@ def api_save_portfolio(body: PortfolioCreate):
     except (ValueError, KeyError) as e:
         raise HTTPException(status_code=400, detail=str(e))
     name = cfg.get("bot", {}).get("name", "Portfolio")
-    pid = save_portfolio(name, cfg)
+    try:
+        pid = save_portfolio(name, cfg)
+    except Exception as e:
+        log.error("save_portfolio exception: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"فشل حفظ المحفظة: {e}")
     if pid < 0:
-        raise HTTPException(status_code=500, detail="فشل حفظ المحفظة")
+        raise HTTPException(status_code=500, detail="فشل حفظ المحفظة: خطأ في قاعدة البيانات")
     return {"ok": True, "id": pid}
+
+
+@app.get("/api/db/status")
+def db_status():
+    """Diagnostic endpoint — returns DB backend and connection health."""
+    import database as _db
+    try:
+        count = len(_db.list_portfolios())
+        return {"backend": _db._BACKEND, "ok": True, "portfolio_count": count}
+    except Exception as e:
+        return {"backend": _db._BACKEND, "ok": False, "error": str(e)}
 
 
 @app.get("/api/portfolios/{portfolio_id}")
