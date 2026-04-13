@@ -79,3 +79,7 @@ export const stopAndSellPortfolio = (id: number) =>
     `/api/portfolios/${id}/stop-and-sell`,
     { method: 'POST' }
   );
+
+export const startPortfolio      = (id: number) => req<{ ok: boolean; message: string }>(`/api/portfolios/${id}/start`, { method: 'POST' });
+export const stopPortfolio       = (id: number) => req<{ ok: boolean; message: string }>(`/api/portfolios/${id}/stop`,  { method: 'POST' });
+export const getPortfolioStatus  = (id: number) => req<{ portfolio_id: number; running: boolean; started_at: string | null; error: string | null }>(`/api/portfolios/${id}/status`);

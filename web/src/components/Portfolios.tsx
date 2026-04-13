@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import {
   listPortfolios, activatePortfolio, deletePortfolio,
   rebalancePortfolio, getRebalanceJobStatus, cancelRebalance,
-  stopAndSellPortfolio,
+  stopAndSellPortfolio, startPortfolio, stopPortfolio,
 } from '../lib/api';
 import { Lang, tr } from '../lib/i18n';
 
@@ -272,6 +272,7 @@ export default function Portfolios({ lang, onActivated }: Props) {
   const [confirmDelete, setConfirmDelete]   = useState<number | null>(null);
   const [rebalModal, setRebalModal]         = useState<{ id: number; name: string; active: boolean } | null>(null);
   const [stopSellModal, setStopSellModal]   = useState<{ id: number; name: string } | null>(null);
+  const [togglingLoop, setTogglingLoop]     = useState<number | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -297,6 +298,24 @@ export default function Portfolios({ lang, onActivated }: Props) {
       setMsg('❌ ' + e.message);
     } finally {
       setActivating(null);
+    }
+  };
+
+  const handleToggleLoop = async (p: any) => {
+    setTogglingLoop(p.id); setMsg('');
+    try {
+      if (p.running) {
+        const r = await stopPortfolio(p.id);
+        setMsg('⏹ ' + r.message);
+      } else {
+        const r = await startPortfolio(p.id);
+        setMsg('▶️ ' + r.message);
+      }
+      await load();
+    } catch (e: any) {
+      setMsg('❌ ' + e.message);
+    } finally {
+      setTogglingLoop(null);
     }
   };
 
@@ -380,18 +399,18 @@ export default function Portfolios({ lang, onActivated }: Props) {
             {portfolios.map((p) => (
               <div
                 key={p.id}
-                className={`card flex flex-col gap-3 relative transition-all ${p.active ? 'border-brand' : ''}`}
-                style={p.active ? { borderColor: 'var(--brand)', borderWidth: 2 } : {}}
+                className={`card flex flex-col gap-3 relative transition-all ${p.running ? 'border-green-500' : ''}`}
+                style={p.running ? { borderColor: '#22c55e', borderWidth: 2 } : {}}
               >
-                {/* Active badge */}
-                {p.active && (
-                  <div className="absolute top-3 left-3 badge bg-brand/20 text-brand text-xs font-bold">
-                    ✅ {tr('activePortfolio', lang)}
+                {/* Running badge */}
+                {p.running && (
+                  <div className="absolute top-3 left-3 badge bg-green-900/40 text-green-400 text-xs font-bold animate-pulse">
+                    ✅ {tr('portfolioRunning', lang)}
                   </div>
                 )}
 
                 {/* Name + mode */}
-                <div className={`${p.active ? 'mt-6' : ''}`}>
+                <div className={`${p.running ? 'mt-6' : ''}`}>
                   <div className="flex items-center gap-2">
                     <span className="text-xl">{MODE_ICON[p.mode] ?? '📁'}</span>
                     <span className="font-bold text-base" style={{ color: 'var(--text-main)' }}>{p.name}</span>
@@ -443,47 +462,36 @@ export default function Portfolios({ lang, onActivated }: Props) {
 
                 {/* Rebalance button */}
                 <button
-                  onClick={() => setRebalModal({ id: p.id, name: p.name, active: p.active })}
-                  className={`w-full py-2 rounded-xl border-2 text-sm font-semibold transition-colors ${
-                    p.active
-                      ? 'border-brand text-brand hover:bg-brand/10'
-                      : 'border-gray-700 text-gray-500 hover:border-gray-600 hover:text-gray-400'
-                  }`}
+                  onClick={() => setRebalModal({ id: p.id, name: p.name, active: true })}
+                  className="w-full py-2 rounded-xl border-2 border-brand text-brand text-sm font-semibold hover:bg-brand/10 transition-colors"
                 >
                   ⚖️ {tr('rebalancePortfolio', lang)}
-                  {!p.active && (
-                    <span className="text-xs font-normal ms-1 opacity-60">
-                      — {tr('activateFirst', lang)}
-                    </span>
-                  )}
                 </button>
 
-                {/* Stop & Sell button — active portfolios only */}
-                {p.active && (
-                  <button
-                    onClick={() => setStopSellModal({ id: p.id, name: p.name })}
-                    className="w-full py-2 rounded-xl border-2 border-red-700 text-red-400 text-sm font-semibold hover:bg-red-900/20 transition-colors"
-                  >
-                    🛑 {tr('stopAndSell', lang)}
-                  </button>
-                )}
+                {/* Stop & Sell button — all portfolios */}
+                <button
+                  onClick={() => setStopSellModal({ id: p.id, name: p.name })}
+                  className="w-full py-2 rounded-xl border-2 border-red-700 text-red-400 text-sm font-semibold hover:bg-red-900/20 transition-colors"
+                >
+                  🛑 {tr('stopAndSell', lang)}
+                </button>
 
-                {/* Activate / Delete actions */}
+                {/* Start / Stop / Delete actions */}
                 <div className="flex gap-2 pt-2 border-t" style={{ borderColor: 'var(--border)' }}>
-                  {!p.active && (
-                    <button
-                      onClick={() => handleActivate(p.id)}
-                      disabled={activating === p.id}
-                      className="btn-primary flex-1 text-sm py-1.5"
-                    >
-                      {activating === p.id ? '⏳' : '▶️'} {tr('activatePortfolio', lang)}
-                    </button>
-                  )}
-                  {p.active && (
-                    <div className="flex-1 text-center text-sm py-1.5 rounded-xl font-semibold text-brand" style={{ background: 'var(--bg-input)' }}>
-                      ✅ {tr('currentlyActive', lang)}
-                    </div>
-                  )}
+                  {/* Start / Stop toggle */}
+                  <button
+                    onClick={() => handleToggleLoop(p)}
+                    disabled={togglingLoop === p.id}
+                    className={`flex-1 text-sm py-1.5 rounded-xl font-semibold transition-colors ${
+                      p.running
+                        ? 'bg-gray-700 text-gray-200 hover:bg-gray-600'
+                        : 'btn-primary'
+                    }`}
+                  >
+                    {togglingLoop === p.id ? '⏳' : p.running ? `⏹ ${tr('stopPortfolio', lang)}` : `▶️ ${tr('startPortfolio', lang)}`}
+                  </button>
+
+                  {/* Delete */}
                   {confirmDelete === p.id ? (
                     <div className="flex gap-1">
                       <button
@@ -503,9 +511,9 @@ export default function Portfolios({ lang, onActivated }: Props) {
                   ) : (
                     <button
                       onClick={() => setConfirmDelete(p.id)}
-                      disabled={p.active}
+                      disabled={p.running}
                       className="btn-secondary text-sm px-3 py-1.5 disabled:opacity-30"
-                      title={p.active ? tr('cantDeleteActive', lang) : tr('deletePortfolio', lang)}
+                      title={p.running ? tr('cantDeleteActive', lang) : tr('deletePortfolio', lang)}
                     >
                       🗑️
                     </button>

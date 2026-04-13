@@ -152,68 +152,106 @@ async def _run_telegram_async() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Rebalancer loop manager
 # ---------------------------------------------------------------------------
-_loop_thread: Optional[threading.Thread] = None
-_stop_event = threading.Event()
-_loop_error: Optional[str] = None
-_loop_started_at: Optional[str] = None
+# Per-portfolio rebalancer loop manager
+# Each portfolio gets its own thread + stop event so multiple portfolios
+# can run simultaneously and be stopped independently.
+# ---------------------------------------------------------------------------
+
+# portfolio_id -> {"thread": Thread, "stop": Event, "error": str|None, "started_at": str|None}
+_portfolio_loops: dict[int, dict] = {}
+_loops_lock = threading.Lock()
 
 
-def _rebalancer_loop() -> None:
-    global _loop_error, _loop_started_at
-    _loop_error = None
-    _loop_started_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+def _make_loop(portfolio_id: int, stop_event: threading.Event) -> None:
+    """Rebalancer loop for a single portfolio."""
+    from smart_portfolio import (
+        execute_rebalance, needs_rebalance_proportional,
+        next_run_time, get_portfolio_value,
+    )
+    from database import get_portfolio as db_get_portfolio
+
+    with _loops_lock:
+        if portfolio_id in _portfolio_loops:
+            _portfolio_loops[portfolio_id]["error"] = None
+            _portfolio_loops[portfolio_id]["started_at"] = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+
     try:
-        from smart_portfolio import (
-            execute_rebalance, needs_rebalance_proportional,
-            next_run_time, load_config,
-        )
-        cfg = load_config()
+        cfg = db_get_portfolio(portfolio_id)
+        if cfg is None:
+            raise ValueError(f"Portfolio {portfolio_id} not found")
         client = _client()
         mode = cfg["rebalance"]["mode"]
-        log.info("Rebalancer loop started | mode: %s", mode)
+        log.info("Portfolio %d loop started | mode: %s", portfolio_id, mode)
 
         if mode == "proportional":
             interval = cfg["rebalance"]["proportional"]["check_interval_minutes"] * 60
-            while not _stop_event.is_set():
+            while not stop_event.is_set():
                 try:
-                    cfg = load_config()
-                    if needs_rebalance_proportional(client, cfg):
+                    cfg = db_get_portfolio(portfolio_id)
+                    if cfg and needs_rebalance_proportional(client, cfg):
                         execute_rebalance(client, cfg)
                 except Exception as e:
-                    log.error("Loop iteration error: %s", e)
-                _stop_event.wait(interval)
+                    log.error("Portfolio %d loop error: %s", portfolio_id, e)
+                stop_event.wait(interval)
 
         elif mode == "timed":
             timed_cfg = cfg["rebalance"]["timed"]
             frequency = timed_cfg["frequency"]
             target_hour = timed_cfg.get("hour", 0)
             next_run = next_run_time(frequency, target_hour=target_hour)
-            while not _stop_event.is_set():
+            while not stop_event.is_set():
                 try:
                     if datetime.utcnow() >= next_run:
-                        cfg = load_config()
-                        execute_rebalance(client, cfg)
-                        frequency = cfg["rebalance"]["timed"]["frequency"]
-                        target_hour = cfg["rebalance"]["timed"].get("hour", 0)
-                        next_run = next_run_time(frequency, target_hour=target_hour)
+                        cfg = db_get_portfolio(portfolio_id)
+                        if cfg:
+                            execute_rebalance(client, cfg)
+                            frequency = cfg["rebalance"]["timed"]["frequency"]
+                            target_hour = cfg["rebalance"]["timed"].get("hour", 0)
+                            next_run = next_run_time(frequency, target_hour=target_hour)
                 except Exception as e:
-                    log.error("Loop iteration error: %s", e)
-                _stop_event.wait(60)
+                    log.error("Portfolio %d loop error: %s", portfolio_id, e)
+                stop_event.wait(60)
 
         elif mode == "unbalanced":
-            _stop_event.wait()
+            stop_event.wait()
 
     except Exception as e:
-        _loop_error = str(e)
-        log.error("Rebalancer loop crashed: %s", e)
+        with _loops_lock:
+            if portfolio_id in _portfolio_loops:
+                _portfolio_loops[portfolio_id]["error"] = str(e)
+        log.error("Portfolio %d loop crashed: %s", portfolio_id, e)
 
-    log.info("Rebalancer loop stopped")
+    log.info("Portfolio %d loop stopped", portfolio_id)
 
 
+def _is_portfolio_running(portfolio_id: int) -> bool:
+    with _loops_lock:
+        entry = _portfolio_loops.get(portfolio_id)
+    return entry is not None and entry["thread"].is_alive()
+
+
+def _start_portfolio_loop(portfolio_id: int) -> None:
+    stop_ev = threading.Event()
+    t = threading.Thread(target=_make_loop, args=(portfolio_id, stop_ev), daemon=True)
+    with _loops_lock:
+        _portfolio_loops[portfolio_id] = {
+            "thread": t, "stop": stop_ev,
+            "error": None, "started_at": None,
+        }
+    t.start()
+
+
+def _stop_portfolio_loop(portfolio_id: int) -> None:
+    with _loops_lock:
+        entry = _portfolio_loops.get(portfolio_id)
+    if entry:
+        entry["stop"].set()
+
+
+# Legacy single-bot helpers kept for /api/bot/* endpoints (Dashboard tab)
 def _is_running() -> bool:
-    return _loop_thread is not None and _loop_thread.is_alive()
+    return any(_is_portfolio_running(pid) for pid in list(_portfolio_loops.keys()))
 
 
 # ---------------------------------------------------------------------------
@@ -703,35 +741,47 @@ def health():
 
 @app.get("/api/bot/status")
 def bot_status():
+    """Overall status — aggregates all running portfolio loops."""
+    with _loops_lock:
+        loops_snapshot = {pid: dict(e) for pid, e in _portfolio_loops.items()}
+    running_ids = [pid for pid, e in loops_snapshot.items() if e["thread"].is_alive()]
     return {
-        "running": _is_running(),
-        "started_at": _loop_started_at,
-        "error": _loop_error,
+        "running": len(running_ids) > 0,
+        "running_portfolios": running_ids,
+        "started_at": next((loops_snapshot[pid]["started_at"] for pid in running_ids), None),
+        "error": next((loops_snapshot[pid]["error"] for pid in running_ids if loops_snapshot[pid]["error"]), None),
         "mode": load_config()["rebalance"]["mode"],
     }
 
 
 @app.post("/api/bot/start")
 def bot_start():
-    global _loop_thread
-    if _is_running():
-        return {"ok": False, "message": "البوت شغال بالفعل"}
+    """Start the active portfolio's loop (legacy single-bot endpoint)."""
     cfg = load_config()
     try:
         validate_allocations(cfg["portfolio"]["assets"])
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    _stop_event.clear()
-    _loop_thread = threading.Thread(target=_rebalancer_loop, daemon=True)
-    _loop_thread.start()
+    # Find the active portfolio id
+    portfolios = list_portfolios()
+    active = next((p for p in portfolios if p.get("active")), None)
+    if active is None:
+        raise HTTPException(status_code=400, detail="لا توجد محفظة نشطة")
+    pid = active["id"]
+    if _is_portfolio_running(pid):
+        return {"ok": False, "message": "البوت شغال بالفعل"}
+    _start_portfolio_loop(pid)
     return {"ok": True, "message": f"البوت بدأ | mode: {cfg['rebalance']['mode']}"}
 
 
 @app.post("/api/bot/stop")
 def bot_stop():
-    if not _is_running():
+    """Stop all running portfolio loops."""
+    running = [pid for pid in list(_portfolio_loops.keys()) if _is_portfolio_running(pid)]
+    if not running:
         return {"ok": False, "message": "البوت مش شغال"}
-    _stop_event.set()
+    for pid in running:
+        _stop_portfolio_loop(pid)
     return {"ok": True, "message": "تم إيقاف البوت"}
 
 
@@ -745,8 +795,11 @@ class PortfolioCreate(BaseModel):
 
 @app.get("/api/portfolios")
 def api_list_portfolios():
-    """List all saved portfolios."""
-    return list_portfolios()
+    """List all saved portfolios with live running state."""
+    portfolios = list_portfolios()
+    for p in portfolios:
+        p["running"] = _is_portfolio_running(p["id"])
+    return portfolios
 
 
 @app.post("/api/portfolios")
@@ -834,7 +887,7 @@ def api_get_portfolio(portfolio_id: int):
 
 @app.post("/api/portfolios/{portfolio_id}/activate")
 def api_activate_portfolio(portfolio_id: int):
-    """Mark portfolio as active in DB and sync config.json."""
+    """Mark portfolio as the default active one in DB and sync config.json."""
     cfg = get_portfolio(portfolio_id)
     if cfg is None:
         raise HTTPException(status_code=404, detail="المحفظة غير موجودة")
@@ -842,13 +895,48 @@ def api_activate_portfolio(portfolio_id: int):
         validate_allocations(cfg["portfolio"]["assets"])
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    # Stop running loop before switching
-    if _is_running():
-        _stop_event.set()
-    # Mark active in DB first so save_config picks it up
     set_active_portfolio(portfolio_id)
     save_config(cfg)
     return {"ok": True, "message": f"تم تفعيل المحفظة: {cfg['bot']['name']}"}
+
+
+@app.post("/api/portfolios/{portfolio_id}/start")
+def api_start_portfolio(portfolio_id: int):
+    """Start the rebalancer loop for a specific portfolio."""
+    cfg = get_portfolio(portfolio_id)
+    if cfg is None:
+        raise HTTPException(status_code=404, detail="المحفظة غير موجودة")
+    try:
+        validate_allocations(cfg["portfolio"]["assets"])
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if _is_portfolio_running(portfolio_id):
+        return {"ok": False, "message": "المحفظة شغالة بالفعل"}
+    _start_portfolio_loop(portfolio_id)
+    return {"ok": True, "message": f"تم تشغيل المحفظة: {cfg['bot']['name']}"}
+
+
+@app.post("/api/portfolios/{portfolio_id}/stop")
+def api_stop_portfolio(portfolio_id: int):
+    """Stop the rebalancer loop for a specific portfolio."""
+    if not _is_portfolio_running(portfolio_id):
+        return {"ok": False, "message": "المحفظة مش شغالة"}
+    _stop_portfolio_loop(portfolio_id)
+    return {"ok": True, "message": "تم إيقاف المحفظة"}
+
+
+@app.get("/api/portfolios/{portfolio_id}/status")
+def api_portfolio_status(portfolio_id: int):
+    """Return running state for a specific portfolio."""
+    with _loops_lock:
+        entry = _portfolio_loops.get(portfolio_id)
+    running = entry is not None and entry["thread"].is_alive()
+    return {
+        "portfolio_id": portfolio_id,
+        "running": running,
+        "started_at": entry["started_at"] if entry else None,
+        "error": entry["error"] if entry else None,
+    }
 
 
 @app.delete("/api/portfolios/{portfolio_id}")
@@ -930,9 +1018,9 @@ def api_stop_and_sell(portfolio_id: int):
     if cfg is None:
         raise HTTPException(status_code=404, detail="المحفظة غير موجودة")
 
-    # Stop the loop first
-    if _is_running():
-        _stop_event.set()
+    # Stop this portfolio's loop first
+    if _is_portfolio_running(portfolio_id):
+        _stop_portfolio_loop(portfolio_id)
 
     try:
         client = _client()

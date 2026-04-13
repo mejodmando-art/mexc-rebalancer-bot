@@ -125,6 +125,10 @@ export const t: Record<string, Record<Lang, string>> = {
   stopAndSellRunning:    { ar: 'جاري البيع...',                     en: 'Selling...' },
   stopAndSellSuccess:    { ar: 'تم إيقاف البوت وبيع المحفظة',      en: 'Bot stopped and portfolio sold' },
   stopAndSellCancel:     { ar: 'إلغاء',                             en: 'Cancel' },
+  startPortfolio:        { ar: 'تشغيل',                             en: 'Start' },
+  stopPortfolio:         { ar: 'إيقاف',                             en: 'Stop' },
+  portfolioRunning:      { ar: 'شغّالة ✅',                         en: 'Running ✅' },
+  portfolioStopped:      { ar: 'متوقفة',                            en: 'Stopped' },
 
   // Errors / messages
   errDuplicate:     { ar: 'لا يمكن تكرار العملات', en: 'Duplicate coin symbols not allowed' },
