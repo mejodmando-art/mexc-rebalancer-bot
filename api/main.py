@@ -775,6 +775,30 @@ def db_status():
         return {"backend": _db._BACKEND, "ok": False, "error": str(e)}
 
 
+@app.get("/api/mexc/status")
+def mexc_status():
+    """Diagnostic endpoint — checks MEXC API key and connectivity."""
+    api_key = os.environ.get("MEXC_API_KEY", "")
+    secret  = os.environ.get("MEXC_SECRET_KEY", "")
+    if not api_key or not secret:
+        return {"ok": False, "error": "MEXC_API_KEY أو MEXC_SECRET_KEY غير موجود في متغيرات البيئة"}
+    try:
+        client = MEXCClient(api_key, secret)
+        account = client.get_account()
+        balances = [
+            b for b in account.get("balances", [])
+            if float(b.get("free", 0)) > 0 or float(b.get("locked", 0)) > 0
+        ]
+        return {
+            "ok": True,
+            "key_prefix": api_key[:6] + "...",
+            "non_zero_assets": len(balances),
+            "assets": [{"asset": b["asset"], "free": b["free"]} for b in balances[:10]],
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 @app.get("/api/portfolios/{portfolio_id}")
 def api_get_portfolio(portfolio_id: int):
     cfg = get_portfolio(portfolio_id)
