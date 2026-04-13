@@ -279,7 +279,7 @@ async def lifespan(app):
         pass
 
 
-app = FastAPI(title="MEXC Portfolio Rebalancer API", version="3.0.0", lifespan=lifespan)
+app = FastAPI(title="MEXC Portfolio Rebalancer API", version="3.0.1", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
