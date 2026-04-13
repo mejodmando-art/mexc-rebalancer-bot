@@ -151,10 +151,18 @@ def init_db() -> None:
             """)
             for stmt in stmts:
                 cur.execute(stmt)
-            # Safe migrations for rebalance_history and portfolio_snapshots
+            # Safe migrations — add any missing columns to existing tables.
+            # Covers cases where the table was created with an old schema.
             migrations = [
-                "ALTER TABLE rebalance_history ADD COLUMN IF NOT EXISTS portfolio_id INTEGER NOT NULL DEFAULT 1",
+                "ALTER TABLE rebalance_history ADD COLUMN IF NOT EXISTS ts TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE rebalance_history ADD COLUMN IF NOT EXISTS mode TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE rebalance_history ADD COLUMN IF NOT EXISTS total_usdt REAL NOT NULL DEFAULT 0",
+                "ALTER TABLE rebalance_history ADD COLUMN IF NOT EXISTS details TEXT NOT NULL DEFAULT '[]'",
                 "ALTER TABLE rebalance_history ADD COLUMN IF NOT EXISTS paper INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE rebalance_history ADD COLUMN IF NOT EXISTS portfolio_id INTEGER NOT NULL DEFAULT 1",
+                "ALTER TABLE portfolio_snapshots ADD COLUMN IF NOT EXISTS ts TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE portfolio_snapshots ADD COLUMN IF NOT EXISTS total_usdt REAL NOT NULL DEFAULT 0",
+                "ALTER TABLE portfolio_snapshots ADD COLUMN IF NOT EXISTS assets_json TEXT NOT NULL DEFAULT '[]'",
                 "ALTER TABLE portfolio_snapshots ADD COLUMN IF NOT EXISTS portfolio_id INTEGER NOT NULL DEFAULT 1",
             ]
             for m in migrations:
@@ -230,7 +238,11 @@ def get_rebalance_history(limit: int = 10) -> list:
             )
             rows = _rows_to_dicts(cur.fetchall(), cur)
         for d in rows:
-            d["details"] = json.loads(d["details"])
+            raw = d.get("details") or "[]"
+            try:
+                d["details"] = json.loads(raw)
+            except (json.JSONDecodeError, TypeError):
+                d["details"] = []
         return rows
     except Exception as e:
         log.error("get_rebalance_history failed: %s", e)
