@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import {
   listPortfolios, activatePortfolio, deletePortfolio,
   rebalancePortfolio, getRebalanceJobStatus, cancelRebalance,
+  stopAndSellPortfolio,
 } from '../lib/api';
 import { Lang, tr } from '../lib/i18n';
 
@@ -162,15 +163,115 @@ function RebalanceModal({ portfolioId, portfolioName, isActive, lang, onClose, o
   );
 }
 
+// ── Stop & Sell modal ────────────────────────────────────────────────────────
+interface StopAndSellModalProps {
+  portfolioId: number;
+  portfolioName: string;
+  lang: Lang;
+  onClose: () => void;
+  onDone: (msg: string) => void;
+}
+
+function StopAndSellModal({ portfolioId, portfolioName, lang, onClose, onDone }: StopAndSellModalProps) {
+  const [phase, setPhase] = useState<'confirm' | 'running' | 'done'>('confirm');
+  const [results, setResults] = useState<{ symbol: string; action: string; qty?: number; error?: string }[]>([]);
+  const [error, setError] = useState('');
+
+  const handleConfirm = async () => {
+    setPhase('running');
+    setError('');
+    try {
+      const res = await stopAndSellPortfolio(portfolioId);
+      setResults(res.results);
+      setPhase('done');
+    } catch (e: any) {
+      setError('❌ ' + e.message);
+      setPhase('confirm');
+    }
+  };
+
+  const handleClose = () => {
+    if (phase === 'done') onDone(tr('stopAndSellSuccess', lang));
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4">
+      <div className="card w-full max-w-md space-y-5" style={{ background: 'var(--bg-card)' }}>
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-bold text-red-400">
+            🛑 {tr('stopAndSell', lang)}
+          </h2>
+          <button onClick={handleClose} className="text-xl" style={{ color: 'var(--text-muted)' }}>✖</button>
+        </div>
+
+        <p className="text-sm font-medium" style={{ color: 'var(--text-muted)' }}>{portfolioName}</p>
+
+        {/* Confirm phase */}
+        {phase === 'confirm' && (
+          <>
+            <div className="text-sm text-red-300 bg-red-900/30 rounded-xl px-4 py-3 leading-relaxed">
+              ⚠️ {tr('stopAndSellDesc', lang)}
+            </div>
+            {error && <div className="text-sm text-red-400">{error}</div>}
+            <div className="flex gap-2 pt-1">
+              <button onClick={onClose} className="btn-secondary flex-1">
+                {tr('stopAndSellCancel', lang)}
+              </button>
+              <button onClick={handleConfirm} className="btn-danger flex-1">
+                🛑 {tr('stopAndSellConfirm', lang)}
+              </button>
+            </div>
+          </>
+        )}
+
+        {/* Running phase */}
+        {phase === 'running' && (
+          <div className="text-center py-8 space-y-3">
+            <div className="text-4xl animate-spin inline-block">⚙️</div>
+            <p className="text-sm font-semibold" style={{ color: 'var(--text-main)' }}>
+              {tr('stopAndSellRunning', lang)}
+            </p>
+          </div>
+        )}
+
+        {/* Done phase */}
+        {phase === 'done' && (
+          <>
+            <div className="text-sm text-green-400 bg-green-900/20 rounded-xl px-4 py-3">
+              ✅ {tr('stopAndSellSuccess', lang)}
+            </div>
+            <div className="space-y-2">
+              {results.map((r) => (
+                <div key={r.symbol} className="flex items-center justify-between text-sm px-3 py-2 rounded-xl" style={{ background: 'var(--bg-input)' }}>
+                  <span className="font-semibold" style={{ color: 'var(--text-main)' }}>{r.symbol}</span>
+                  <span className={r.action === 'SOLD' ? 'text-green-400' : r.action === 'ERROR' ? 'text-red-400' : 'text-gray-500'}>
+                    {r.action === 'SOLD' ? `✅ بيع ${r.qty?.toFixed(6)}` : r.action === 'ERROR' ? `❌ ${r.error}` : '— لا رصيد'}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <button onClick={handleClose} className="btn-primary w-full">
+              {tr('stopAndSellCancel', lang)}
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Main component ───────────────────────────────────────────────────────────
 export default function Portfolios({ lang, onActivated }: Props) {
   const [portfolios, setPortfolios]       = useState<any[]>([]);
   const [loading, setLoading]             = useState(true);
   const [msg, setMsg]                     = useState('');
-  const [activating, setActivating]       = useState<number | null>(null);
-  const [deleting, setDeleting]           = useState<number | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
-  const [rebalModal, setRebalModal]       = useState<{ id: number; name: string; active: boolean } | null>(null);
+  const [activating, setActivating]         = useState<number | null>(null);
+  const [deleting, setDeleting]             = useState<number | null>(null);
+  const [confirmDelete, setConfirmDelete]   = useState<number | null>(null);
+  const [rebalModal, setRebalModal]         = useState<{ id: number; name: string; active: boolean } | null>(null);
+  const [stopSellModal, setStopSellModal]   = useState<{ id: number; name: string } | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -229,6 +330,15 @@ export default function Portfolios({ lang, onActivated }: Props) {
           isActive={rebalModal.active}
           lang={lang}
           onClose={() => setRebalModal(null)}
+          onDone={(m) => { setMsg('✅ ' + m); load(); }}
+        />
+      )}
+      {stopSellModal && (
+        <StopAndSellModal
+          portfolioId={stopSellModal.id}
+          portfolioName={stopSellModal.name}
+          lang={lang}
+          onClose={() => setStopSellModal(null)}
           onDone={(m) => { setMsg('✅ ' + m); load(); }}
         />
       )}
@@ -347,6 +457,16 @@ export default function Portfolios({ lang, onActivated }: Props) {
                     </span>
                   )}
                 </button>
+
+                {/* Stop & Sell button — active portfolios only */}
+                {p.active && (
+                  <button
+                    onClick={() => setStopSellModal({ id: p.id, name: p.name })}
+                    className="w-full py-2 rounded-xl border-2 border-red-700 text-red-400 text-sm font-semibold hover:bg-red-900/20 transition-colors"
+                  >
+                    🛑 {tr('stopAndSell', lang)}
+                  </button>
+                )}
 
                 {/* Activate / Delete actions */}
                 <div className="flex gap-2 pt-2 border-t" style={{ borderColor: 'var(--border)' }}>

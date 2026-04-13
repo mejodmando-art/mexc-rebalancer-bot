@@ -119,6 +119,12 @@ export const t: Record<string, Record<Lang, string>> = {
   rebalanceSuccess:      { ar: 'تمت إعادة التوازن بنجاح', en: 'Rebalance completed' },
   rebalanceCancelled:    { ar: 'تم إلغاء إعادة التوازن',  en: 'Rebalance cancelled' },
   activateFirst:         { ar: 'فعّل المحفظة أولاً لإعادة التوازن', en: 'Activate portfolio first to rebalance' },
+  stopAndSell:           { ar: 'إيقاف وبيع المحفظة',               en: 'Stop & Sell Portfolio' },
+  stopAndSellDesc:       { ar: 'سيتم إيقاف البوت وبيع جميع العملات إلى USDT', en: 'Bot will stop and all assets will be sold to USDT' },
+  stopAndSellConfirm:    { ar: 'تأكيد الإيقاف والبيع',             en: 'Confirm Stop & Sell' },
+  stopAndSellRunning:    { ar: 'جاري البيع...',                     en: 'Selling...' },
+  stopAndSellSuccess:    { ar: 'تم إيقاف البوت وبيع المحفظة',      en: 'Bot stopped and portfolio sold' },
+  stopAndSellCancel:     { ar: 'إلغاء',                             en: 'Cancel' },
 
   // Errors / messages
   errDuplicate:     { ar: 'لا يمكن تكرار العملات', en: 'Duplicate coin symbols not allowed' },

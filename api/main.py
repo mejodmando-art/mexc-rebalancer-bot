@@ -918,3 +918,43 @@ def api_rebalance_portfolio(portfolio_id: int, body: PortfolioRebalanceRequest):
 
     threading.Thread(target=_run, daemon=True).start()
     return {"ok": True, "job_id": job_id, "cancel_window_seconds": 10}
+
+
+@app.post("/api/portfolios/{portfolio_id}/stop-and-sell")
+def api_stop_and_sell(portfolio_id: int):
+    """
+    Stop the rebalancer loop (if running) then sell all portfolio assets to USDT.
+    Only works on the active portfolio.
+    """
+    cfg = get_portfolio(portfolio_id)
+    if cfg is None:
+        raise HTTPException(status_code=404, detail="المحفظة غير موجودة")
+
+    # Stop the loop first
+    if _is_running():
+        _stop_event.set()
+
+    try:
+        client = _client()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    assets = cfg["portfolio"]["assets"]
+    results = []
+    for a in assets:
+        sym = a["symbol"]
+        if sym == "USDT":
+            continue
+        try:
+            balance = client.get_asset_balance(sym)
+            if balance <= 0:
+                results.append({"symbol": sym, "action": "SKIP", "reason": "zero balance"})
+                continue
+            resp = client.place_market_sell(f"{sym}USDT", balance)
+            log.info("stop-and-sell: sold %.8f %s → %s", balance, sym, resp)
+            results.append({"symbol": sym, "action": "SOLD", "qty": balance})
+        except Exception as e:
+            log.error("stop-and-sell: failed to sell %s: %s", sym, e)
+            results.append({"symbol": sym, "action": "ERROR", "error": str(e)})
+
+    return {"ok": True, "results": results}

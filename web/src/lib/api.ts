@@ -73,3 +73,9 @@ export const rebalancePortfolio = (id: number, rebalance_type: 'market_value' | 
     `/api/portfolios/${id}/rebalance`,
     { method: 'POST', body: JSON.stringify({ rebalance_type }) }
   );
+
+export const stopAndSellPortfolio = (id: number) =>
+  req<{ ok: boolean; results: { symbol: string; action: string; qty?: number; error?: string }[] }>(
+    `/api/portfolios/${id}/stop-and-sell`,
+    { method: 'POST' }
+  );
