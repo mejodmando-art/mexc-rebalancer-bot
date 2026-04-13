@@ -1,12 +1,11 @@
 'use client';
 
-import { useState } from 'react';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
+import { useState, useEffect } from 'react';
 
 interface Snapshot { ts: string; total_usdt: number; }
 interface Props { snapshots: Snapshot[]; loading?: boolean; lang?: 'ar' | 'en'; }
-
 type Range = '7d' | '30d' | '90d' | 'all';
+
 const RANGES: { key: Range; label: string }[] = [
   { key: '7d', label: '7D' }, { key: '30d', label: '30D' },
   { key: '90d', label: '90D' }, { key: 'all', label: 'All' },
@@ -23,19 +22,6 @@ function ChartSkeleton() {
   );
 }
 
-const CustomTooltip = ({ active, payload, label }: any) => {
-  if (!active || !payload?.length) return null;
-  const val: number = payload[0].value;
-  return (
-    <div className="card p-3 text-sm" style={{ minWidth: 150 }}>
-      <div className="text-xs mb-1" style={{ color: 'var(--text-muted)' }}>{label}</div>
-      <div className="num font-bold text-base" style={{ color: 'var(--accent)' }}>
-        ${val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-      </div>
-    </div>
-  );
-};
-
 function filterByRange(data: Snapshot[], range: Range): Snapshot[] {
   if (range === 'all' || !data.length) return data;
   const days = range === '7d' ? 7 : range === '30d' ? 30 : 90;
@@ -50,12 +36,16 @@ function formatTs(ts: string): string {
   } catch { return ts; }
 }
 
-export default function PerformanceChart({ snapshots, loading, lang = 'ar' }: Props) {
+function ChartInner({ snapshots, lang }: { snapshots: Snapshot[]; lang: 'ar' | 'en' }) {
   const [range, setRange] = useState<Range>('30d');
+  const [RC, setRC] = useState<any>(null);
 
-  if (loading) return <ChartSkeleton />;
+  useEffect(() => {
+    import('recharts').then(mod => setRC(mod));
+  }, []);
 
   const filtered = filterByRange(snapshots, range);
+
   if (filtered.length < 2) {
     return (
       <div className="flex flex-col items-center justify-center h-48 gap-2">
@@ -75,6 +65,18 @@ export default function PerformanceChart({ snapshots, loading, lang = 'ar' }: Pr
   const minVal = Math.min(...chartData.map(d => d.value));
   const maxVal = Math.max(...chartData.map(d => d.value));
   const padding = (maxVal - minVal) * 0.1 || 10;
+
+  const CustomTooltip = ({ active, payload, label }: any) => {
+    if (!active || !payload?.length) return null;
+    return (
+      <div className="card p-3 text-sm" style={{ minWidth: 150 }}>
+        <div className="text-xs mb-1" style={{ color: 'var(--text-muted)' }}>{label}</div>
+        <div className="num font-bold text-base" style={{ color: 'var(--accent)' }}>
+          ${payload[0].value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-4">
@@ -102,27 +104,38 @@ export default function PerformanceChart({ snapshots, loading, lang = 'ar' }: Pr
         </div>
       </div>
 
-      <div style={{ height: 200 }}>
-        <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={chartData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
-            <defs>
-              <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%"   stopColor={color} stopOpacity={0.3} />
-                <stop offset="100%" stopColor={color} stopOpacity={0.0} />
-              </linearGradient>
-            </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" strokeOpacity={0.4} vertical={false} />
-            <XAxis dataKey="time" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
-            <YAxis domain={[minVal - padding, maxVal + padding]} tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={false}
-                   tickFormatter={v => `$${v >= 1000 ? `${(v/1000).toFixed(1)}K` : v.toFixed(0)}`} />
-            <Tooltip content={<CustomTooltip />} cursor={{ stroke: color, strokeWidth: 1, strokeDasharray: '4 4' }} />
-            <ReferenceLine y={first} stroke="var(--border)" strokeDasharray="4 4" strokeOpacity={0.6} />
-            <Area type="monotone" dataKey="value" stroke={color} strokeWidth={2} fill="url(#areaGrad)"
-                  dot={false} activeDot={{ r: 5, fill: color, stroke: 'var(--bg-card)', strokeWidth: 2 }}
-                  animationDuration={600} />
-          </AreaChart>
-        </ResponsiveContainer>
-      </div>
+      {!RC ? (
+        <div className="skeleton w-full rounded-xl" style={{ height: 200 }} />
+      ) : (
+        <div style={{ height: 200 }}>
+          <RC.ResponsiveContainer width="100%" height="100%">
+            <RC.AreaChart data={chartData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+              <defs>
+                <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%"   stopColor={color} stopOpacity={0.3} />
+                  <stop offset="100%" stopColor={color} stopOpacity={0.0} />
+                </linearGradient>
+              </defs>
+              <RC.CartesianGrid strokeDasharray="3 3" stroke="var(--border)" strokeOpacity={0.4} vertical={false} />
+              <RC.XAxis dataKey="time" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+              <RC.YAxis domain={[minVal - padding, maxVal + padding]}
+                     tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={false}
+                     tickFormatter={(v: number) => `$${v >= 1000 ? `${(v/1000).toFixed(1)}K` : v.toFixed(0)}`} />
+              <RC.Tooltip content={<CustomTooltip />} cursor={{ stroke: color, strokeWidth: 1, strokeDasharray: '4 4' }} />
+              <RC.ReferenceLine y={first} stroke="var(--border)" strokeDasharray="4 4" strokeOpacity={0.6} />
+              <RC.Area type="monotone" dataKey="value" stroke={color} strokeWidth={2}
+                    fill="url(#areaGrad)" dot={false}
+                    activeDot={{ r: 5, fill: color, stroke: 'var(--bg-card)', strokeWidth: 2 }}
+                    animationDuration={600} />
+            </RC.AreaChart>
+          </RC.ResponsiveContainer>
+        </div>
+      )}
     </div>
   );
+}
+
+export default function PerformanceChart({ snapshots, loading, lang = 'ar' }: Props) {
+  if (loading) return <ChartSkeleton />;
+  return <ChartInner snapshots={snapshots} lang={lang} />;
 }
