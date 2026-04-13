@@ -371,8 +371,9 @@ def get_status():
         }
     try:
         client = _client()
-        budget_usdt = cfg["portfolio"].get("total_usdt")
-        portfolio = get_portfolio_value(client, cfg["portfolio"]["assets"], budget_usdt=budget_usdt)
+        # Status uses live values so the user sees real balances.
+        # budget_usdt is only used during rebalance execution.
+        portfolio = get_portfolio_value(client, cfg["portfolio"]["assets"], budget_usdt=None)
         targets = {a["symbol"]: a["allocation_pct"] for a in cfg["portfolio"]["assets"]}
         pnl = get_pnl(cfg, current_usdt=portfolio["total_usdt"])
         assets_out = []
