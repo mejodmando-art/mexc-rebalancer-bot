@@ -1,562 +1,450 @@
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
-  PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend,
-  LineChart, Line, XAxis, YAxis, CartesianGrid,
-} from 'recharts';
-import { RefreshCw } from 'lucide-react';
+  DollarSign, TrendingUp, Clock, Layers,
+  Play, Square, RefreshCw, Zap, RotateCcw,
+  Timer, CheckCircle2, XCircle,
+} from 'lucide-react';
 import {
-  getStatus, getHistory, getSnapshots, getBotStatus,
+  getStatus, getSnapshots, getBotStatus,
   startBot, stopBot, triggerRebalance, cancelRebalance,
-  updateConfig, exportCsvUrl, exportExcelUrl,
+  getRebalanceJobStatus,
 } from '../lib/api';
 import { Lang, tr } from '../lib/i18n';
+import { useToast } from './Toast';
+import StatCard from './StatCard';
+import PortfolioPieChart from './PortfolioPieChart';
+import PerformanceChart from './PerformanceChart';
+import AssetsTable from './AssetsTable';
 
-const COLORS = ['#f0b90b','#3b82f6','#10b981','#8b5cf6','#ef4444','#f97316','#06b6d4','#ec4899','#84cc16','#a78bfa'];
+interface Asset {
+  symbol: string;
+  target_pct: number;
+  current_pct: number;
+  diff_pct: number;
+  value_usdt: number;
+  balance: number;
+  price_usdt: number;
+}
 
-interface Asset { symbol: string; allocation_pct: number; }
+interface StatusData {
+  total_usdt: number;
+  profit_usdt: number;
+  profit_pct: number;
+  last_rebalance: string | null;
+  assets: Asset[];
+  bot_name?: string;
+  mode?: string;
+}
 
-interface Props { lang: Lang; }
+interface Props { lang: Lang }
+
+// Ripple helper
+function createRipple(e: React.MouseEvent<HTMLButtonElement>) {
+  const btn = e.currentTarget;
+  const rect = btn.getBoundingClientRect();
+  const size = Math.max(rect.width, rect.height) * 2;
+  const x = e.clientX - rect.left - size / 2;
+  const y = e.clientY - rect.top - size / 2;
+  const ripple = document.createElement('span');
+  ripple.className = 'ripple';
+  ripple.style.cssText = `width:${size}px;height:${size}px;left:${x}px;top:${y}px;`;
+  btn.appendChild(ripple);
+  setTimeout(() => ripple.remove(), 700);
+}
+
+function formatTime(iso: string | null, lang: Lang): string {
+  if (!iso) return tr('notYet', lang);
+  try {
+    const d = new Date(iso);
+    return d.toLocaleString(lang === 'ar' ? 'ar-EG' : 'en-US', {
+      month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+    });
+  } catch { return iso; }
+}
 
 export default function Dashboard({ lang }: Props) {
-  const [status, setStatus]       = useState<any>(null);
-  const [history, setHistory]     = useState<any[]>([]);
+  const toast = useToast();
+
+  const [status,    setStatus]    = useState<StatusData | null>(null);
   const [snapshots, setSnapshots] = useState<any[]>([]);
-  const [botSt, setBotSt]         = useState<any>(null);
-  const [loading, setLoading]     = useState(true);
+  const [botRunning, setBotRunning] = useState(false);
+  const [loading,   setLoading]   = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [rebalancing, setRebalancing] = useState(false);
-  const [cancelJobId, setCancelJobId] = useState<string | null>(null);
-  const [cancelCountdown, setCancelCountdown] = useState(0);
-  const [msg, setMsg]             = useState('');
-  const [activeTab, setActiveTab] = useState<'overview'|'history'>('overview');
+  const [autoRefresh, setAutoRefresh] = useState(true);
+  const autoRefreshRef = useRef(autoRefresh);
+  autoRefreshRef.current = autoRefresh;
 
-  // Inline asset editor state
-  const [editAssets, setEditAssets]   = useState<Asset[]>([]);
-  const [editMode, setEditMode]       = useState(false);
-  const [editError, setEditError]     = useState('');
-  const [editSaving, setEditSaving]   = useState(false);
+  // Rebalance state
+  const [rebalancing,  setRebalancing]  = useState(false);
+  const [jobId,        setJobId]        = useState<string | null>(null);
+  const [cancelWindow, setCancelWindow] = useState(0);
+  const [cancelTimer,  setCancelTimer]  = useState(0);
+  const cancelIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Bot action loading
+  const [botLoading, setBotLoading] = useState(false);
 
-  const load = useCallback(async () => {
+  const fetchAll = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
+    else setRefreshing(true);
     try {
-      const [s, h, sn, b] = await Promise.all([
-        getStatus(), getHistory(50), getSnapshots(90), getBotStatus(),
+      const [s, snaps, bot] = await Promise.all([
+        getStatus(),
+        getSnapshots(90),
+        getBotStatus(),
       ]);
       setStatus(s);
-      setHistory(h);
-      setSnapshots(sn);
-      setBotSt(b);
-      if (!editMode) {
-        setEditAssets((s.assets ?? []).map((a: any) => ({
-          symbol: a.symbol,
-          allocation_pct: a.target_pct,
-        })));
-      }
-    } catch (e: any) {
-      setMsg(tr('errLoad', lang) + ': ' + e.message);
+      setSnapshots(snaps ?? []);
+      setBotRunning(bot?.running ?? false);
+    } catch (err: any) {
+      if (!silent) toast.error(tr('errLoad', lang), err?.message);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
-  }, [lang, editMode]);
+  }, [lang, toast]);
 
-  useEffect(() => { load(); const t = setInterval(load, 30000); return () => clearInterval(t); }, [load]);
+  // Initial load
+  useEffect(() => { fetchAll(); }, [fetchAll]);
 
-  // ── Cancel countdown ────────────────────────────────────────────────────
-  const startCancelCountdown = (jobId: string) => {
-    setCancelJobId(jobId);
-    setCancelCountdown(10);
-    countdownRef.current = setInterval(() => {
-      setCancelCountdown(prev => {
-        if (prev <= 1) {
-          clearInterval(countdownRef.current!);
-          setCancelJobId(null);
-          return 0;
+  // Auto-refresh every 30s
+  useEffect(() => {
+    const t = setInterval(() => {
+      if (autoRefreshRef.current) fetchAll(true);
+    }, 30000);
+    return () => clearInterval(t);
+  }, [fetchAll]);
+
+  // Cancel countdown
+  useEffect(() => {
+    if (cancelWindow > 0) {
+      setCancelTimer(cancelWindow);
+      cancelIntervalRef.current = setInterval(() => {
+        setCancelTimer(prev => {
+          if (prev <= 1) {
+            clearInterval(cancelIntervalRef.current!);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }
+    return () => { if (cancelIntervalRef.current) clearInterval(cancelIntervalRef.current); };
+  }, [cancelWindow]);
+
+  // Poll job status
+  useEffect(() => {
+    if (!jobId) return;
+    const poll = setInterval(async () => {
+      try {
+        const res = await getRebalanceJobStatus(jobId);
+        if (res.done || res.cancelled) {
+          clearInterval(poll);
+          setRebalancing(false);
+          setJobId(null);
+          setCancelWindow(0);
+          setCancelTimer(0);
+          if (res.cancelled) {
+            toast.warning(tr('cancelledRebalance', lang));
+          } else {
+            toast.success(tr('successRebalance', lang));
+            fetchAll(true);
+          }
         }
-        return prev - 1;
-      });
-    }, 1000);
+      } catch { clearInterval(poll); setRebalancing(false); setJobId(null); }
+    }, 2000);
+    return () => clearInterval(poll);
+  }, [jobId, lang, toast, fetchAll]);
+
+  const handleRebalance = async (e: React.MouseEvent<HTMLButtonElement>) => {
+    createRipple(e);
+    setRebalancing(true);
+    try {
+      const res = await triggerRebalance();
+      setJobId(res.job_id);
+      setCancelWindow(res.cancel_window_seconds ?? 5);
+      toast.info(
+        lang === 'ar' ? 'جاري إعادة التوازن...' : 'Rebalancing...',
+        lang === 'ar'
+          ? `يمكنك الإلغاء خلال ${res.cancel_window_seconds} ثانية`
+          : `You can cancel within ${res.cancel_window_seconds}s`,
+      );
+    } catch (err: any) {
+      setRebalancing(false);
+      toast.error(lang === 'ar' ? 'فشل تنفيذ Rebalance' : 'Rebalance failed', err?.message);
+    }
   };
 
   const handleCancel = async () => {
-    if (!cancelJobId) return;
-    clearInterval(countdownRef.current!);
+    if (!jobId) return;
     try {
-      await cancelRebalance(cancelJobId);
-      setMsg('⚠️ ' + tr('cancelledRebalance', lang));
-    } catch (e: any) {
-      setMsg('❌ ' + e.message);
-    } finally {
-      setCancelJobId(null);
-      setCancelCountdown(0);
+      await cancelRebalance(jobId);
       setRebalancing(false);
-    }
-  };
-
-  // ── Rebalance ───────────────────────────────────────────────────────────
-  const handleRebalance = async () => {
-    setRebalancing(true); setMsg('');
-    try {
-      const r = await triggerRebalance();
-      startCancelCountdown(r.job_id);
-      // Poll until done
-      const poll = setInterval(async () => {
-        try {
-          const { done, cancelled, result } = await import('../lib/api').then(m =>
-            m.getRebalanceJobStatus(r.job_id)
-          );
-          if (done || cancelled) {
-            clearInterval(poll);
-            clearInterval(countdownRef.current!);
-            setCancelJobId(null);
-            setCancelCountdown(0);
-            setRebalancing(false);
-            if (!cancelled) {
-              setMsg('✅ ' + tr('successRebalance', lang));
-              await load();
-            }
-          }
-        } catch {}
-      }, 1000);
-    } catch (e: any) {
-      setMsg('❌ ' + e.message);
-      setRebalancing(false);
+      setJobId(null);
+      setCancelWindow(0);
+      setCancelTimer(0);
+      if (cancelIntervalRef.current) clearInterval(cancelIntervalRef.current);
+      toast.warning(tr('cancelledRebalance', lang));
+    } catch (err: any) {
+      toast.error(lang === 'ar' ? 'فشل الإلغاء' : 'Cancel failed', err?.message);
     }
   };
 
   const handleBotToggle = async () => {
+    setBotLoading(true);
     try {
-      if (botSt?.running) { await stopBot(); setMsg('⏸️ ' + tr('pause', lang)); }
-      else                { await startBot(); setMsg('▶️ ' + tr('start', lang)); }
-      await load();
-    } catch (e: any) { setMsg('❌ ' + e.message); }
-  };
-
-  // ── Inline asset editor ─────────────────────────────────────────────────
-  const totalEditPct = editAssets.reduce((s, a) => s + a.allocation_pct, 0);
-
-  const addEditAsset = () => {
-    if (editAssets.length >= 10) return;
-    setEditAssets([...editAssets, { symbol: '', allocation_pct: 0 }]);
-    setEditError('');
-  };
-
-  const removeEditAsset = (i: number) => {
-    if (editAssets.length <= 2) return;
-    setEditAssets(editAssets.filter((_, idx) => idx !== i));
-    setEditError('');
-  };
-
-  const updateEditSymbol = (i: number, val: string) => {
-    const up = [...editAssets];
-    const sym = val.toUpperCase();
-    up[i] = { ...up[i], symbol: sym };
-    setEditAssets(up);
-    // Duplicate check
-    const syms = up.map(a => a.symbol.trim()).filter(Boolean);
-    if (new Set(syms).size !== syms.length) {
-      setEditError('❌ ' + tr('errDuplicate', lang));
-    } else {
-      setEditError('');
-    }
-  };
-
-  const updateEditPct = (i: number, val: number) => {
-    const up = [...editAssets];
-    up[i] = { ...up[i], allocation_pct: val };
-    setEditAssets(up);
-    setEditError('');
-  };
-
-  const allocateEqually = () => {
-    const n = editAssets.length;
-    const base = Math.floor((100 / n) * 100) / 100;
-    const rem  = parseFloat((100 - base * (n - 1)).toFixed(2));
-    setEditAssets(editAssets.map((a, i) => ({ ...a, allocation_pct: i === n - 1 ? rem : base })));
-    setEditError('');
-  };
-
-  const saveEditAssets = async () => {
-    const syms = editAssets.map(a => a.symbol.trim().toUpperCase());
-    if (syms.some(s => !s)) { setEditError('❌ ' + tr('errSymbol', lang)); return; }
-    if (new Set(syms).size !== syms.length) { setEditError('❌ ' + tr('errDuplicate', lang)); return; }
-    if (Math.abs(totalEditPct - 100) > 0.1) { setEditError('❌ ' + tr('errSum', lang)); return; }
-    setEditSaving(true); setEditError('');
-    try {
-      await updateConfig({
-        assets: editAssets.map((a, i) => ({ symbol: syms[i], allocation_pct: a.allocation_pct })),
-      });
-      setEditMode(false);
-      setMsg('✅ ' + tr('successSaved', lang));
-      await load();
-    } catch (e: any) {
-      setEditError('❌ ' + e.message);
+      if (botRunning) {
+        await stopBot();
+        setBotRunning(false);
+        toast.info(lang === 'ar' ? 'تم إيقاف البوت' : 'Bot stopped');
+      } else {
+        await startBot();
+        setBotRunning(true);
+        toast.success(lang === 'ar' ? 'تم تشغيل البوت' : 'Bot started');
+      }
+    } catch (err: any) {
+      toast.error(lang === 'ar' ? 'فشل تغيير حالة البوت' : 'Bot toggle failed', err?.message);
     } finally {
-      setEditSaving(false);
+      setBotLoading(false);
     }
   };
 
-  const handleRefresh = async () => {
-    setRefreshing(true);
-    await load();
-    setRefreshing(false);
-  };
-
-  if (loading) return (
-    <div className="flex items-center justify-center h-64">
-      <div className="flex flex-col items-center gap-3">
-        <RefreshCw size={28} className="spin" style={{ color: 'var(--brand)' }} />
-        <span className="text-sm" style={{ color: 'var(--text-muted)' }}>{tr('loadingData', lang)}</span>
-      </div>
-    </div>
-  );
-
-  const assets = status?.assets ?? [];
-  const pnl    = status?.pnl ?? {};
-  const pnlPos = (pnl.pnl_usdt ?? 0) >= 0;
-  // When no API key, value_usdt is 0 for all assets – fall back to target allocation for the pie
-  const hasLiveData = assets.some((a: any) => a.value_usdt > 0);
-  const pieData = assets.map((a: any) => ({
-    name: a.symbol,
-    value: hasLiveData ? a.value_usdt : a.target_pct,
-  }));
-
-  const modeLabel: Record<string, string> = {
-    proportional: '📊 ' + tr('proportional', lang),
-    timed:        '⏰ ' + tr('timed', lang),
-    unbalanced:   '🔓 ' + tr('manual', lang),
-  };
+  const isProfit = (status?.profit_usdt ?? 0) >= 0;
 
   return (
-    <div className="space-y-4 fade-in">
-      {/* Top bar */}
-      <div className="flex flex-wrap items-start justify-between gap-3">
+    <div className="space-y-6">
+
+      {/* ── Top action bar ─────────────────────────────────────────────── */}
+      <motion.div
+        className="flex flex-wrap items-center justify-between gap-3"
+        initial={{ opacity: 0, y: -8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.25 }}
+      >
         <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-xl sm:text-2xl font-bold" style={{ color: 'var(--text-main)' }}>
-              {status?.bot_name ?? 'المحفظة الذكية'}
-            </h1>
-            <button onClick={handleRefresh} disabled={refreshing}
-              className="p-1.5 rounded-lg transition-colors hover:opacity-70 disabled:opacity-40"
-              style={{ color: 'var(--text-muted)' }} title="تحديث">
-              <RefreshCw size={16} className={refreshing ? 'spin' : ''} />
-            </button>
-          </div>
-          <div className="flex items-center gap-2 mt-1 flex-wrap">
-            <span className="badge" style={{ background: 'var(--bg-input)', color: 'var(--text-muted)' }}>
-              {modeLabel[status?.mode] ?? status?.mode}
+          <h1 className="font-bold text-xl" style={{ color: 'var(--text-main)' }}>
+            {status?.bot_name ?? (lang === 'ar' ? 'لوحة التحكم' : 'Dashboard')}
+          </h1>
+          <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+            {lang === 'ar' ? 'MEXC Spot · محفظة ذكية' : 'MEXC Spot · Smart Portfolio'}
+            {status?.mode && (
+              <span className="ms-2 px-1.5 py-0.5 rounded text-[10px] font-semibold"
+                    style={{ background: 'var(--bg-input)', color: 'var(--accent)' }}>
+                {status.mode}
+              </span>
+            )}
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Auto-refresh toggle */}
+          <button
+            onClick={() => setAutoRefresh(v => !v)}
+            className="btn-secondary !px-3 !min-h-[36px] !text-xs gap-1.5"
+            title={autoRefresh ? (lang === 'ar' ? 'إيقاف التحديث التلقائي' : 'Disable auto-refresh') : (lang === 'ar' ? 'تفعيل التحديث التلقائي' : 'Enable auto-refresh')}
+          >
+            <Timer size={13} style={{ color: autoRefresh ? 'var(--accent)' : 'var(--text-muted)' }} />
+            <span style={{ color: autoRefresh ? 'var(--accent)' : 'var(--text-muted)' }}>
+              {autoRefresh ? '30s' : lang === 'ar' ? 'متوقف' : 'Off'}
             </span>
-            {status?.paper_trading && <span className="badge bg-yellow-900/60 text-yellow-400">🧪 {tr('experimental', lang)}</span>}
-            {status?.warning && <span className="badge bg-orange-900/60 text-orange-400">⚠️ {status.warning}</span>}
-          </div>
-        </div>
-        <div className="flex gap-2 flex-wrap">
-          <button onClick={handleBotToggle} className={botSt?.running ? 'btn-danger' : 'btn-secondary'}>
-            {botSt?.running ? '⏸ ' + tr('pause', lang) : '▶ ' + tr('start', lang)}
           </button>
-          <button onClick={handleRebalance} disabled={rebalancing} className="btn-primary">
-            {rebalancing ? '⏳' : '⚖️'} {tr('rebalanceNow', lang)}
+
+          {/* Manual refresh */}
+          <button
+            onClick={() => fetchAll(true)}
+            disabled={refreshing}
+            className="btn-secondary !px-3 !min-h-[36px]"
+            title={lang === 'ar' ? 'تحديث' : 'Refresh'}
+          >
+            <RefreshCw size={14} className={refreshing ? 'spin' : ''} />
           </button>
-          {cancelJobId && cancelCountdown > 0 && (
-            <button onClick={handleCancel} className="btn-cancel">
-              ✖ {tr('cancelRebalance', lang)} ({cancelCountdown}s)
-            </button>
-          )}
-          <a href={exportExcelUrl()} className="btn-secondary text-sm hidden sm:inline-flex">
-            📊 {tr('exportExcel', lang)}
-          </a>
-          <a href={exportCsvUrl()} className="btn-secondary text-sm hidden sm:inline-flex">
-            ⬇️ {tr('exportCsv', lang)}
-          </a>
-        </div>
-      </div>
 
-      {msg && (
-        <div className={`card text-sm ${msg.startsWith('❌') ? 'border-red-700 text-red-400' : msg.startsWith('⚠️') ? 'border-orange-700 text-orange-400' : 'border-green-700 text-green-400'}`}>
-          {msg}
-        </div>
-      )}
-
-      {/* KPI cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {[
-          {
-            label: tr('totalPortfolio', lang),
-            value: `$${(status?.total_usdt ?? 0).toFixed(2)}`,
-            sub: 'USDT',
-            color: 'var(--text-main)',
-          },
-          {
-            label: tr('profitLoss', lang),
-            value: `${pnlPos ? '+' : ''}${(pnl.pnl_usdt ?? 0).toFixed(2)}$`,
-            sub: `${pnlPos ? '+' : ''}${(pnl.pnl_pct ?? 0).toFixed(2)}%`,
-            color: pnlPos ? '#4ade80' : '#f87171',
-          },
-          {
-            label: tr('lastRebalance', lang),
-            value: status?.last_rebalance ? status.last_rebalance.slice(0, 16) : tr('notYet', lang),
-            sub: '',
-            color: 'var(--text-main)',
-            small: true,
-          },
-          {
-            label: tr('assetCount', lang),
-            value: String(assets.length),
-            sub: tr('currency', lang),
-            color: 'var(--text-main)',
-          },
-        ].map((k, i) => (
-          <div key={i} className="card">
-            <div className="label">{k.label}</div>
-            <div className={`font-bold mt-1 ${k.small ? 'text-sm' : 'stat-value'}`} style={{ color: k.color }}>
-              {k.value}
-            </div>
-            {k.sub && <div className="text-xs mt-0.5" style={{ color: k.color === 'var(--text-main)' ? 'var(--text-muted)' : k.color }}>{k.sub}</div>}
-          </div>
-        ))}
-      </div>
-
-      {/* Charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        <div className="card flex flex-col items-center">
-          <div className="label w-full mb-3">{tr('assetDist', lang)}</div>
-          <ResponsiveContainer width="100%" height={220}>
-            <PieChart>
-              <Pie data={pieData} cx="50%" cy="50%" innerRadius={55} outerRadius={90} dataKey="value" paddingAngle={2}>
-                {pieData.map((_: any, i: number) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
-              </Pie>
-              <Tooltip formatter={(v: any) => `$${Number(v).toFixed(2)}`}
-                contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }} />
-              <Legend formatter={(v) => <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{v}</span>} />
-            </PieChart>
-          </ResponsiveContainer>
-        </div>
-
-        <div className="card lg:col-span-2">
-          <div className="label mb-3">{tr('portfolioPerf', lang)}</div>
-          {snapshots.length > 1 ? (
-            <ResponsiveContainer width="100%" height={220}>
-              <LineChart data={snapshots}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                <XAxis dataKey="ts" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickFormatter={(v) => v.slice(5, 16)} />
-                <YAxis tick={{ fontSize: 10, fill: 'var(--text-muted)' }} />
-                <Tooltip contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}
-                  formatter={(v: any) => `$${Number(v).toFixed(2)}`} />
-                <Line type="monotone" dataKey="total_usdt" stroke="#f0b90b" strokeWidth={2} dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="flex items-center justify-center h-48 text-sm" style={{ color: 'var(--text-muted)' }}>
-              {tr('noDataYet', lang)}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Tabs */}
-      <div className="card">
-        <div className="flex gap-2 mb-4 border-b pb-3" style={{ borderColor: 'var(--border)' }}>
-          <button onClick={() => setActiveTab('overview')}
-            className={`text-sm font-medium px-3 py-1 rounded-lg transition-colors ${activeTab === 'overview' ? 'bg-brand text-black' : ''}`}
-            style={activeTab !== 'overview' ? { color: 'var(--text-muted)' } : {}}>
-            📋 {tr('assetTable', lang)}
+          {/* Bot start/stop */}
+          <button
+            onClick={handleBotToggle}
+            disabled={botLoading}
+            className={botRunning ? 'btn-danger !px-4 !min-h-[36px] !text-xs' : 'btn-secondary !px-4 !min-h-[36px] !text-xs'}
+          >
+            {botLoading
+              ? <RefreshCw size={13} className="spin" />
+              : botRunning
+                ? <><Square size={13} /> {tr('pause', lang)}</>
+                : <><Play size={13} /> {tr('start', lang)}</>
+            }
           </button>
-          <button onClick={() => setActiveTab('history')}
-            className={`text-sm font-medium px-3 py-1 rounded-lg transition-colors ${activeTab === 'history' ? 'bg-brand text-black' : ''}`}
-            style={activeTab !== 'history' ? { color: 'var(--text-muted)' } : {}}>
-            📜 {tr('history', lang)}
-          </button>
-        </div>
 
-        {/* ── Assets table with inline editor ── */}
-        {activeTab === 'overview' && (
-          <div>
-            {/* Edit toolbar */}
-            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-              <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                {editMode ? `${tr('assetsAndAlloc', lang)} (${editAssets.length}/10)` : ''}
-              </div>
-              <div className="flex gap-2 flex-wrap">
-                {editMode ? (
-                  <>
-                    <button onClick={allocateEqually} className="btn-secondary text-xs px-3 py-1">
-                      {tr('equalAlloc', lang)}
-                    </button>
-                    <button onClick={addEditAsset} disabled={editAssets.length >= 10} className="btn-primary text-xs px-3 py-1">
-                      {tr('addAsset', lang)}
-                    </button>
-                    <button onClick={saveEditAssets} disabled={editSaving} className="btn-primary text-xs px-3 py-1">
-                      {editSaving ? tr('saving', lang) : '💾 ' + tr('save', lang)}
-                    </button>
-                    <button onClick={() => { setEditMode(false); setEditError(''); }} className="btn-secondary text-xs px-3 py-1">
-                      ✖
-                    </button>
-                  </>
-                ) : (
-                  <button onClick={() => setEditMode(true)} className="btn-secondary text-xs px-3 py-1">
-                    ✏️ {lang === 'ar' ? 'تعديل الأصول' : 'Edit Assets'}
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {editError && (
-              <div className="mb-3 text-sm text-red-400 border border-red-700 rounded-xl px-3 py-2">
-                {editError}
-              </div>
-            )}
-
-            {editMode ? (
-              /* Inline editor */
-              <div className="space-y-2">
-                {editAssets.map((a, i) => {
-                  const syms = editAssets.map(x => x.symbol.trim().toUpperCase());
-                  const isDup = a.symbol.trim() !== '' && syms.filter(s => s === a.symbol.trim().toUpperCase()).length > 1;
-                  return (
-                    <div key={i} className="flex items-center gap-2">
-                      <input
-                        className={`input w-28 font-mono uppercase ${isDup ? 'border-red-500' : ''}`}
-                        value={a.symbol}
-                        onChange={e => updateEditSymbol(i, e.target.value)}
-                        placeholder="BTC"
-                        maxLength={10}
-                      />
-                      {isDup && <span className="text-red-400 text-xs">⚠️ {tr('errDuplicate', lang)}</span>}
-                      <div className="flex-1 relative">
-                        <input
-                          type="number" min={0} max={100} step={0.1}
-                          className="input"
-                          value={a.allocation_pct}
-                          onChange={e => updateEditPct(i, parseFloat(e.target.value) || 0)}
-                        />
-                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm" style={{ color: 'var(--text-muted)' }}>%</span>
-                      </div>
-                      <button onClick={() => removeEditAsset(i)} disabled={editAssets.length <= 2}
-                        className="text-red-500 hover:text-red-400 disabled:opacity-30 p-1">🗑️</button>
-                    </div>
-                  );
-                })}
-                <div className={`mt-2 text-sm font-semibold ${Math.abs(totalEditPct - 100) < 0.1 ? 'text-green-400' : 'text-red-400'}`}>
-                  {tr('totalSum', lang)}: {totalEditPct.toFixed(1)}% {Math.abs(totalEditPct - 100) < 0.1 ? '✅' : tr('mustBe100', lang)}
-                </div>
-              </div>
+          {/* Rebalance button */}
+          <AnimatePresence mode="wait">
+            {rebalancing && cancelTimer > 0 ? (
+              <motion.button
+                key="cancel"
+                onClick={handleCancel}
+                className="btn-danger !px-4 !min-h-[36px] !text-xs relative overflow-hidden"
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.9 }}
+              >
+                <XCircle size={13} />
+                {tr('cancelRebalance', lang)} ({cancelTimer}s)
+              </motion.button>
+            ) : rebalancing ? (
+              <motion.button
+                key="running"
+                disabled
+                className="btn-accent !px-4 !min-h-[36px] !text-xs"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+              >
+                <RefreshCw size={13} className="spin" />
+                {lang === 'ar' ? 'جاري...' : 'Running...'}
+              </motion.button>
             ) : (
-              /* Read-only table — card view on mobile */
-              <div className="overflow-x-auto -mx-1">
-                <table className="w-full text-sm mobile-card-table">
-                  <thead>
-                    <tr className="text-xs border-b" style={{ color: 'var(--text-muted)', borderColor: 'var(--border)' }}>
-                      <th className="text-start py-2 px-3 font-semibold">{tr('coin', lang)}</th>
-                      <th className="text-start py-2 px-3 font-semibold">{tr('target', lang)}</th>
-                      <th className="text-start py-2 px-3 font-semibold">{tr('current', lang)}</th>
-                      <th className="text-start py-2 px-3 font-semibold">{tr('diff', lang)}</th>
-                      <th className="text-start py-2 px-3 font-semibold">{tr('valueUsdt', lang)}</th>
-                      <th className="text-start py-2 px-3 font-semibold">{tr('balancePrice', lang)}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {assets.map((a: any, idx: number) => {
-                      const dev    = a.deviation ?? 0;
-                      const isOver = dev > 0;
-                      const absdev = Math.abs(dev);
-                      const color  = COLORS[idx % COLORS.length];
-                      return (
-                        <tr key={a.symbol} className="border-b transition-colors"
-                          style={{ borderColor: 'var(--border)' }}>
-                          <td className="py-3 px-3" data-label={tr('coin', lang)}>
-                            <div className="flex items-center gap-2">
-                              <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
-                                   style={{ background: color + '30', color }}>
-                                {a.symbol.slice(0, 2)}
-                              </div>
-                              <span className="font-semibold text-sm" style={{ color: 'var(--text-main)' }}>{a.symbol}</span>
-                            </div>
-                          </td>
-                          <td className="py-3 px-3 text-sm" data-label={tr('target', lang)} style={{ color: 'var(--text-muted)' }}>
-                            {a.target_pct.toFixed(1)}%
-                          </td>
-                          <td className="py-3 px-3" data-label={tr('current', lang)}>
-                            {hasLiveData ? (
-                              <div className="flex items-center gap-2 min-w-[80px]">
-                                <div className="flex-1 rounded-full h-1.5" style={{ background: 'var(--bg-input)', minWidth: 40 }}>
-                                  <div className="h-1.5 rounded-full transition-all" style={{ width: `${Math.min(a.actual_pct, 100)}%`, background: color }} />
-                                </div>
-                                <span className="text-sm font-medium" style={{ color: 'var(--text-main)' }}>{a.actual_pct.toFixed(1)}%</span>
-                              </div>
-                            ) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
-                          </td>
-                          <td className="py-3 px-3" data-label={tr('diff', lang)}>
-                            {hasLiveData ? (
-                              <span className={`badge text-xs ${absdev < 1 ? '' : isOver ? 'bg-red-900/40 text-red-400' : 'bg-green-900/40 text-green-400'}`}
-                                    style={absdev < 1 ? { background: 'var(--bg-input)', color: 'var(--text-muted)' } : {}}>
-                                {isOver ? '+' : ''}{dev.toFixed(1)}%
-                              </span>
-                            ) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
-                          </td>
-                          <td className="py-3 px-3 text-sm font-medium" data-label={tr('valueUsdt', lang)} style={{ color: 'var(--text-main)' }}>
-                            {hasLiveData ? `$${a.value_usdt.toFixed(2)}` : '—'}
-                          </td>
-                          <td className="py-3 px-3 text-xs" data-label={tr('balancePrice', lang)} style={{ color: 'var(--text-muted)' }}>
-                            {hasLiveData ? `${a.balance.toFixed(5)} @ $${a.price.toFixed(3)}` : '—'}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+              <motion.button
+                key="rebalance"
+                onClick={handleRebalance}
+                className="btn-accent !px-4 !min-h-[36px] !text-xs relative overflow-hidden"
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.9 }}
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.97 }}
+              >
+                <Zap size={13} />
+                {tr('rebalanceNow', lang)}
+              </motion.button>
             )}
-          </div>
-        )}
+          </AnimatePresence>
+        </div>
+      </motion.div>
 
-        {/* History tab */}
-        {activeTab === 'history' && (
-          <div className="overflow-x-auto">
-            {history.length === 0 ? (
-              <div className="text-center py-10" style={{ color: 'var(--text-muted)' }}>{tr('noOps', lang)}</div>
-            ) : (
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-xs border-b" style={{ color: 'var(--text-muted)', borderColor: 'var(--border)' }}>
-                    <th className="text-right py-2 px-4">{tr('time', lang)}</th>
-                    <th className="text-right py-2 px-4">{tr('mode', lang)}</th>
-                    <th className="text-right py-2 px-4">{tr('total', lang)}</th>
-                    <th className="text-right py-2 px-4">{tr('operations', lang)}</th>
-                    <th className="text-right py-2 px-4">{tr('paper', lang)}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {history.map((h: any) => (
-                    <tr key={h.id} className="border-b hover:opacity-80 transition-colors" style={{ borderColor: 'var(--border)' }}>
-                      <td className="py-2 px-4 text-xs" style={{ color: 'var(--text-muted)' }}>{h.ts}</td>
-                      <td className="py-2 px-4">
-                        <span className="badge bg-gray-800 text-gray-300">{h.mode}</span>
-                      </td>
-                      <td className="py-2 px-4" style={{ color: 'var(--text-main)' }}>${Number(h.total_usdt).toFixed(2)}</td>
-                      <td className="py-2 px-4">
-                        <div className="flex flex-wrap gap-1">
-                          {(h.details ?? []).filter((d: any) => d.action !== 'SKIP').map((d: any, i: number) => (
-                            <span key={i} className={`badge text-xs ${d.action === 'BUY' ? 'bg-green-900 text-green-400' : d.action === 'SELL' ? 'bg-red-900 text-red-400' : 'bg-gray-800 text-gray-400'}`}>
-                              {d.action} {d.symbol} {d.diff_usdt > 0 ? `$${d.diff_usdt}` : ''}
-                            </span>
-                          ))}
-                        </div>
-                      </td>
-                      <td className="py-2 px-4">
-                        {h.paper
-                          ? <span className="badge bg-yellow-900 text-yellow-400">{tr('experimental', lang)}</span>
-                          : <span style={{ color: 'var(--text-muted)' }}>—</span>}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+      {/* ── 4 Stat Cards ───────────────────────────────────────────────── */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        <StatCard
+          title={tr('totalPortfolio', lang)}
+          value={loading ? '—' : `$${(status?.total_usdt ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+          change={loading ? undefined : `${(status?.assets?.length ?? 0)} ${tr('currency', lang)}`}
+          changePositive={null}
+          icon={DollarSign}
+          iconColor="#58A6FF"
+          loading={loading}
+          delay={0}
+        />
+        <StatCard
+          title={tr('profitLoss', lang)}
+          value={loading ? '—' : `${isProfit ? '+' : ''}$${(status?.profit_usdt ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+          change={loading ? undefined : `${isProfit ? '+' : ''}${(status?.profit_pct ?? 0).toFixed(2)}%`}
+          changePositive={loading ? null : isProfit}
+          icon={TrendingUp}
+          iconColor={isProfit ? '#00D4AA' : '#FF7B72'}
+          loading={loading}
+          delay={0.05}
+        />
+        <StatCard
+          title={tr('lastRebalance', lang)}
+          value={loading ? '—' : formatTime(status?.last_rebalance ?? null, lang)}
+          icon={Clock}
+          iconColor="#A78BFA"
+          loading={loading}
+          delay={0.1}
+        />
+        <StatCard
+          title={tr('assetCount', lang)}
+          value={loading ? '—' : String(status?.assets?.length ?? 0)}
+          change={loading ? undefined : (lang === 'ar' ? 'أصول نشطة' : 'active assets')}
+          changePositive={null}
+          icon={Layers}
+          iconColor="#F472B6"
+          loading={loading}
+          delay={0.15}
+        />
+      </div>
+
+      {/* ── Charts row ─────────────────────────────────────────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+        {/* Pie chart */}
+        <motion.div
+          className="card p-5 lg:col-span-2"
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2, duration: 0.35 }}
+        >
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="section-title">{tr('assetDist', lang)}</h2>
+          </div>
+          <PortfolioPieChart
+            assets={status?.assets ?? []}
+            totalUsdt={status?.total_usdt ?? 0}
+            loading={loading}
+            lang={lang}
+          />
+        </motion.div>
+
+        {/* Area chart */}
+        <motion.div
+          className="card p-5 lg:col-span-3"
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.25, duration: 0.35 }}
+        >
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="section-title">{tr('portfolioPerf', lang)}</h2>
+            {snapshots.length > 0 && (
+              <span className="text-xs num" style={{ color: 'var(--text-muted)' }}>
+                {snapshots.length} {lang === 'ar' ? 'نقطة' : 'pts'}
+              </span>
             )}
           </div>
-        )}
+          <PerformanceChart
+            snapshots={snapshots}
+            loading={loading}
+            lang={lang}
+          />
+        </motion.div>
       </div>
+
+      {/* ── Assets table ───────────────────────────────────────────────── */}
+      <motion.div
+        className="card p-5"
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.3, duration: 0.35 }}
+      >
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="section-title">{tr('assetTable', lang)}</h2>
+          {!loading && status?.assets?.length ? (
+            <span className="badge" style={{ background: 'var(--bg-input)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}>
+              {status.assets.length} {lang === 'ar' ? 'عملة' : 'coins'}
+            </span>
+          ) : null}
+        </div>
+        <AssetsTable
+          assets={status?.assets ?? []}
+          loading={loading}
+          lang={lang}
+        />
+      </motion.div>
+
+      {/* ── Last updated footer ─────────────────────────────────────────── */}
+      <motion.div
+        className="flex items-center justify-center gap-2 pb-2"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 0.4 }}
+      >
+        {refreshing ? (
+          <RefreshCw size={11} className="spin" style={{ color: 'var(--text-muted)' }} />
+        ) : (
+          <CheckCircle2 size={11} style={{ color: 'var(--accent)' }} />
+        )}
+        <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+          {refreshing
+            ? (lang === 'ar' ? 'جاري التحديث...' : 'Refreshing...')
+            : (lang === 'ar' ? `تحديث تلقائي كل 30 ثانية${autoRefresh ? '' : ' (متوقف)'}` : `Auto-refresh every 30s${autoRefresh ? '' : ' (paused)'}`)}
+        </span>
+      </motion.div>
     </div>
   );
 }

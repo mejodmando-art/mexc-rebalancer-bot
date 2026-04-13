@@ -1,11 +1,14 @@
 'use client';
 
-import { LayoutDashboard, Briefcase, PlusCircle, Settings, Bell } from 'lucide-react';
+import { motion } from 'framer-motion';
+import { Sun, Moon, Globe, LayoutDashboard, Briefcase, PlusCircle, Settings, Bell } from 'lucide-react';
 import { Lang, tr } from '../lib/i18n';
 
+type Tab = 'dashboard' | 'portfolios' | 'create' | 'settings' | 'notifications';
+
 interface NavbarProps {
-  active: 'dashboard' | 'portfolios' | 'create' | 'settings' | 'notifications';
-  onNav: (tab: 'dashboard' | 'portfolios' | 'create' | 'settings' | 'notifications') => void;
+  active: Tab;
+  onNav: (tab: Tab) => void;
   botRunning: boolean;
   lang: Lang;
   onLangToggle: () => void;
@@ -13,69 +16,104 @@ interface NavbarProps {
   onThemeToggle: () => void;
 }
 
-const TABS = [
-  { key: 'dashboard'     as const, icon: LayoutDashboard, labelKey: 'dashboard' },
-  { key: 'portfolios'    as const, icon: Briefcase,        labelKey: 'myPortfolios' },
-  { key: 'create'        as const, icon: PlusCircle,       labelKey: 'createBot' },
-  { key: 'settings'      as const, icon: Settings,         labelKey: 'settings' },
-  { key: 'notifications' as const, icon: Bell,             labelKey: 'notifications' },
+const TABS: { key: Tab; icon: React.ElementType; labelKey: string }[] = [
+  { key: 'dashboard',     icon: LayoutDashboard, labelKey: 'dashboard' },
+  { key: 'portfolios',    icon: Briefcase,        labelKey: 'myPortfolios' },
+  { key: 'create',        icon: PlusCircle,       labelKey: 'createBot' },
+  { key: 'settings',      icon: Settings,         labelKey: 'settings' },
+  { key: 'notifications', icon: Bell,             labelKey: 'notifications' },
 ];
 
-export default function Navbar({
-  active, onNav, botRunning, lang, onLangToggle, dark, onThemeToggle,
-}: NavbarProps) {
+export default function Navbar({ active, onNav, botRunning, lang, onLangToggle, dark, onThemeToggle }: NavbarProps) {
   return (
     <>
-      <nav className="nav-bg border-b sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2 shrink-0">
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center font-bold text-sm text-black"
-                 style={{ background: 'var(--brand)' }}>SP</div>
-            <span className="font-bold text-base hidden sm:block" style={{ color: 'var(--text-main)' }}>
-              Smart Portfolio
+      {/* Top navbar — visible on all sizes, but on desktop it's just the top bar */}
+      <header className="navbar sticky top-0 z-50 h-14">
+        <div className="h-full px-4 lg:ps-72 flex items-center justify-between gap-3">
+          {/* Mobile logo */}
+          <div className="flex items-center gap-2 lg:hidden">
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs text-[#0D1117] accent-gradient">
+              SP
+            </div>
+            <span className="font-bold text-sm" style={{ color: 'var(--text-main)' }}>Smart Portfolio</span>
+          </div>
+
+          {/* Desktop page title */}
+          <div className="hidden lg:block">
+            <span className="font-semibold text-sm" style={{ color: 'var(--text-muted)' }}>
+              {tr(active === 'dashboard' ? 'dashboard' : active === 'portfolios' ? 'myPortfolios' : active === 'create' ? 'createBot' : active === 'settings' ? 'settings' : 'notifications', lang)}
             </span>
           </div>
 
-          <div className="hidden sm:flex items-center gap-1 rounded-xl p-1" style={{ background: 'var(--bg-input)' }}>
-            {TABS.map(({ key, icon: Icon, labelKey }) => (
-              <button key={key} onClick={() => onNav(key)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-150 ${active === key ? 'text-black' : 'hover:opacity-80'}`}
-                style={active === key ? { background: 'var(--brand)' } : { color: 'var(--text-muted)' }}>
-                <Icon size={14} />
-                <span>{tr(labelKey, lang)}</span>
-              </button>
-            ))}
-          </div>
+          {/* Right controls */}
+          <div className="flex items-center gap-2">
+            {/* Bot status badge */}
+            <div className={`badge ${botRunning ? 'badge-running' : 'badge-stopped'} hidden sm:flex`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${botRunning ? 'pulse-dot' : ''}`}
+                    style={{ background: botRunning ? 'var(--accent)' : 'var(--text-muted)' }} />
+              <span>{botRunning ? tr('running', lang) : tr('stopped', lang)}</span>
+            </div>
 
-          <div className="flex items-center gap-2 shrink-0">
-            <span className={`badge ${botRunning ? 'bg-green-900/60 text-green-400' : 'bg-gray-800 text-gray-500'}`}>
-              <span className={`w-1.5 h-1.5 rounded-full ${botRunning ? 'bg-green-400 pulse-dot' : 'bg-gray-500'}`} />
-              <span className="hidden sm:inline">{botRunning ? tr('running', lang) : tr('stopped', lang)}</span>
-            </span>
-            <button onClick={onLangToggle} className="btn-secondary !px-2.5 !min-h-[36px] text-xs font-bold">
+            {/* Lang toggle */}
+            <motion.button
+              onClick={onLangToggle}
+              className="btn-secondary !px-3 !min-h-[36px] !text-xs !font-bold gap-1.5"
+              whileTap={{ scale: 0.95 }}
+              title="Toggle language"
+            >
+              <Globe size={13} />
               {lang === 'ar' ? 'EN' : 'ع'}
-            </button>
-            <button onClick={onThemeToggle} className="btn-secondary !px-2.5 !min-h-[36px] text-sm">
-              {dark ? '☀️' : '🌙'}
-            </button>
+            </motion.button>
+
+            {/* Theme toggle */}
+            <motion.button
+              onClick={onThemeToggle}
+              className="btn-secondary !px-3 !min-h-[36px]"
+              whileTap={{ scale: 0.95, rotate: 15 }}
+              title="Toggle theme"
+            >
+              <motion.div
+                key={dark ? 'sun' : 'moon'}
+                initial={{ rotate: -30, opacity: 0 }}
+                animate={{ rotate: 0, opacity: 1 }}
+                transition={{ duration: 0.2 }}
+              >
+                {dark ? <Sun size={15} /> : <Moon size={15} />}
+              </motion.div>
+            </motion.button>
           </div>
         </div>
-      </nav>
+      </header>
 
       {/* Mobile bottom nav */}
-      <div className="sm:hidden fixed bottom-0 inset-x-0 z-50 border-t nav-bg"
-           style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
+      <nav
+        className="lg:hidden fixed bottom-0 inset-x-0 z-50 border-t glass"
+        style={{
+          background: 'var(--bg-nav)',
+          borderColor: 'var(--border)',
+          paddingBottom: 'env(safe-area-inset-bottom)',
+        }}
+      >
         <div className="flex">
           {TABS.map(({ key, icon: Icon, labelKey }) => (
-            <button key={key} onClick={() => onNav(key)}
-              className="flex-1 flex flex-col items-center justify-center py-2 gap-0.5 transition-colors active:scale-95"
-              style={{ color: active === key ? 'var(--brand)' : 'var(--text-muted)' }}>
-              <Icon size={20} strokeWidth={active === key ? 2.5 : 1.8} />
-              <span className="text-[10px] font-medium leading-none">{tr(labelKey, lang)}</span>
+            <button
+              key={key}
+              onClick={() => onNav(key)}
+              className="flex-1 flex flex-col items-center justify-center py-2.5 gap-1 transition-all active:scale-90"
+              style={{ color: active === key ? 'var(--accent)' : 'var(--text-muted)' }}
+            >
+              {active === key && (
+                <motion.div
+                  layoutId="bottom-nav-indicator"
+                  className="absolute top-0 w-8 h-0.5 rounded-full accent-gradient"
+                />
+              )}
+              <Icon size={19} strokeWidth={active === key ? 2.5 : 1.8} />
+              <span className="text-[10px] font-semibold leading-none">{tr(labelKey, lang)}</span>
             </button>
           ))}
         </div>
-      </div>
+      </nav>
     </>
   );
 }
