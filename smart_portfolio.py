@@ -50,11 +50,32 @@ MAX_ASSETS = 10
 # ---------------------------------------------------------------------------
 
 def load_config(path: str = CONFIG_PATH) -> dict:
+    """Load config from the active portfolio in DB if one exists, else fall back to config.json."""
+    try:
+        from database import list_portfolios, get_portfolio as db_get_portfolio
+        portfolios = list_portfolios()
+        active = next((p for p in portfolios if p.get("active")), None)
+        if active:
+            cfg = db_get_portfolio(active["id"])
+            if cfg:
+                return cfg
+    except Exception as e:
+        log.warning("Could not load active portfolio from DB (%s) — falling back to config.json", e)
     with open(path, "r") as f:
         return json.load(f)
 
 
 def save_config(cfg: dict, path: str = CONFIG_PATH) -> None:
+    """Persist config to the active portfolio in DB (if one exists) and to config.json."""
+    try:
+        from database import list_portfolios, update_portfolio_config
+        portfolios = list_portfolios()
+        active = next((p for p in portfolios if p.get("active")), None)
+        if active:
+            update_portfolio_config(active["id"], cfg)
+            log.info("Config saved to DB (portfolio id=%s)", active["id"])
+    except Exception as e:
+        log.warning("Could not save config to DB (%s) — saving to config.json only", e)
     with open(path, "w") as f:
         json.dump(cfg, f, indent=2)
     log.info("Config saved to %s", path)

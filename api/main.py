@@ -809,7 +809,7 @@ def api_get_portfolio(portfolio_id: int):
 
 @app.post("/api/portfolios/{portfolio_id}/activate")
 def api_activate_portfolio(portfolio_id: int):
-    """Load a saved portfolio into config.json and make it active."""
+    """Mark portfolio as active in DB and sync config.json."""
     cfg = get_portfolio(portfolio_id)
     if cfg is None:
         raise HTTPException(status_code=404, detail="المحفظة غير موجودة")
@@ -820,8 +820,9 @@ def api_activate_portfolio(portfolio_id: int):
     # Stop running loop before switching
     if _is_running():
         _stop_event.set()
-    save_config(cfg)
+    # Mark active in DB first so save_config picks it up
     set_active_portfolio(portfolio_id)
+    save_config(cfg)
     return {"ok": True, "message": f"تم تفعيل المحفظة: {cfg['bot']['name']}"}
 
 
