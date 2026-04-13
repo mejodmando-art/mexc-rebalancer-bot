@@ -125,6 +125,8 @@ export const t: Record<string, Record<Lang, string>> = {
   stopAndSellRunning:    { ar: 'جاري البيع...',                     en: 'Selling...' },
   stopAndSellSuccess:    { ar: 'تم إيقاف البوت وبيع المحفظة',      en: 'Bot stopped and portfolio sold' },
   stopAndSellCancel:     { ar: 'إلغاء',                             en: 'Cancel' },
+  selectPortfolio:       { ar: 'اختر المحفظة',                      en: 'Select Portfolio' },
+  editingPortfolio:      { ar: 'تعديل المحفظة',                     en: 'Editing Portfolio' },
   startPortfolio:        { ar: 'تشغيل',                             en: 'Start' },
   stopPortfolio:         { ar: 'إيقاف',                             en: 'Stop' },
   portfolioRunning:      { ar: 'شغّالة ✅',                         en: 'Running ✅' },

@@ -1,39 +1,70 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { getConfig, updateConfig } from '../lib/api';
+import { useEffect, useState, useCallback } from 'react';
+import { getConfig, updateConfig, listPortfolios, getPortfolio, updatePortfolio } from '../lib/api';
 import { Lang, tr } from '../lib/i18n';
 
 interface Asset { symbol: string; allocation_pct: number; }
 interface Props { lang: Lang; onSaved: () => void; }
 
 export default function Settings({ lang, onSaved }: Props) {
-  const [cfg, setCfg]         = useState<any>(null);
-  const [assets, setAssets]   = useState<Asset[]>([]);
-  const [totalUsdt, setTotalUsdt] = useState(0);
-  const [rebalMode, setRebalMode] = useState('proportional');
-  const [threshold, setThreshold] = useState(5);
-  const [frequency, setFrequency] = useState('daily');
-  const [timedHour, setTimedHour] = useState(10);
-  const [sellTerm, setSellTerm]   = useState(false);
+  const [portfolios, setPortfolios]   = useState<any[]>([]);
+  const [selectedId, setSelectedId]   = useState<number | null>(null);
+  const [cfg, setCfg]                 = useState<any>(null);
+  const [assets, setAssets]           = useState<Asset[]>([]);
+  const [totalUsdt, setTotalUsdt]     = useState(0);
+  const [rebalMode, setRebalMode]     = useState('proportional');
+  const [threshold, setThreshold]     = useState(5);
+  const [frequency, setFrequency]     = useState('daily');
+  const [timedHour, setTimedHour]     = useState(10);
+  const [sellTerm, setSellTerm]       = useState(false);
   const [assetTransfer, setAssetTransfer] = useState(false);
   const [paperTrading, setPaperTrading]   = useState(false);
-  const [saving, setSaving]   = useState(false);
-  const [msg, setMsg]         = useState('');
+  const [saving, setSaving]           = useState(false);
+  const [msg, setMsg]                 = useState('');
 
+  const applyConfig = (c: any) => {
+    setCfg(c);
+    setAssets(c.portfolio.assets.map((a: any) => ({ ...a })));
+    setTotalUsdt(c.portfolio.total_usdt);
+    setRebalMode(c.rebalance.mode);
+    setThreshold(c.rebalance.proportional.threshold_pct);
+    setFrequency(c.rebalance.timed.frequency);
+    setTimedHour(c.rebalance.timed.hour ?? 10);
+    setSellTerm(c.termination.sell_at_termination);
+    setAssetTransfer(c.asset_transfer.enable_asset_transfer);
+    setPaperTrading(c.paper_trading ?? false);
+  };
+
+  // Load portfolio list + default to active portfolio
   useEffect(() => {
-    getConfig().then(c => {
-      setCfg(c);
-      setAssets(c.portfolio.assets.map((a: any) => ({ ...a })));
-      setTotalUsdt(c.portfolio.total_usdt);
-      setRebalMode(c.rebalance.mode);
-      setThreshold(c.rebalance.proportional.threshold_pct);
-      setFrequency(c.rebalance.timed.frequency);
-      setTimedHour(c.rebalance.timed.hour ?? 10);
-      setSellTerm(c.termination.sell_at_termination);
-      setAssetTransfer(c.asset_transfer.enable_asset_transfer);
-      setPaperTrading(c.paper_trading ?? false);
+    Promise.all([listPortfolios(), getConfig()]).then(([list, activeCfg]) => {
+      setPortfolios(list);
+      // Find the active portfolio id from the list
+      const active = list.find((p: any) => p.active);
+      if (active) {
+        setSelectedId(active.id);
+        // Load that portfolio's config
+        getPortfolio(active.id).then(applyConfig).catch(() => applyConfig(activeCfg));
+      } else {
+        applyConfig(activeCfg);
+      }
+    }).catch(() => {
+      getConfig().then(applyConfig);
     });
+  }, []);
+
+  // When user picks a different portfolio, load its config
+  const handleSelectPortfolio = useCallback(async (id: number) => {
+    setSelectedId(id);
+    setMsg('');
+    setCfg(null);
+    try {
+      const c = await getPortfolio(id);
+      applyConfig(c);
+    } catch (e: any) {
+      setMsg('❌ ' + e.message);
+    }
   }, []);
 
   const totalPct = assets.reduce((s, a) => s + a.allocation_pct, 0);
@@ -76,17 +107,41 @@ export default function Settings({ lang, onSaved }: Props) {
 
     setSaving(true); setMsg('');
     try {
-      await updateConfig({
-        assets: assets.map((a, i) => ({ symbol: symbols[i], allocation_pct: a.allocation_pct })),
-        total_usdt: totalUsdt,
-        rebalance_mode: rebalMode,
-        threshold_pct: threshold,
-        frequency,
-        timed_hour: timedHour,
-        sell_at_termination: sellTerm,
-        enable_asset_transfer: assetTransfer,
+      const updatedCfg = {
+        ...cfg,
+        portfolio: {
+          ...cfg.portfolio,
+          assets: assets.map((a, i) => ({ symbol: symbols[i], allocation_pct: a.allocation_pct })),
+          total_usdt: totalUsdt,
+        },
+        rebalance: {
+          ...cfg.rebalance,
+          mode: rebalMode,
+          proportional: { ...cfg.rebalance.proportional, threshold_pct: threshold },
+          timed: { ...cfg.rebalance.timed, frequency, hour: timedHour },
+        },
+        termination: { sell_at_termination: sellTerm },
+        asset_transfer: { enable_asset_transfer: assetTransfer },
         paper_trading: paperTrading,
-      });
+      };
+
+      if (selectedId !== null) {
+        // Save to specific portfolio in DB
+        await updatePortfolio(selectedId, updatedCfg);
+      } else {
+        // Fallback: save via legacy config endpoint
+        await updateConfig({
+          assets: assets.map((a, i) => ({ symbol: symbols[i], allocation_pct: a.allocation_pct })),
+          total_usdt: totalUsdt,
+          rebalance_mode: rebalMode,
+          threshold_pct: threshold,
+          frequency,
+          timed_hour: timedHour,
+          sell_at_termination: sellTerm,
+          enable_asset_transfer: assetTransfer,
+          paper_trading: paperTrading,
+        });
+      }
       setMsg('✅ ' + tr('successSaved', lang));
       setTimeout(onSaved, 1000);
     } catch (e: any) {
@@ -108,6 +163,36 @@ export default function Settings({ lang, onSaved }: Props) {
         <h1 className="text-2xl font-bold" style={{ color: 'var(--text-main)' }}>{tr('settingsTitle', lang)}</h1>
         <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>{tr('settingsDesc', lang)}</p>
       </div>
+
+      {/* Portfolio selector */}
+      {portfolios.length > 0 && (
+        <div className="card">
+          <div className="label">{tr('selectPortfolio', lang)}</div>
+          <div className="flex flex-col gap-2">
+            {portfolios.map(p => (
+              <button
+                key={p.id}
+                onClick={() => handleSelectPortfolio(p.id)}
+                className={`flex items-center justify-between px-4 py-3 rounded-xl border-2 text-sm font-semibold transition-colors text-start ${
+                  selectedId === p.id
+                    ? 'border-brand bg-brand/10 text-brand'
+                    : 'border-gray-700 hover:border-gray-500'
+                }`}
+              >
+                <span style={{ color: selectedId === p.id ? 'var(--brand)' : 'var(--text-main)' }}>
+                  {p.name}
+                  <span className="font-normal text-xs ms-2" style={{ color: 'var(--text-muted)' }}>
+                    {p.assets?.length ?? 0} {tr('assetCount', lang)} · ${p.total_usdt}
+                  </span>
+                </span>
+                {p.running && (
+                  <span className="text-xs text-green-400 font-bold">● {tr('portfolioRunning', lang)}</span>
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Bot name (read-only) */}
       <div className="card">
