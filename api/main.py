@@ -760,9 +760,7 @@ def api_save_portfolio(body: PortfolioCreate):
         pid = save_portfolio(name, cfg)
     except Exception as e:
         log.error("save_portfolio exception: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail=f"فشل حفظ المحفظة: {e}")
-    if pid < 0:
-        raise HTTPException(status_code=500, detail="فشل حفظ المحفظة: خطأ في قاعدة البيانات")
+        raise HTTPException(status_code=500, detail=f"فشل حفظ المحفظة: {type(e).__name__}: {e}")
     return {"ok": True, "id": pid}
 
 

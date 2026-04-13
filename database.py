@@ -25,14 +25,20 @@ _SQLITE_PATH = os.path.join(os.path.dirname(__file__), "portfolio.db")
 def _try_postgres() -> bool:
     """Return True if psycopg2 is available and DATABASE_URL connects."""
     if not _DATABASE_URL:
+        log.info("DATABASE_URL not set — using SQLite")
         return False
     try:
         import psycopg2  # noqa: F401
+    except ImportError:
+        log.warning("psycopg2 not installed — falling back to SQLite")
+        return False
+    try:
         conn = psycopg2.connect(_DATABASE_URL)
         conn.close()
+        log.info("PostgreSQL connection OK (Supabase)")
         return True
     except Exception as e:
-        log.warning("PostgreSQL unavailable (%s) — falling back to SQLite", e)
+        log.warning("PostgreSQL connection failed (%s: %s) — falling back to SQLite", type(e).__name__, e)
         return False
 
 
@@ -246,33 +252,29 @@ def get_snapshots(limit: int = 90, portfolio_id: int = 1) -> list:
 # ---------------------------------------------------------------------------
 
 def save_portfolio(name: str, config: dict) -> int:
-    """Save a new portfolio. Returns its new id."""
-    try:
-        with _conn() as conn:
-            cur = conn.cursor()
-            if _BACKEND == "postgresql":
-                cur.execute(
-                    "INSERT INTO portfolios (ts_created, name, config_json, active) VALUES (%s,%s,%s,0) RETURNING id",
-                    (
-                        datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
-                        name,
-                        json.dumps(config),
-                    ),
-                )
-                return cur.fetchone()[0]
-            else:
-                cur.execute(
-                    "INSERT INTO portfolios (ts_created, name, config_json, active) VALUES (?,?,?,0)",
-                    (
-                        datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
-                        name,
-                        json.dumps(config),
-                    ),
-                )
-                return cur.lastrowid
-    except Exception as e:
-        log.error("save_portfolio failed: %s", e)
-        return -1
+    """Save a new portfolio. Returns its new id. Raises on failure."""
+    with _conn() as conn:
+        cur = conn.cursor()
+        if _BACKEND == "postgresql":
+            cur.execute(
+                "INSERT INTO portfolios (ts_created, name, config_json, active) VALUES (%s,%s,%s,0) RETURNING id",
+                (
+                    datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+                    name,
+                    json.dumps(config),
+                ),
+            )
+            return cur.fetchone()[0]
+        else:
+            cur.execute(
+                "INSERT INTO portfolios (ts_created, name, config_json, active) VALUES (?,?,?,0)",
+                (
+                    datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+                    name,
+                    json.dumps(config),
+                ),
+            )
+            return cur.lastrowid
 
 
 def list_portfolios() -> list:
