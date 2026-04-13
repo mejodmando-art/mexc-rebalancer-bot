@@ -777,7 +777,7 @@ def db_status():
 
 @app.get("/api/mexc/status")
 def mexc_status():
-    """Diagnostic endpoint — checks MEXC API key and connectivity."""
+    """Diagnostic endpoint — checks MEXC API key, connectivity, and balances."""
     api_key = os.environ.get("MEXC_API_KEY", "")
     secret  = os.environ.get("MEXC_SECRET_KEY", "")
     if not api_key or not secret:
@@ -785,15 +785,38 @@ def mexc_status():
     try:
         client = MEXCClient(api_key, secret)
         account = client.get_account()
-        balances = [
-            b for b in account.get("balances", [])
+        all_balances = account.get("balances", [])
+        non_zero = [
+            b for b in all_balances
             if float(b.get("free", 0)) > 0 or float(b.get("locked", 0)) > 0
         ]
+        # Check balances for configured portfolio assets
+        cfg = load_config()
+        portfolio_assets = cfg.get("portfolio", {}).get("assets", [])
+        portfolio_balances = []
+        for a in portfolio_assets:
+            sym = a["symbol"]
+            bal = next((b for b in all_balances if b["asset"] == sym), None)
+            try:
+                price = client.get_price(f"{sym}USDT") if sym != "USDT" else 1.0
+            except Exception:
+                price = 0.0
+            free = float(bal["free"]) if bal else 0.0
+            portfolio_balances.append({
+                "symbol": sym,
+                "free": free,
+                "price_usdt": price,
+                "value_usdt": round(free * price, 2),
+                "target_pct": a["allocation_pct"],
+            })
         return {
             "ok": True,
             "key_prefix": api_key[:6] + "...",
-            "non_zero_assets": len(balances),
-            "assets": [{"asset": b["asset"], "free": b["free"]} for b in balances[:10]],
+            "paper_trading": cfg.get("paper_trading", False),
+            "total_non_zero_assets": len(non_zero),
+            "all_non_zero": [{"asset": b["asset"], "free": b["free"]} for b in non_zero[:20]],
+            "portfolio_assets": portfolio_balances,
+            "total_portfolio_usdt": round(sum(b["value_usdt"] for b in portfolio_balances), 2),
         }
     except Exception as e:
         return {"ok": False, "error": str(e)}
