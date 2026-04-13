@@ -5,11 +5,10 @@
   "portfolio": {
     "assets": [
       { "symbol": "BTC", "allocation_pct": 50.0 },
-      { "symbol": "ETH", "allocation_pct": 30.0 },
-      { "symbol": "SOL", "allocation_pct": 20.0 }
+      { "symbol": "ETH", "allocation_pct": 50.0 }
     ],
-    "total_usdt": 1000,
-    "initial_value_usdt": 1000
+    "total_usdt": 19,
+    "initial_value_usdt": 19
   },
   "rebalance": {
     "mode": "proportional",

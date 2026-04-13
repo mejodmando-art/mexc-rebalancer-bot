@@ -315,10 +315,14 @@ def get_portfolio_value(
 def execute_rebalance(client: MEXCClient, cfg: dict) -> list:
     """
     Rebalance logic:
-    - target for each asset = budget * allocation_pct / 100
-    - if current value > target → sell the difference
-    - if current value < target → buy the difference
-    - never touches funds outside the configured budget
+    1. Compute the effective portfolio total = sum(asset values) + free USDT
+       capped at the configured budget_usdt.  This means the bot only ever
+       works within the user-defined budget and never touches funds outside it.
+    2. Sell assets that are worth more than their target share of that total.
+    3. After sells settle, buy assets that are worth less than their target.
+
+    The effective total is recalculated after sells so that the USDT freed by
+    selling is available for buys.
     """
     env_paper = os.environ.get("PAPER_TRADING", "").lower()
     if env_paper in ("true", "1", "yes"):
@@ -346,12 +350,30 @@ def execute_rebalance(client: MEXCClient, cfg: dict) -> list:
             log.warning("Cannot fetch %s: %s", sym, e)
             actuals[sym] = {"balance": 0.0, "price": 0.0, "value_usdt": 0.0}
 
+    # ── Compute effective total ──────────────────────────────────────────
+    # Sum the value of all configured assets + free USDT in the account,
+    # then cap at the user-defined budget so we never over-spend.
+    asset_symbols = {a["symbol"].upper() for a in assets_cfg}
+    assets_value = sum(actuals[sym]["value_usdt"] for sym in asset_symbols if sym != "USDT")
+    try:
+        free_usdt = client.get_asset_balance("USDT")
+    except Exception as e:
+        log.warning("Could not fetch free USDT: %s", e)
+        free_usdt = 0.0
+
+    # Effective total = what we actually have, but never more than the budget.
+    effective_total = min(assets_value + free_usdt, budget_usdt)
+    log.info(
+        "assets_value=%.2f$ free_usdt=%.2f$ budget=%.2f$ → effective_total=%.2f$",
+        assets_value, free_usdt, budget_usdt, effective_total,
+    )
+
     sells = []
     buys  = []
 
     for a in assets_cfg:
         sym        = a["symbol"]
-        target_val = round(budget_usdt * a["allocation_pct"] / 100, 2)
+        target_val = round(effective_total * a["allocation_pct"] / 100, 2)
         actual_val = actuals[sym]["value_usdt"]
         diff       = round(actual_val - target_val, 2)   # + = زيادة → بيع، - = ناقص → شراء
 
@@ -360,8 +382,8 @@ def execute_rebalance(client: MEXCClient, cfg: dict) -> list:
         entry = {
             "symbol":     sym,
             "target_pct": a["allocation_pct"],
-            "actual_pct": round(actual_val / budget_usdt * 100, 2) if budget_usdt else 0,
-            "deviation":  round(diff / budget_usdt * 100, 2) if budget_usdt else 0,
+            "actual_pct": round(actual_val / effective_total * 100, 2) if effective_total else 0,
+            "deviation":  round(diff / effective_total * 100, 2) if effective_total else 0,
             "diff_usdt":  diff,
             "action":     "SKIP",
         }
@@ -394,10 +416,13 @@ def execute_rebalance(client: MEXCClient, cfg: dict) -> list:
     if not paper:
         time.sleep(3)
 
-    # ── Buys — track remaining USDT across orders ────────────────────────
+    # ── Buys — re-fetch USDT after sells settle ──────────────────────────
+    # Re-read the live USDT balance so that proceeds from sells are included.
     if not paper:
         try:
             usdt_remaining = client.get_asset_balance("USDT")
+            # Never spend more than the budget allows.
+            usdt_remaining = min(usdt_remaining, budget_usdt)
             log.info("USDT available for buys: %.2f", usdt_remaining)
         except Exception as e:
             log.warning("Could not fetch USDT: %s", e)
@@ -441,9 +466,9 @@ def execute_rebalance(client: MEXCClient, cfg: dict) -> list:
 
     # Persist to DB and config
     mode = cfg["rebalance"]["mode"]
-    record_rebalance(mode, budget_usdt, details, paper=paper)
-    record_snapshot(budget_usdt, [
-        {"symbol": a["symbol"], "value_usdt": round(budget_usdt * a["allocation_pct"] / 100, 2), "actual_pct": a["allocation_pct"]}
+    record_rebalance(mode, effective_total, details, paper=paper)
+    record_snapshot(effective_total, [
+        {"symbol": a["symbol"], "value_usdt": round(effective_total * a["allocation_pct"] / 100, 2), "actual_pct": a["allocation_pct"]}
         for a in assets_cfg
     ])
 
@@ -498,19 +523,59 @@ def get_pnl(cfg: dict, current_usdt: float | None = None) -> dict:
 # ---------------------------------------------------------------------------
 
 def needs_rebalance_proportional(client: MEXCClient, cfg: dict) -> bool:
-    """Return True if any asset deviates >= min_deviation_to_execute_pct."""
+    """Return True if any asset deviates >= min_deviation_to_execute_pct.
+
+    Uses the same effective_total calculation as execute_rebalance:
+    min(assets_value + free_usdt, budget_usdt).  This ensures the deviation
+    check and the rebalance execution always agree on what the total is.
+    """
     assets_cfg = cfg["portfolio"]["assets"]
     min_dev = cfg["rebalance"]["proportional"]["min_deviation_to_execute_pct"]
-    budget_usdt = cfg["portfolio"].get("total_usdt")
-    portfolio = get_portfolio_value(client, assets_cfg, budget_usdt=budget_usdt)
+    budget_usdt = cfg["portfolio"].get("total_usdt", 0)
+
+    # Compute effective total the same way execute_rebalance does.
+    asset_symbols = {a["symbol"].upper() for a in assets_cfg}
+    assets_value = 0.0
+    actuals = {}
+    for a in assets_cfg:
+        sym = a["symbol"]
+        try:
+            balance = client.get_asset_balance(sym) if sym != "USDT" else client.get_asset_balance("USDT")
+            price   = client.get_price(f"{sym}USDT") if sym != "USDT" else 1.0
+            val = balance * price
+        except Exception as e:
+            log.warning("Cannot fetch %s for deviation check: %s", sym, e)
+            val = 0.0
+        actuals[sym] = val
+        if sym != "USDT":
+            assets_value += val
+
+    try:
+        free_usdt = client.get_asset_balance("USDT")
+    except Exception as e:
+        log.warning("Could not fetch free USDT for deviation check: %s", e)
+        free_usdt = 0.0
+
+    effective_total = min(assets_value + free_usdt, budget_usdt)
+
+    if effective_total <= 0:
+        log.info("Effective total is 0 — skipping deviation check.")
+        return False
+
     targets = {a["symbol"]: a["allocation_pct"] for a in assets_cfg}
 
-    for r in portfolio["assets"]:
-        deviation = abs(r["actual_pct"] - targets[r["symbol"]])
+    for a in assets_cfg:
+        sym = a["symbol"]
+        actual_pct = actuals[sym] / effective_total * 100
+        deviation = abs(actual_pct - targets[sym])
+        log.info(
+            "%s actual=%.2f%% target=%.2f%% deviation=%.2f%%",
+            sym, actual_pct, targets[sym], deviation,
+        )
         if deviation >= min_dev:
             log.info(
                 "%s deviation=%.2f%% >= threshold %.2f%% → rebalance triggered",
-                r["symbol"], deviation, min_dev,
+                sym, deviation, min_dev,
             )
             return True
     return False
