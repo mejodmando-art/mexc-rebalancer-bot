@@ -67,3 +67,9 @@ export const deletePortfolio   = (id: number)                   =>
   req<{ ok: boolean }>(`/api/portfolios/${id}`, { method: 'DELETE' });
 export const updatePortfolio   = (id: number, config: Record<string, unknown>) =>
   req<{ ok: boolean }>(`/api/portfolios/${id}`, { method: 'PUT', body: JSON.stringify({ config }) });
+
+export const rebalancePortfolio = (id: number, rebalance_type: 'market_value' | 'equal') =>
+  req<{ ok: boolean; job_id: string; cancel_window_seconds: number }>(
+    `/api/portfolios/${id}/rebalance`,
+    { method: 'POST', body: JSON.stringify({ rebalance_type }) }
+  );

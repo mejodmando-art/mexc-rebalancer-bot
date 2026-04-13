@@ -52,6 +52,7 @@ from database import (
 from mexc_client import MEXCClient
 from smart_portfolio import (
     execute_rebalance,
+    execute_rebalance_equal,
     get_pnl,
     get_portfolio_value,
     load_config,
@@ -806,3 +807,51 @@ def api_update_portfolio(portfolio_id: int, body: PortfolioCreate):
         raise HTTPException(status_code=404, detail="المحفظة غير موجودة")
     update_portfolio_config(portfolio_id, cfg)
     return {"ok": True}
+
+
+class PortfolioRebalanceRequest(BaseModel):
+    rebalance_type: str = "market_value"  # "market_value" | "equal"
+
+
+@app.post("/api/portfolios/{portfolio_id}/rebalance")
+def api_rebalance_portfolio(portfolio_id: int, body: PortfolioRebalanceRequest):
+    """
+    Trigger a rebalance for a specific portfolio.
+
+    rebalance_type:
+      - "market_value": restore configured allocation_pct targets (default)
+      - "equal": redistribute equally across all assets regardless of targets
+    """
+    cfg = get_portfolio(portfolio_id)
+    if cfg is None:
+        raise HTTPException(status_code=404, detail="المحفظة غير موجودة")
+    try:
+        client = _client()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    job_id = str(uuid.uuid4())
+    entry: dict = {"cancel": threading.Event(), "done": threading.Event(), "result": None}
+    with _pending_lock:
+        _pending_rebalances[job_id] = entry
+
+    def _run() -> None:
+        cancel_ev: threading.Event = entry["cancel"]
+        cancel_ev.wait(10)
+        if cancel_ev.is_set():
+            entry["done"].set()
+            return
+        try:
+            if body.rebalance_type == "equal":
+                result = execute_rebalance_equal(client, cfg)
+            else:
+                result = execute_rebalance(client, cfg)
+            entry["result"] = result
+        except Exception as exc:
+            log.error("Portfolio rebalance failed (id=%s): %s", portfolio_id, exc)
+            entry["result"] = [{"error": str(exc)}]
+        finally:
+            entry["done"].set()
+
+    threading.Thread(target=_run, daemon=True).start()
+    return {"ok": True, "job_id": job_id, "cancel_window_seconds": 10}

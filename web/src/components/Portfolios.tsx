@@ -1,10 +1,15 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { listPortfolios, activatePortfolio, deletePortfolio } from '../lib/api';
+import {
+  listPortfolios, activatePortfolio, deletePortfolio,
+  rebalancePortfolio, getRebalanceJobStatus, cancelRebalance,
+} from '../lib/api';
 import { Lang, tr } from '../lib/i18n';
 
 interface Props { lang: Lang; onActivated: () => void; }
+
+type RebalanceType = 'market_value' | 'equal';
 
 const MODE_ICON: Record<string, string> = {
   proportional: '📊',
@@ -14,13 +19,158 @@ const MODE_ICON: Record<string, string> = {
 
 const COLORS = ['#f0b90b','#3b82f6','#10b981','#8b5cf6','#ef4444','#f97316','#06b6d4','#ec4899','#84cc16','#a78bfa'];
 
+// ── Rebalance modal ──────────────────────────────────────────────────────────
+interface RebalanceModalProps {
+  portfolioId: number;
+  portfolioName: string;
+  isActive: boolean;
+  lang: Lang;
+  onClose: () => void;
+  onDone: (msg: string) => void;
+}
+
+function RebalanceModal({ portfolioId, portfolioName, isActive, lang, onClose, onDone }: RebalanceModalProps) {
+  const [type, setType]           = useState<RebalanceType>('market_value');
+  const [phase, setPhase]         = useState<'pick' | 'countdown' | 'running'>('pick');
+  const [countdown, setCountdown] = useState(10);
+  const [jobId, setJobId]         = useState('');
+  const [error, setError]         = useState('');
+
+  const startRebalance = async () => {
+    setError('');
+    try {
+      const res = await rebalancePortfolio(portfolioId, type);
+      setJobId(res.job_id);
+      setCountdown(res.cancel_window_seconds);
+      setPhase('countdown');
+    } catch (e: any) {
+      setError('❌ ' + e.message);
+    }
+  };
+
+  // Countdown timer
+  useEffect(() => {
+    if (phase !== 'countdown') return;
+    if (countdown <= 0) { setPhase('running'); return; }
+    const t = setTimeout(() => setCountdown(c => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [phase, countdown]);
+
+  // Poll job status once running
+  useEffect(() => {
+    if (phase !== 'running' || !jobId) return;
+    let active = true;
+    const poll = async () => {
+      try {
+        const s = await getRebalanceJobStatus(jobId);
+        if (!active) return;
+        if (s.cancelled) { onDone(tr('rebalanceCancelled', lang)); onClose(); }
+        else if (s.done)  { onDone(tr('rebalanceSuccess', lang));   onClose(); }
+        else setTimeout(poll, 1500);
+      } catch { if (active) setTimeout(poll, 2000); }
+    };
+    poll();
+    return () => { active = false; };
+  }, [phase, jobId, lang, onDone, onClose]);
+
+  const handleCancel = async () => {
+    if (jobId) { try { await cancelRebalance(jobId); } catch {} }
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4">
+      <div className="card w-full max-w-md space-y-5" style={{ background: 'var(--bg-card)' }}>
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-bold" style={{ color: 'var(--text-main)' }}>
+            ⚖️ {tr('rebalancePortfolio', lang)}
+          </h2>
+          <button onClick={handleCancel} className="text-xl" style={{ color: 'var(--text-muted)' }}>✖</button>
+        </div>
+
+        <p className="text-sm font-medium" style={{ color: 'var(--text-muted)' }}>{portfolioName}</p>
+
+        {!isActive && (
+          <div className="text-sm text-yellow-400 bg-yellow-900/30 rounded-xl px-3 py-2">
+            ⚠️ {tr('activateFirst', lang)}
+          </div>
+        )}
+
+        {/* Type picker */}
+        {phase === 'pick' && (
+          <>
+            <div className="label">{tr('rebalanceType', lang)}</div>
+            <div className="grid grid-cols-2 gap-3">
+              {([
+                { key: 'market_value' as RebalanceType, label: tr('rebalanceMarketValue', lang), desc: tr('rebalanceMarketDesc', lang), icon: '📊' },
+                { key: 'equal'        as RebalanceType, label: tr('rebalanceEqual', lang),       desc: tr('rebalanceEqualDesc', lang),  icon: '⚖️' },
+              ]).map(opt => (
+                <button
+                  key={opt.key}
+                  onClick={() => setType(opt.key)}
+                  className={`p-4 rounded-xl border-2 text-start transition-colors ${type === opt.key ? 'border-brand bg-brand/10' : 'border-gray-700 hover:border-gray-600'}`}
+                >
+                  <div className="text-2xl mb-1">{opt.icon}</div>
+                  <div className="text-sm font-semibold" style={{ color: 'var(--text-main)' }}>{opt.label}</div>
+                  <div className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>{opt.desc}</div>
+                </button>
+              ))}
+            </div>
+
+            {error && <div className="text-sm text-red-400">{error}</div>}
+
+            <div className="flex gap-2 pt-1">
+              <button onClick={handleCancel} className="btn-secondary flex-1">
+                {tr('rebalanceCancelBtn', lang)}
+              </button>
+              <button
+                onClick={startRebalance}
+                disabled={!isActive}
+                className="btn-primary flex-1 disabled:opacity-40"
+              >
+                {tr('rebalanceConfirm', lang)}
+              </button>
+            </div>
+          </>
+        )}
+
+        {/* Countdown */}
+        {phase === 'countdown' && (
+          <div className="text-center space-y-4 py-4">
+            <div className="text-6xl font-bold text-brand">{countdown}</div>
+            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+              {tr('cancelWindow', lang)} {countdown} {tr('seconds', lang)}
+            </p>
+            <button onClick={handleCancel} className="btn-danger px-8 py-2">
+              ✖ {tr('cancelRebalance', lang)}
+            </button>
+          </div>
+        )}
+
+        {/* Running */}
+        {phase === 'running' && (
+          <div className="text-center py-8 space-y-3">
+            <div className="text-4xl animate-spin inline-block">⚙️</div>
+            <p className="text-sm font-semibold" style={{ color: 'var(--text-main)' }}>
+              {tr('rebalanceRunning', lang)}
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Main component ───────────────────────────────────────────────────────────
 export default function Portfolios({ lang, onActivated }: Props) {
-  const [portfolios, setPortfolios] = useState<any[]>([]);
-  const [loading, setLoading]       = useState(true);
-  const [msg, setMsg]               = useState('');
-  const [activating, setActivating] = useState<number | null>(null);
-  const [deleting, setDeleting]     = useState<number | null>(null);
+  const [portfolios, setPortfolios]       = useState<any[]>([]);
+  const [loading, setLoading]             = useState(true);
+  const [msg, setMsg]                     = useState('');
+  const [activating, setActivating]       = useState<number | null>(null);
+  const [deleting, setDeleting]           = useState<number | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
+  const [rebalModal, setRebalModal]       = useState<{ id: number; name: string; active: boolean } | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -71,151 +221,181 @@ export default function Portfolios({ lang, onActivated }: Props) {
   );
 
   return (
-    <div className="space-y-5">
-      {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-main)' }}>
-            {tr('myPortfolios', lang)}
-          </h1>
-          <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>
-            {tr('myPortfoliosDesc', lang)}
-          </p>
-        </div>
-        <div className="text-sm font-semibold px-3 py-1 rounded-xl" style={{ background: 'var(--bg-card)', color: 'var(--text-muted)' }}>
-          {portfolios.length} / 10 {tr('portfolioCount', lang)}
-        </div>
-      </div>
-
-      {msg && (
-        <div className={`card text-sm ${msg.startsWith('❌') ? 'border-red-700 text-red-400' : 'border-green-700 text-green-400'}`}>
-          {msg}
-        </div>
+    <>
+      {rebalModal && (
+        <RebalanceModal
+          portfolioId={rebalModal.id}
+          portfolioName={rebalModal.name}
+          isActive={rebalModal.active}
+          lang={lang}
+          onClose={() => setRebalModal(null)}
+          onDone={(m) => { setMsg('✅ ' + m); load(); }}
+        />
       )}
 
-      {portfolios.length === 0 ? (
-        <div className="card flex flex-col items-center justify-center py-16 gap-4">
-          <div className="text-5xl">📂</div>
-          <div className="text-lg font-semibold" style={{ color: 'var(--text-main)' }}>
-            {tr('noPortfolios', lang)}
+      <div className="space-y-5">
+        {/* Header */}
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <h1 className="text-2xl font-bold" style={{ color: 'var(--text-main)' }}>
+              {tr('myPortfolios', lang)}
+            </h1>
+            <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>
+              {tr('myPortfoliosDesc', lang)}
+            </p>
           </div>
-          <div className="text-sm" style={{ color: 'var(--text-muted)' }}>
-            {tr('noPortfoliosDesc', lang)}
+          <div className="text-sm font-semibold px-3 py-1 rounded-xl" style={{ background: 'var(--bg-card)', color: 'var(--text-muted)' }}>
+            {portfolios.length} / 10 {tr('portfolioCount', lang)}
           </div>
         </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {portfolios.map((p) => (
-            <div
-              key={p.id}
-              className={`card flex flex-col gap-3 relative transition-all ${p.active ? 'border-brand' : ''}`}
-              style={p.active ? { borderColor: 'var(--brand)', borderWidth: 2 } : {}}
-            >
-              {/* Active badge */}
-              {p.active && (
-                <div className="absolute top-3 left-3 badge bg-brand/20 text-brand text-xs font-bold">
-                  ✅ {tr('activePortfolio', lang)}
-                </div>
-              )}
 
-              {/* Name + mode */}
-              <div className={`${p.active ? 'mt-6' : ''}`}>
-                <div className="flex items-center gap-2">
-                  <span className="text-xl">{MODE_ICON[p.mode] ?? '📁'}</span>
-                  <span className="font-bold text-base" style={{ color: 'var(--text-main)' }}>{p.name}</span>
-                  {p.paper_trading && (
-                    <span className="badge bg-yellow-900 text-yellow-400 text-xs">🧪</span>
+        {msg && (
+          <div className={`card text-sm ${msg.startsWith('❌') ? 'border-red-700 text-red-400' : 'border-green-700 text-green-400'}`}>
+            {msg}
+          </div>
+        )}
+
+        {portfolios.length === 0 ? (
+          <div className="card flex flex-col items-center justify-center py-16 gap-4">
+            <div className="text-5xl">📂</div>
+            <div className="text-lg font-semibold" style={{ color: 'var(--text-main)' }}>
+              {tr('noPortfolios', lang)}
+            </div>
+            <div className="text-sm" style={{ color: 'var(--text-muted)' }}>
+              {tr('noPortfoliosDesc', lang)}
+            </div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {portfolios.map((p) => (
+              <div
+                key={p.id}
+                className={`card flex flex-col gap-3 relative transition-all ${p.active ? 'border-brand' : ''}`}
+                style={p.active ? { borderColor: 'var(--brand)', borderWidth: 2 } : {}}
+              >
+                {/* Active badge */}
+                {p.active && (
+                  <div className="absolute top-3 left-3 badge bg-brand/20 text-brand text-xs font-bold">
+                    ✅ {tr('activePortfolio', lang)}
+                  </div>
+                )}
+
+                {/* Name + mode */}
+                <div className={`${p.active ? 'mt-6' : ''}`}>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xl">{MODE_ICON[p.mode] ?? '📁'}</span>
+                    <span className="font-bold text-base" style={{ color: 'var(--text-main)' }}>{p.name}</span>
+                    {p.paper_trading && (
+                      <span className="badge bg-yellow-900 text-yellow-400 text-xs">🧪</span>
+                    )}
+                  </div>
+                  <div className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+                    {tr('createdAt', lang)}: {p.ts_created.slice(0, 16)}
+                  </div>
+                </div>
+
+                {/* Stats row */}
+                <div className="flex gap-3 text-sm flex-wrap">
+                  <div className="flex flex-col">
+                    <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{tr('totalPortfolio', lang)}</span>
+                    <span className="font-semibold" style={{ color: 'var(--text-main)' }}>${p.total_usdt.toLocaleString()}</span>
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{tr('mode', lang)}</span>
+                    <span className="font-semibold" style={{ color: 'var(--text-main)' }}>{p.mode}</span>
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{tr('assetCount', lang)}</span>
+                    <span className="font-semibold" style={{ color: 'var(--text-main)' }}>{p.assets.length}</span>
+                  </div>
+                </div>
+
+                {/* Asset allocation bar */}
+                <div>
+                  <div className="flex rounded-full overflow-hidden h-2 w-full gap-px">
+                    {p.assets.map((a: any, i: number) => (
+                      <div
+                        key={a.symbol}
+                        style={{ width: `${a.allocation_pct}%`, background: COLORS[i % COLORS.length] }}
+                        title={`${a.symbol}: ${a.allocation_pct}%`}
+                      />
+                    ))}
+                  </div>
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {p.assets.map((a: any, i: number) => (
+                      <span key={a.symbol} className="flex items-center gap-1 text-xs" style={{ color: 'var(--text-muted)' }}>
+                        <span className="w-2 h-2 rounded-full inline-block" style={{ background: COLORS[i % COLORS.length] }} />
+                        {a.symbol} {a.allocation_pct}%
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Rebalance button */}
+                <button
+                  onClick={() => setRebalModal({ id: p.id, name: p.name, active: p.active })}
+                  className={`w-full py-2 rounded-xl border-2 text-sm font-semibold transition-colors ${
+                    p.active
+                      ? 'border-brand text-brand hover:bg-brand/10'
+                      : 'border-gray-700 text-gray-500 hover:border-gray-600 hover:text-gray-400'
+                  }`}
+                >
+                  ⚖️ {tr('rebalancePortfolio', lang)}
+                  {!p.active && (
+                    <span className="text-xs font-normal ms-1 opacity-60">
+                      — {tr('activateFirst', lang)}
+                    </span>
+                  )}
+                </button>
+
+                {/* Activate / Delete actions */}
+                <div className="flex gap-2 pt-2 border-t" style={{ borderColor: 'var(--border)' }}>
+                  {!p.active && (
+                    <button
+                      onClick={() => handleActivate(p.id)}
+                      disabled={activating === p.id}
+                      className="btn-primary flex-1 text-sm py-1.5"
+                    >
+                      {activating === p.id ? '⏳' : '▶️'} {tr('activatePortfolio', lang)}
+                    </button>
+                  )}
+                  {p.active && (
+                    <div className="flex-1 text-center text-sm py-1.5 rounded-xl font-semibold text-brand" style={{ background: 'var(--bg-input)' }}>
+                      ✅ {tr('currentlyActive', lang)}
+                    </div>
+                  )}
+                  {confirmDelete === p.id ? (
+                    <div className="flex gap-1">
+                      <button
+                        onClick={() => handleDelete(p.id)}
+                        disabled={deleting === p.id}
+                        className="btn-danger text-xs px-3 py-1.5"
+                      >
+                        {deleting === p.id ? '⏳' : tr('confirmDelete', lang)}
+                      </button>
+                      <button
+                        onClick={() => setConfirmDelete(null)}
+                        className="btn-secondary text-xs px-3 py-1.5"
+                      >
+                        ✖
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setConfirmDelete(p.id)}
+                      disabled={p.active}
+                      className="btn-secondary text-sm px-3 py-1.5 disabled:opacity-30"
+                      title={p.active ? tr('cantDeleteActive', lang) : tr('deletePortfolio', lang)}
+                    >
+                      🗑️
+                    </button>
                   )}
                 </div>
-                <div className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
-                  {tr('createdAt', lang)}: {p.ts_created.slice(0, 16)}
-                </div>
               </div>
-
-              {/* Stats row */}
-              <div className="flex gap-3 text-sm flex-wrap">
-                <div className="flex flex-col">
-                  <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{tr('totalPortfolio', lang)}</span>
-                  <span className="font-semibold" style={{ color: 'var(--text-main)' }}>${p.total_usdt.toLocaleString()}</span>
-                </div>
-                <div className="flex flex-col">
-                  <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{tr('mode', lang)}</span>
-                  <span className="font-semibold" style={{ color: 'var(--text-main)' }}>{p.mode}</span>
-                </div>
-                <div className="flex flex-col">
-                  <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{tr('assetCount', lang)}</span>
-                  <span className="font-semibold" style={{ color: 'var(--text-main)' }}>{p.assets.length}</span>
-                </div>
-              </div>
-
-              {/* Asset allocation bar */}
-              <div>
-                <div className="flex rounded-full overflow-hidden h-2 w-full gap-px">
-                  {p.assets.map((a: any, i: number) => (
-                    <div
-                      key={a.symbol}
-                      style={{ width: `${a.allocation_pct}%`, background: COLORS[i % COLORS.length] }}
-                      title={`${a.symbol}: ${a.allocation_pct}%`}
-                    />
-                  ))}
-                </div>
-                <div className="flex flex-wrap gap-2 mt-2">
-                  {p.assets.map((a: any, i: number) => (
-                    <span key={a.symbol} className="flex items-center gap-1 text-xs" style={{ color: 'var(--text-muted)' }}>
-                      <span className="w-2 h-2 rounded-full inline-block" style={{ background: COLORS[i % COLORS.length] }} />
-                      {a.symbol} {a.allocation_pct}%
-                    </span>
-                  ))}
-                </div>
-              </div>
-
-              {/* Actions */}
-              <div className="flex gap-2 mt-auto pt-2 border-t" style={{ borderColor: 'var(--border)' }}>
-                {!p.active && (
-                  <button
-                    onClick={() => handleActivate(p.id)}
-                    disabled={activating === p.id}
-                    className="btn-primary flex-1 text-sm py-1.5"
-                  >
-                    {activating === p.id ? '⏳' : '▶️'} {tr('activatePortfolio', lang)}
-                  </button>
-                )}
-                {p.active && (
-                  <div className="flex-1 text-center text-sm py-1.5 rounded-xl font-semibold text-brand" style={{ background: 'var(--bg-input)' }}>
-                    ✅ {tr('currentlyActive', lang)}
-                  </div>
-                )}
-                {confirmDelete === p.id ? (
-                  <div className="flex gap-1">
-                    <button
-                      onClick={() => handleDelete(p.id)}
-                      disabled={deleting === p.id}
-                      className="btn-danger text-xs px-3 py-1.5"
-                    >
-                      {deleting === p.id ? '⏳' : tr('confirmDelete', lang)}
-                    </button>
-                    <button
-                      onClick={() => setConfirmDelete(null)}
-                      className="btn-secondary text-xs px-3 py-1.5"
-                    >
-                      ✖
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    onClick={() => setConfirmDelete(p.id)}
-                    disabled={p.active}
-                    className="btn-secondary text-sm px-3 py-1.5 disabled:opacity-30"
-                    title={p.active ? tr('cantDeleteActive', lang) : tr('deletePortfolio', lang)}
-                  >
-                    🗑️
-                  </button>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </>
   );
 }
