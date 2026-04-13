@@ -8,9 +8,10 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    // Dark class is toggled client-side via ThemeProvider in page.tsx
     <html lang="ar" dir="rtl" suppressHydrationWarning>
-      <body>{children}</body>
+      <body>
+        {children}
+      </body>
     </html>
   );
 }

@@ -11,6 +11,7 @@ import Notifications from '../components/Notifications';
 import { ToastProvider } from '../components/Toast';
 import { getBotStatus } from '../lib/api';
 import { Lang } from '../lib/i18n';
+import ErrorBoundary from '../components/ErrorBoundary';
 
 type Tab = 'dashboard' | 'portfolios' | 'create' | 'settings' | 'notifications';
 
@@ -54,6 +55,7 @@ export default function App() {
   }, []);
 
   return (
+    <ErrorBoundary>
     <ToastProvider>
       <div className="min-h-screen" style={{ background: 'var(--bg-base)' }}>
         <Sidebar active={tab} onNav={setTab} botRunning={botRunning} lang={lang} />
@@ -76,5 +78,6 @@ export default function App() {
         </div>
       </div>
     </ToastProvider>
+    </ErrorBoundary>
   );
 }
