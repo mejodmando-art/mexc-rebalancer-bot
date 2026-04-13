@@ -245,14 +245,27 @@ export default function Settings({ lang, onSaved }: Props) {
       {/* Rebalance mode */}
       <div className="card">
         <div className="label mb-3">{tr('rebalanceMode', lang)}</div>
-        <div className="grid grid-cols-3 gap-2 mb-4">
-          {(['proportional', 'timed', 'unbalanced'] as const).map(m => (
-            <button key={m} onClick={() => setRebalMode(m)}
-              className={`p-3 rounded-xl border-2 text-center transition-colors ${rebalMode === m ? 'border-brand bg-brand/10' : 'border-gray-700 hover:border-gray-600'}`}>
-              <div className="text-lg">{m === 'proportional' ? '📊' : m === 'timed' ? '⏰' : '🔓'}</div>
-              <div className="text-xs font-semibold mt-1" style={{ color: 'var(--text-main)' }}>
-                {tr(m === 'proportional' ? 'proportional' : m === 'timed' ? 'timed' : 'manual', lang)}
-              </div>
+        {/* Tab strip */}
+        <div className="flex rounded-xl overflow-hidden border mb-4" style={{ borderColor: 'var(--border)' }}>
+          {([
+            { key: 'proportional', icon: '📊', labelKey: 'proportional' },
+            { key: 'timed',        icon: '⏰', labelKey: 'timed' },
+            { key: 'unbalanced',   icon: '🔓', labelKey: 'manual' },
+          ] as const).map((m, i, arr) => (
+            <button
+              key={m.key}
+              onClick={() => setRebalMode(m.key)}
+              className={`flex-1 flex flex-col items-center justify-center gap-1 py-3 text-xs font-semibold transition-all duration-150
+                ${i < arr.length - 1 ? 'border-e' : ''}
+                ${rebalMode === m.key ? 'text-black' : 'hover:opacity-80'}`}
+              style={{
+                background: rebalMode === m.key ? 'var(--brand)' : 'var(--bg-input)',
+                borderColor: 'var(--border)',
+                color: rebalMode === m.key ? '#000' : 'var(--text-muted)',
+              }}
+            >
+              <span className="text-lg leading-none">{m.icon}</span>
+              <span>{tr(m.labelKey, lang)}</span>
             </button>
           ))}
         </div>

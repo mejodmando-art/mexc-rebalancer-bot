@@ -5,6 +5,7 @@ import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend,
   LineChart, Line, XAxis, YAxis, CartesianGrid,
 } from 'recharts';
+import { RefreshCw } from 'lucide-react';
 import {
   getStatus, getHistory, getSnapshots, getBotStatus,
   startBot, stopBot, triggerRebalance, cancelRebalance,
@@ -24,6 +25,7 @@ export default function Dashboard({ lang }: Props) {
   const [snapshots, setSnapshots] = useState<any[]>([]);
   const [botSt, setBotSt]         = useState<any>(null);
   const [loading, setLoading]     = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [rebalancing, setRebalancing] = useState(false);
   const [cancelJobId, setCancelJobId] = useState<string | null>(null);
   const [cancelCountdown, setCancelCountdown] = useState(0);
@@ -196,10 +198,17 @@ export default function Dashboard({ lang }: Props) {
     }
   };
 
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await load();
+    setRefreshing(false);
+  };
+
   if (loading) return (
     <div className="flex items-center justify-center h-64">
-      <div className="animate-pulse text-lg" style={{ color: 'var(--text-muted)' }}>
-        {tr('loadingData', lang)}
+      <div className="flex flex-col items-center gap-3">
+        <RefreshCw size={28} className="spin" style={{ color: 'var(--brand)' }} />
+        <span className="text-sm" style={{ color: 'var(--text-muted)' }}>{tr('loadingData', lang)}</span>
       </div>
     </div>
   );
@@ -221,35 +230,44 @@ export default function Dashboard({ lang }: Props) {
   };
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4 fade-in">
       {/* Top bar */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-main)' }}>
-            {status?.bot_name ?? 'المحفظة الذكية'}
-          </h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl sm:text-2xl font-bold" style={{ color: 'var(--text-main)' }}>
+              {status?.bot_name ?? 'المحفظة الذكية'}
+            </h1>
+            <button onClick={handleRefresh} disabled={refreshing}
+              className="p-1.5 rounded-lg transition-colors hover:opacity-70 disabled:opacity-40"
+              style={{ color: 'var(--text-muted)' }} title="تحديث">
+              <RefreshCw size={16} className={refreshing ? 'spin' : ''} />
+            </button>
+          </div>
           <div className="flex items-center gap-2 mt-1 flex-wrap">
-            <span className="badge bg-gray-800 text-gray-400">{modeLabel[status?.mode] ?? status?.mode}</span>
-            {status?.paper_trading && <span className="badge bg-yellow-900 text-yellow-400">🧪 {tr('experimental', lang)}</span>}
-            {status?.warning && <span className="badge bg-orange-900 text-orange-400">⚠️ {status.warning}</span>}
+            <span className="badge" style={{ background: 'var(--bg-input)', color: 'var(--text-muted)' }}>
+              {modeLabel[status?.mode] ?? status?.mode}
+            </span>
+            {status?.paper_trading && <span className="badge bg-yellow-900/60 text-yellow-400">🧪 {tr('experimental', lang)}</span>}
+            {status?.warning && <span className="badge bg-orange-900/60 text-orange-400">⚠️ {status.warning}</span>}
           </div>
         </div>
         <div className="flex gap-2 flex-wrap">
           <button onClick={handleBotToggle} className={botSt?.running ? 'btn-danger' : 'btn-secondary'}>
-            {botSt?.running ? '⏸️ ' + tr('pause', lang) : '▶️ ' + tr('start', lang)}
+            {botSt?.running ? '⏸ ' + tr('pause', lang) : '▶ ' + tr('start', lang)}
           </button>
           <button onClick={handleRebalance} disabled={rebalancing} className="btn-primary">
-            {rebalancing ? '⏳ ' + tr('loading', lang) : '🔄 ' + tr('rebalanceNow', lang)}
+            {rebalancing ? '⏳' : '⚖️'} {tr('rebalanceNow', lang)}
           </button>
           {cancelJobId && cancelCountdown > 0 && (
-            <button onClick={handleCancel} className="btn-cancel flex items-center gap-1">
+            <button onClick={handleCancel} className="btn-cancel">
               ✖ {tr('cancelRebalance', lang)} ({cancelCountdown}s)
             </button>
           )}
-          <a href={exportExcelUrl()} className="btn-secondary text-sm flex items-center gap-1">
+          <a href={exportExcelUrl()} className="btn-secondary text-sm hidden sm:inline-flex">
             📊 {tr('exportExcel', lang)}
           </a>
-          <a href={exportCsvUrl()} className="btn-secondary text-sm flex items-center gap-1">
+          <a href={exportCsvUrl()} className="btn-secondary text-sm hidden sm:inline-flex">
             ⬇️ {tr('exportCsv', lang)}
           </a>
         </div>
@@ -262,34 +280,42 @@ export default function Dashboard({ lang }: Props) {
       )}
 
       {/* KPI cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="card">
-          <div className="label">{tr('totalPortfolio', lang)}</div>
-          <div className="text-2xl font-bold" style={{ color: 'var(--text-main)' }}>
-            ${(status?.total_usdt ?? 0).toFixed(2)}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {[
+          {
+            label: tr('totalPortfolio', lang),
+            value: `$${(status?.total_usdt ?? 0).toFixed(2)}`,
+            sub: 'USDT',
+            color: 'var(--text-main)',
+          },
+          {
+            label: tr('profitLoss', lang),
+            value: `${pnlPos ? '+' : ''}${(pnl.pnl_usdt ?? 0).toFixed(2)}$`,
+            sub: `${pnlPos ? '+' : ''}${(pnl.pnl_pct ?? 0).toFixed(2)}%`,
+            color: pnlPos ? '#4ade80' : '#f87171',
+          },
+          {
+            label: tr('lastRebalance', lang),
+            value: status?.last_rebalance ? status.last_rebalance.slice(0, 16) : tr('notYet', lang),
+            sub: '',
+            color: 'var(--text-main)',
+            small: true,
+          },
+          {
+            label: tr('assetCount', lang),
+            value: String(assets.length),
+            sub: tr('currency', lang),
+            color: 'var(--text-main)',
+          },
+        ].map((k, i) => (
+          <div key={i} className="card">
+            <div className="label">{k.label}</div>
+            <div className={`font-bold mt-1 ${k.small ? 'text-sm' : 'stat-value'}`} style={{ color: k.color }}>
+              {k.value}
+            </div>
+            {k.sub && <div className="text-xs mt-0.5" style={{ color: k.color === 'var(--text-main)' ? 'var(--text-muted)' : k.color }}>{k.sub}</div>}
           </div>
-          <div className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>USDT</div>
-        </div>
-        <div className="card">
-          <div className="label">{tr('profitLoss', lang)}</div>
-          <div className={`text-2xl font-bold ${pnlPos ? 'text-green-400' : 'text-red-400'}`}>
-            {pnlPos ? '+' : ''}{(pnl.pnl_usdt ?? 0).toFixed(2)} $
-          </div>
-          <div className={`text-xs mt-1 ${pnlPos ? 'text-green-500' : 'text-red-500'}`}>
-            {pnlPos ? '+' : ''}{(pnl.pnl_pct ?? 0).toFixed(2)}%
-          </div>
-        </div>
-        <div className="card">
-          <div className="label">{tr('lastRebalance', lang)}</div>
-          <div className="text-sm font-semibold" style={{ color: 'var(--text-main)' }}>
-            {status?.last_rebalance ?? tr('notYet', lang)}
-          </div>
-        </div>
-        <div className="card">
-          <div className="label">{tr('assetCount', lang)}</div>
-          <div className="text-2xl font-bold" style={{ color: 'var(--text-main)' }}>{assets.length}</div>
-          <div className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>{tr('currency', lang)}</div>
-        </div>
+        ))}
       </div>
 
       {/* Charts */}
@@ -417,62 +443,63 @@ export default function Dashboard({ lang }: Props) {
                 </div>
               </div>
             ) : (
-              /* Read-only table */
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+              /* Read-only table — card view on mobile */
+              <div className="overflow-x-auto -mx-1">
+                <table className="w-full text-sm mobile-card-table">
                   <thead>
                     <tr className="text-xs border-b" style={{ color: 'var(--text-muted)', borderColor: 'var(--border)' }}>
-                      <th className="text-right py-2 px-4">{tr('coin', lang)}</th>
-                      <th className="text-right py-2 px-4">{tr('target', lang)}</th>
-                      <th className="text-right py-2 px-4">{tr('current', lang)}</th>
-                      <th className="text-right py-2 px-4">{tr('diff', lang)}</th>
-                      <th className="text-right py-2 px-4">{tr('valueUsdt', lang)}</th>
-                      <th className="text-right py-2 px-4">{tr('balancePrice', lang)}</th>
+                      <th className="text-start py-2 px-3 font-semibold">{tr('coin', lang)}</th>
+                      <th className="text-start py-2 px-3 font-semibold">{tr('target', lang)}</th>
+                      <th className="text-start py-2 px-3 font-semibold">{tr('current', lang)}</th>
+                      <th className="text-start py-2 px-3 font-semibold">{tr('diff', lang)}</th>
+                      <th className="text-start py-2 px-3 font-semibold">{tr('valueUsdt', lang)}</th>
+                      <th className="text-start py-2 px-3 font-semibold">{tr('balancePrice', lang)}</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {assets.map((a: any) => {
-                      const dev = a.deviation;
-                      const isOver  = dev > 0;
-                      const absdev  = Math.abs(dev);
+                    {assets.map((a: any, idx: number) => {
+                      const dev    = a.deviation ?? 0;
+                      const isOver = dev > 0;
+                      const absdev = Math.abs(dev);
+                      const color  = COLORS[idx % COLORS.length];
                       return (
-                        <tr key={a.symbol} className="border-b hover:opacity-80 transition-colors"
+                        <tr key={a.symbol} className="border-b transition-colors"
                           style={{ borderColor: 'var(--border)' }}>
-                          <td className="py-3 px-4">
+                          <td className="py-3 px-3" data-label={tr('coin', lang)}>
                             <div className="flex items-center gap-2">
-                              <div className="w-7 h-7 rounded-full bg-brand/20 flex items-center justify-center text-brand text-xs font-bold">
+                              <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
+                                   style={{ background: color + '30', color }}>
                                 {a.symbol.slice(0, 2)}
                               </div>
-                              <span className="font-semibold" style={{ color: 'var(--text-main)' }}>{a.symbol}</span>
+                              <span className="font-semibold text-sm" style={{ color: 'var(--text-main)' }}>{a.symbol}</span>
                             </div>
                           </td>
-                          <td className="py-3 px-4" style={{ color: 'var(--text-muted)' }}>{a.target_pct.toFixed(1)}%</td>
-                          <td className="py-3 px-4">
-                            {hasLiveData ? (
-                              <div className="flex items-center gap-2">
-                                <div className="flex-1 rounded-full h-1.5 w-16" style={{ background: 'var(--bg-input)' }}>
-                                  <div className="h-1.5 rounded-full bg-brand" style={{ width: `${Math.min(a.actual_pct, 100)}%` }} />
-                                </div>
-                                <span className="text-sm" style={{ color: 'var(--text-main)' }}>{a.actual_pct.toFixed(1)}%</span>
-                              </div>
-                            ) : (
-                              <span className="text-xs" style={{ color: 'var(--text-muted)' }}>—</span>
-                            )}
+                          <td className="py-3 px-3 text-sm" data-label={tr('target', lang)} style={{ color: 'var(--text-muted)' }}>
+                            {a.target_pct.toFixed(1)}%
                           </td>
-                          <td className="py-3 px-4">
+                          <td className="py-3 px-3" data-label={tr('current', lang)}>
                             {hasLiveData ? (
-                              <span className={`badge ${absdev < 1 ? 'bg-gray-800 text-gray-400' : isOver ? 'bg-red-900/60 text-red-400' : 'bg-green-900/60 text-green-400'}`}>
+                              <div className="flex items-center gap-2 min-w-[80px]">
+                                <div className="flex-1 rounded-full h-1.5" style={{ background: 'var(--bg-input)', minWidth: 40 }}>
+                                  <div className="h-1.5 rounded-full transition-all" style={{ width: `${Math.min(a.actual_pct, 100)}%`, background: color }} />
+                                </div>
+                                <span className="text-sm font-medium" style={{ color: 'var(--text-main)' }}>{a.actual_pct.toFixed(1)}%</span>
+                              </div>
+                            ) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
+                          </td>
+                          <td className="py-3 px-3" data-label={tr('diff', lang)}>
+                            {hasLiveData ? (
+                              <span className={`badge text-xs ${absdev < 1 ? '' : isOver ? 'bg-red-900/40 text-red-400' : 'bg-green-900/40 text-green-400'}`}
+                                    style={absdev < 1 ? { background: 'var(--bg-input)', color: 'var(--text-muted)' } : {}}>
                                 {isOver ? '+' : ''}{dev.toFixed(1)}%
                               </span>
-                            ) : (
-                              <span className="text-xs" style={{ color: 'var(--text-muted)' }}>—</span>
-                            )}
+                            ) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                           </td>
-                          <td className="py-3 px-4" style={{ color: 'var(--text-muted)' }}>
+                          <td className="py-3 px-3 text-sm font-medium" data-label={tr('valueUsdt', lang)} style={{ color: 'var(--text-main)' }}>
                             {hasLiveData ? `$${a.value_usdt.toFixed(2)}` : '—'}
                           </td>
-                          <td className="py-3 px-4 text-xs" style={{ color: 'var(--text-muted)' }}>
-                            {hasLiveData ? `${a.balance.toFixed(6)} @ $${a.price.toFixed(4)}` : '—'}
+                          <td className="py-3 px-3 text-xs" data-label={tr('balancePrice', lang)} style={{ color: 'var(--text-muted)' }}>
+                            {hasLiveData ? `${a.balance.toFixed(5)} @ $${a.price.toFixed(3)}` : '—'}
                           </td>
                         </tr>
                       );

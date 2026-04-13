@@ -1,10 +1,12 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* ── CSS variables for light/dark theming ─────────────────────────────── */
+/* ── CSS variables ─────────────────────────────────────────────────────── */
 :root {
-  --bg-base:    #f9fafb;
+  --bg-base:    #f0f2f5;
   --bg-card:    #ffffff;
   --bg-input:   #f3f4f6;
   --bg-nav:     #ffffff;
@@ -12,70 +14,155 @@
   --text-main:  #111827;
   --text-muted: #6b7280;
   --text-label: #374151;
+  --brand:      #f0b90b;
+  --brand-dark: #d4a009;
+  --shadow:     0 2px 12px rgba(0,0,0,0.07);
   color-scheme: light;
 }
 
 .dark {
-  --bg-base:    #030712;
-  --bg-card:    #111827;
-  --bg-input:   #1f2937;
-  --bg-nav:     #111827;
-  --border:     #1f2937;
-  --text-main:  #f9fafb;
-  --text-muted: #6b7280;
-  --text-label: #9ca3af;
+  --bg-base:    #0d1117;
+  --bg-card:    #161b22;
+  --bg-input:   #21262d;
+  --bg-nav:     #161b22;
+  --border:     #30363d;
+  --text-main:  #e6edf3;
+  --text-muted: #7d8590;
+  --text-label: #8b949e;
+  --shadow:     0 2px 12px rgba(0,0,0,0.4);
   color-scheme: dark;
 }
 
+* { box-sizing: border-box; }
+
 body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
   background-color: var(--bg-base);
   color: var(--text-main);
-  @apply font-sans transition-colors duration-200;
+  font-size: 15px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  transition: background-color 0.2s, color 0.2s;
 }
 
 @layer components {
   .btn-primary {
-    @apply bg-brand text-black font-bold px-4 py-2 rounded-xl
-           hover:bg-brand-dark transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply inline-flex items-center justify-center gap-2 font-semibold rounded-xl px-5
+           transition-all duration-150 active:scale-95
+           disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100;
+    min-height: 44px;
+    background-color: var(--brand);
+    color: #000;
+    font-size: 14px;
   }
+  .btn-primary:hover:not(:disabled) { background-color: var(--brand-dark); }
+
   .btn-secondary {
-    @apply font-semibold px-4 py-2 rounded-xl border transition-colors
-           disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply inline-flex items-center justify-center gap-2 font-semibold rounded-xl px-5 border
+           transition-all duration-150 active:scale-95
+           disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100;
+    min-height: 44px;
     background-color: var(--bg-input);
     border-color: var(--border);
     color: var(--text-main);
+    font-size: 14px;
   }
-  .btn-secondary:hover {
-    filter: brightness(1.1);
-  }
+  .btn-secondary:hover:not(:disabled) { filter: brightness(1.08); }
+
   .btn-danger {
-    @apply bg-red-600 text-white font-semibold px-4 py-2 rounded-xl
-           hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply inline-flex items-center justify-center gap-2 font-semibold rounded-xl px-5
+           bg-red-600 text-white hover:bg-red-700 transition-all duration-150 active:scale-95
+           disabled:opacity-40 disabled:cursor-not-allowed;
+    min-height: 44px;
+    font-size: 14px;
   }
+
   .btn-cancel {
-    @apply bg-orange-600 text-white font-semibold px-4 py-2 rounded-xl
-           hover:bg-orange-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply inline-flex items-center justify-center gap-2 font-semibold rounded-xl px-5
+           bg-orange-600 text-white hover:bg-orange-700 transition-all duration-150 active:scale-95
+           disabled:opacity-40 disabled:cursor-not-allowed;
+    min-height: 44px;
+    font-size: 14px;
   }
+
   .input {
-    @apply w-full rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-brand border transition-colors;
+    @apply w-full rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400/40 border transition-colors duration-150;
+    min-height: 44px;
     background-color: var(--bg-input);
     border-color: var(--border);
     color: var(--text-main);
   }
+
   .label {
-    @apply block text-xs mb-1 font-medium;
+    @apply block text-xs font-semibold mb-1.5 uppercase tracking-wide;
     color: var(--text-label);
   }
+
   .card {
-    @apply rounded-2xl p-5 border transition-colors;
+    @apply rounded-2xl p-4 sm:p-5 border transition-colors duration-150;
     background-color: var(--bg-card);
     border-color: var(--border);
+    box-shadow: var(--shadow);
   }
+
   .badge {
-    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold;
+    @apply inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold;
   }
+
   .nav-bg {
     background-color: var(--bg-nav);
     border-color: var(--border);
+  }
+
+  .stat-value {
+    @apply font-bold;
+    font-size: clamp(1.2rem, 4vw, 1.75rem);
+    line-height: 1.2;
+  }
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.fade-in { animation: fadeIn 0.22s ease-out; }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+.spin { animation: spin 0.8s linear infinite; }
+
+/* Mobile card table */
+@media (max-width: 639px) {
+  .mobile-card-table thead { display: none; }
+  .mobile-card-table tbody tr {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    padding: 12px;
+    border-radius: 14px;
+    margin-bottom: 10px;
+    background-color: var(--bg-input);
+    border: 1px solid var(--border);
+  }
+  .mobile-card-table tbody td {
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+    border: none;
+    font-size: 13px;
+  }
+  .mobile-card-table tbody td::before {
+    content: attr(data-label);
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+    margin-bottom: 2px;
   }
 }

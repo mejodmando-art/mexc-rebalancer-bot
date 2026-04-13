@@ -70,7 +70,7 @@ export default function App() {
         dark={dark}
         onThemeToggle={toggleTheme}
       />
-      <main className="max-w-7xl mx-auto px-4 py-6">
+      <main className="max-w-7xl mx-auto px-4 py-6 pb-24 sm:pb-6 fade-in">
         {tab === 'dashboard'     && <Dashboard     lang={lang} />}
         {tab === 'portfolios'    && <Portfolios    lang={lang} onActivated={() => setTab('dashboard')} />}
         {tab === 'create'        && <CreateBot     lang={lang} onCreated={() => setTab('portfolios')} />}
