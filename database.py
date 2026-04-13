@@ -137,6 +137,21 @@ def init_db() -> None:
             cur = conn.cursor()
             for stmt in stmts:
                 cur.execute(stmt)
+            # Migration: add missing columns to existing tables
+            migrations = [
+                "ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS ts_created TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS name TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS config_json TEXT NOT NULL DEFAULT '{}'",
+                "ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS active INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE rebalance_history ADD COLUMN IF NOT EXISTS portfolio_id INTEGER NOT NULL DEFAULT 1",
+                "ALTER TABLE rebalance_history ADD COLUMN IF NOT EXISTS paper INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE portfolio_snapshots ADD COLUMN IF NOT EXISTS portfolio_id INTEGER NOT NULL DEFAULT 1",
+            ]
+            for m in migrations:
+                try:
+                    cur.execute(m)
+                except Exception as e:
+                    log.debug("Migration skipped (%s): %s", m[:50], e)
         log.info("PostgreSQL tables ready (Supabase)")
     else:
         with _conn() as conn:
