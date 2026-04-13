@@ -237,6 +237,17 @@ def get_portfolio_value(client: MEXCClient, assets: list) -> dict:
     total = 0.0
     invalid_symbols = []
 
+    # Always include free USDT balance in the total so the rebalancer
+    # knows how much it can spend when buying underweight assets.
+    asset_symbols = {a["symbol"].upper() for a in assets}
+    if "USDT" not in asset_symbols:
+        try:
+            usdt_free = client.get_asset_balance("USDT")
+            total += usdt_free
+            log.info("Free USDT (not in portfolio targets): %.2f", usdt_free)
+        except Exception as e:
+            log.warning("Could not fetch free USDT balance: %s", e)
+
     for a in assets:
         sym = a["symbol"]
         try:
@@ -271,6 +282,7 @@ def get_portfolio_value(client: MEXCClient, assets: list) -> dict:
     if invalid_symbols:
         log.warning("Invalid symbols (not found on MEXC): %s", invalid_symbols)
 
+    log.info("Portfolio total (incl. free USDT): %.2f USDT", total)
     for r in result:
         r["actual_pct"] = (r["value_usdt"] / total * 100) if total > 0 else 0.0
 
