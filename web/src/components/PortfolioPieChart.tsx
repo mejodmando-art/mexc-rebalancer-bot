@@ -1,20 +1,20 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 
 interface Asset { symbol: string; current_pct: number; value_usdt: number; }
 interface Props { assets: Asset[]; totalUsdt: number; loading?: boolean; lang?: 'ar' | 'en'; }
 
 const PALETTE = [
-  '#00D4AA','#00A88F','#58A6FF','#3B82F6',
-  '#A78BFA','#8B5CF6','#F472B6','#EC4899',
-  '#FB923C','#F97316','#FACC15','#EAB308',
+  '#00D4AA','#58A6FF','#A78BFA','#F472B6',
+  '#FB923C','#FACC15','#00A88F','#3B82F6',
+  '#8B5CF6','#EC4899','#F97316','#EAB308',
 ];
 
 function PieChartSkeleton() {
   return (
     <div className="flex flex-col items-center gap-4">
-      <div className="skeleton w-48 h-48 rounded-full" />
+      <div className="skeleton w-44 h-44 rounded-full" />
       <div className="flex flex-wrap gap-2 justify-center">
         {[1,2,3,4].map(i => <div key={i} className="skeleton h-5 w-16 rounded-full" />)}
       </div>
@@ -22,95 +22,108 @@ function PieChartSkeleton() {
   );
 }
 
-// Lazy-loaded chart to avoid SSR/hydration issues with Recharts
-function PieChartInner({ assets, totalUsdt, lang }: Omit<Props, 'loading'>) {
-  const [activeIndex, setActiveIndex] = useState<number | null>(null);
-  const [RC, setRC] = useState<any>(null);
+// Pure SVG donut chart — no external dependencies
+function DonutChart({ data, total, lang }: { data: any[]; total: number; lang: string }) {
+  const [hovered, setHovered] = useState<number | null>(null);
+  const size = 200;
+  const cx = size / 2;
+  const cy = size / 2;
+  const outerR = 80;
+  const innerR = 52;
 
-  useEffect(() => {
-    // Load recharts only on client after mount
-    import('recharts').then(mod => setRC(mod));
-  }, []);
+  // Build arc paths
+  let cumAngle = -90; // start from top
+  const slices = data.map((d, i) => {
+    const angle = (d.current_pct / 100) * 360;
+    const startAngle = cumAngle;
+    const endAngle = cumAngle + angle;
+    cumAngle += angle;
 
-  if (!RC) return <PieChartSkeleton />;
+    const toRad = (deg: number) => (deg * Math.PI) / 180;
+    const x1 = cx + outerR * Math.cos(toRad(startAngle));
+    const y1 = cy + outerR * Math.sin(toRad(startAngle));
+    const x2 = cx + outerR * Math.cos(toRad(endAngle));
+    const y2 = cy + outerR * Math.sin(toRad(endAngle));
+    const ix1 = cx + innerR * Math.cos(toRad(endAngle));
+    const iy1 = cy + innerR * Math.sin(toRad(endAngle));
+    const ix2 = cx + innerR * Math.cos(toRad(startAngle));
+    const iy2 = cy + innerR * Math.sin(toRad(startAngle));
+    const largeArc = angle > 180 ? 1 : 0;
 
-  const { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Sector } = RC;
+    const path = [
+      `M ${x1} ${y1}`,
+      `A ${outerR} ${outerR} 0 ${largeArc} 1 ${x2} ${y2}`,
+      `L ${ix1} ${iy1}`,
+      `A ${innerR} ${innerR} 0 ${largeArc} 0 ${ix2} ${iy2}`,
+      'Z',
+    ].join(' ');
 
-  const data = assets.map((a, i) => ({ ...a, fill: PALETTE[i % PALETTE.length] }));
+    return { ...d, path, color: PALETTE[i % PALETTE.length] };
+  });
 
-  const renderActiveShape = (props: any) => {
-    const { cx, cy, innerRadius, outerRadius, startAngle, endAngle, fill } = props;
-    return (
-      <g>
-        <Sector cx={cx} cy={cy} innerRadius={innerRadius - 4} outerRadius={outerRadius + 8}
-                startAngle={startAngle} endAngle={endAngle} fill={fill} opacity={0.95} />
-      </g>
-    );
-  };
-
-  const CustomTooltip = ({ active, payload }: any) => {
-    if (!active || !payload?.length) return null;
-    const d = payload[0].payload;
-    return (
-      <div className="card p-3 text-sm" style={{ minWidth: 140 }}>
-        <div className="flex items-center gap-2 mb-1">
-          <span className="w-2.5 h-2.5 rounded-full" style={{ background: d.fill }} />
-          <span className="font-bold" style={{ color: 'var(--text-main)' }}>{d.symbol}</span>
-        </div>
-        <div className="num font-semibold" style={{ color: 'var(--accent)' }}>{d.current_pct.toFixed(2)}%</div>
-        <div className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
-          ${d.value_usdt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-        </div>
-      </div>
-    );
-  };
+  const fmt = (n: number) => n >= 1000 ? `${(n/1000).toFixed(1)}K` : n.toFixed(0);
 
   return (
     <div className="flex flex-col items-center gap-4">
-      <div className="relative w-full" style={{ height: 220 }}>
-        <ResponsiveContainer width="100%" height="100%">
-          <PieChart>
-            <Pie
-              data={data} cx="50%" cy="50%"
-              innerRadius={60} outerRadius={90} paddingAngle={2}
-              dataKey="current_pct"
-              activeIndex={activeIndex ?? undefined}
-              activeShape={renderActiveShape}
-              onMouseEnter={(_: any, i: number) => setActiveIndex(i)}
-              onMouseLeave={() => setActiveIndex(null)}
-              animationBegin={0} animationDuration={800}
-            >
-              {data.map((d, i) => (
-                <Cell key={i} fill={d.fill} stroke="transparent"
-                      opacity={activeIndex === null || activeIndex === i ? 1 : 0.6} />
-              ))}
-            </Pie>
-            <Tooltip content={<CustomTooltip />} />
-          </PieChart>
-        </ResponsiveContainer>
+      <div className="relative">
+        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+          {slices.map((s, i) => (
+            <path
+              key={i}
+              d={s.path}
+              fill={s.color}
+              opacity={hovered === null || hovered === i ? 1 : 0.5}
+              style={{ cursor: 'pointer', transition: 'opacity 0.2s' }}
+              onMouseEnter={() => setHovered(i)}
+              onMouseLeave={() => setHovered(null)}
+            />
+          ))}
+          {/* Gap between slices */}
+          <circle cx={cx} cy={cy} r={innerR} fill="var(--bg-card)" />
+        </svg>
+
+        {/* Center text */}
         <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-          <div className="text-[10px] font-semibold uppercase tracking-wider mb-0.5" style={{ color: 'var(--text-muted)' }}>
-            {lang === 'ar' ? 'الإجمالي' : 'Total'}
-          </div>
-          <div className="num font-bold text-lg leading-tight" style={{ color: 'var(--text-main)' }}>
-            ${totalUsdt >= 1000 ? `${(totalUsdt / 1000).toFixed(1)}K` : totalUsdt.toFixed(0)}
-          </div>
-          <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>USDT</div>
+          {hovered !== null ? (
+            <>
+              <div className="text-[10px] font-bold uppercase tracking-wider" style={{ color: slices[hovered]?.color }}>
+                {slices[hovered]?.symbol}
+              </div>
+              <div className="num font-bold text-base" style={{ color: 'var(--text-main)' }}>
+                {slices[hovered]?.current_pct.toFixed(1)}%
+              </div>
+              <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                ${fmt(slices[hovered]?.value_usdt)}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="text-[10px] font-semibold uppercase tracking-wider mb-0.5" style={{ color: 'var(--text-muted)' }}>
+                {lang === 'ar' ? 'الإجمالي' : 'Total'}
+              </div>
+              <div className="num font-bold text-lg leading-tight" style={{ color: 'var(--text-main)' }}>
+                ${fmt(total)}
+              </div>
+              <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>USDT</div>
+            </>
+          )}
         </div>
       </div>
+
+      {/* Legend */}
       <div className="flex flex-wrap gap-2 justify-center w-full">
-        {data.map((d, i) => (
+        {slices.map((d, i) => (
           <div key={d.symbol}
             className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold cursor-pointer transition-all"
             style={{
-              background: activeIndex === i ? `${d.fill}22` : 'var(--bg-input)',
-              border: `1px solid ${activeIndex === i ? d.fill : 'var(--border)'}`,
-              color: activeIndex === i ? d.fill : 'var(--text-muted)',
+              background: hovered === i ? `${d.color}22` : 'var(--bg-input)',
+              border: `1px solid ${hovered === i ? d.color : 'var(--border)'}`,
+              color: hovered === i ? d.color : 'var(--text-muted)',
             }}
-            onMouseEnter={() => setActiveIndex(i)}
-            onMouseLeave={() => setActiveIndex(null)}
+            onMouseEnter={() => setHovered(i)}
+            onMouseLeave={() => setHovered(null)}
           >
-            <span className="w-2 h-2 rounded-full" style={{ background: d.fill }} />
+            <span className="w-2 h-2 rounded-full" style={{ background: d.color }} />
             {d.symbol}
             <span className="num">{d.current_pct.toFixed(1)}%</span>
           </div>
@@ -129,5 +142,5 @@ export default function PortfolioPieChart({ assets, totalUsdt, loading, lang = '
       </div>
     );
   }
-  return <PieChartInner assets={assets} totalUsdt={totalUsdt} lang={lang} />;
+  return <DonutChart data={assets} total={totalUsdt} lang={lang} />;
 }
