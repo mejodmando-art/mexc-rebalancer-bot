@@ -1,25 +1,14 @@
 'use client';
 
-import { motion } from 'framer-motion';
 import { Download, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import { exportCsvUrl } from '../lib/api';
 import { Lang, tr } from '../lib/i18n';
 
 interface Asset {
-  symbol: string;
-  target_pct: number;
-  current_pct: number;
-  diff_pct: number;
-  value_usdt: number;
-  balance: number;
-  price_usdt: number;
+  symbol: string; target_pct: number; current_pct: number;
+  diff_pct: number; value_usdt: number; balance: number; price_usdt: number;
 }
-
-interface Props {
-  assets: Asset[];
-  loading?: boolean;
-  lang: Lang;
-}
+interface Props { assets: Asset[]; loading?: boolean; lang: Lang; }
 
 const PALETTE = [
   '#00D4AA','#00A88F','#58A6FF','#3B82F6',
@@ -30,23 +19,19 @@ const PALETTE = [
 function TableSkeleton() {
   return (
     <div className="space-y-2">
-      {[1,2,3,4].map(i => (
-        <div key={i} className="skeleton h-12 w-full rounded-xl" />
-      ))}
+      {[1,2,3,4].map(i => <div key={i} className="skeleton h-12 w-full rounded-xl" />)}
     </div>
   );
 }
 
 function DiffCell({ diff }: { diff: number }) {
-  const abs = Math.abs(diff);
   const isPos = diff > 0.05;
   const isNeg = diff < -0.05;
   const Icon = isPos ? TrendingUp : isNeg ? TrendingDown : Minus;
   return (
     <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold num
       ${isPos ? 'trend-up' : isNeg ? 'trend-down' : ''}`}
-      style={!isPos && !isNeg ? { color: 'var(--text-muted)', background: 'var(--bg-input)' } : {}}
-    >
+      style={!isPos && !isNeg ? { color: 'var(--text-muted)', background: 'var(--bg-input)' } : {}}>
       <Icon size={10} />
       {isPos ? '+' : ''}{diff.toFixed(2)}%
     </div>
@@ -56,13 +41,8 @@ function DiffCell({ diff }: { diff: number }) {
 function MiniBar({ pct, color }: { pct: number; color: string }) {
   return (
     <div className="w-full h-1 rounded-full mt-1" style={{ background: 'var(--border)' }}>
-      <motion.div
-        className="h-full rounded-full"
-        style={{ background: color }}
-        initial={{ width: 0 }}
-        animate={{ width: `${Math.min(pct, 100)}%` }}
-        transition={{ duration: 0.6, ease: 'easeOut' }}
-      />
+      <div className="h-full rounded-full transition-all duration-500"
+           style={{ width: `${Math.min(pct, 100)}%`, background: color }} />
     </div>
   );
 }
@@ -79,19 +59,13 @@ export default function AssetsTable({ assets, loading, lang }: Props) {
 
   return (
     <div>
-      {/* Export button */}
       <div className="flex justify-end mb-3">
-        <a
-          href={exportCsvUrl()}
-          download
-          className="btn-secondary !px-3 !min-h-[34px] !text-xs gap-1.5"
-        >
+        <a href={exportCsvUrl()} download className="btn-secondary !px-3 !min-h-[34px] !text-xs gap-1.5">
           <Download size={13} />
           {tr('exportCsv', lang)}
         </a>
       </div>
 
-      {/* Table */}
       <div className="overflow-x-auto rounded-xl" style={{ border: '1px solid var(--border)' }}>
         <table className="data-table mobile-card-table">
           <thead>
@@ -108,13 +82,7 @@ export default function AssetsTable({ assets, loading, lang }: Props) {
             {assets.map((a, i) => {
               const color = PALETTE[i % PALETTE.length];
               return (
-                <motion.tr
-                  key={a.symbol}
-                  initial={{ opacity: 0, x: -8 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: i * 0.04, duration: 0.25 }}
-                >
-                  {/* Coin */}
+                <tr key={a.symbol} className="animate-fade-up" style={{ animationDelay: `${i * 0.04}s` }}>
                   <td data-label={tr('coin', lang)}>
                     <div className="flex items-center gap-2.5">
                       <div className="w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold shrink-0"
@@ -127,36 +95,20 @@ export default function AssetsTable({ assets, loading, lang }: Props) {
                       </div>
                     </div>
                   </td>
-
-                  {/* Target */}
                   <td data-label={tr('target', lang)}>
-                    <div className="num font-semibold text-sm" style={{ color: 'var(--text-muted)' }}>
-                      {a.target_pct.toFixed(1)}%
-                    </div>
+                    <div className="num font-semibold text-sm" style={{ color: 'var(--text-muted)' }}>{a.target_pct.toFixed(1)}%</div>
                     <MiniBar pct={a.target_pct} color="var(--border)" />
                   </td>
-
-                  {/* Current */}
                   <td data-label={tr('current', lang)}>
-                    <div className="num font-semibold text-sm" style={{ color }}>
-                      {a.current_pct.toFixed(1)}%
-                    </div>
+                    <div className="num font-semibold text-sm" style={{ color }}>{a.current_pct.toFixed(1)}%</div>
                     <MiniBar pct={a.current_pct} color={color} />
                   </td>
-
-                  {/* Diff */}
-                  <td data-label={tr('diff', lang)}>
-                    <DiffCell diff={a.diff_pct} />
-                  </td>
-
-                  {/* Value */}
+                  <td data-label={tr('diff', lang)}><DiffCell diff={a.diff_pct} /></td>
                   <td data-label={tr('valueUsdt', lang)}>
                     <div className="num font-semibold text-sm" style={{ color: 'var(--text-main)' }}>
                       ${a.value_usdt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </div>
                   </td>
-
-                  {/* Balance / Price */}
                   <td data-label={tr('balancePrice', lang)}>
                     <div className="num text-xs" style={{ color: 'var(--text-main)' }}>
                       {a.balance.toLocaleString('en-US', { maximumFractionDigits: 6 })}
@@ -165,7 +117,7 @@ export default function AssetsTable({ assets, loading, lang }: Props) {
                       @${a.price_usdt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
                     </div>
                   </td>
-                </motion.tr>
+                </tr>
               );
             })}
           </tbody>

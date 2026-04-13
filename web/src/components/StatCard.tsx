@@ -1,6 +1,5 @@
 'use client';
 
-import { motion } from 'framer-motion';
 import { TrendingUp, TrendingDown, Minus } from 'lucide-react';
 
 interface StatCardProps {
@@ -27,9 +26,7 @@ export function StatCardSkeleton() {
   );
 }
 
-export default function StatCard({
-  title, value, change, changePositive, icon: Icon, iconColor, loading, delay = 0,
-}: StatCardProps) {
+export default function StatCard({ title, value, change, changePositive, icon: Icon, iconColor, loading, delay = 0 }: StatCardProps) {
   if (loading) return <StatCardSkeleton />;
 
   const isPositive = changePositive === true;
@@ -37,34 +34,23 @@ export default function StatCard({
   const TrendIcon = isPositive ? TrendingUp : isNegative ? TrendingDown : Minus;
 
   return (
-    <motion.div
-      className="card card-hover p-5 cursor-default"
-      initial={{ opacity: 0, y: 16 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay, duration: 0.3, ease: 'easeOut' }}
+    <div
+      className="card card-hover p-5 cursor-default animate-fade-up"
+      style={{ animationDelay: `${delay}s` }}
     >
       <div className="flex items-start justify-between mb-3">
         <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
           {title}
         </span>
-        <div
-          className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
-          style={{ background: `${iconColor ?? 'var(--accent)'}18` }}
-        >
+        <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
+             style={{ background: `${iconColor ?? 'var(--accent)'}18` }}>
           <Icon size={16} style={{ color: iconColor ?? 'var(--accent)' }} />
         </div>
       </div>
 
-      <motion.div
-        className="stat-value mb-2"
-        key={value}
-        initial={{ opacity: 0, y: 4 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.25 }}
-        style={{ color: 'var(--text-main)' }}
-      >
+      <div className="stat-value mb-2" style={{ color: 'var(--text-main)' }}>
         {value}
-      </motion.div>
+      </div>
 
       {change && (
         <div className={`trend-badge ${isPositive ? 'trend-up' : isNegative ? 'trend-down' : ''}`}
@@ -73,6 +59,6 @@ export default function StatCard({
           {change}
         </div>
       )}
-    </motion.div>
+    </div>
   );
 }

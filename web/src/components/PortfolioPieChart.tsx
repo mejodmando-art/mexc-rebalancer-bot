@@ -1,29 +1,15 @@
 'use client';
 
 import { useState } from 'react';
-import { motion } from 'framer-motion';
-import {
-  PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Sector,
-} from 'recharts';
+import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Sector } from 'recharts';
 
-interface Asset {
-  symbol: string;
-  current_pct: number;
-  value_usdt: number;
-}
+interface Asset { symbol: string; current_pct: number; value_usdt: number; }
+interface Props { assets: Asset[]; totalUsdt: number; loading?: boolean; lang?: 'ar' | 'en'; }
 
-interface Props {
-  assets: Asset[];
-  totalUsdt: number;
-  loading?: boolean;
-  lang?: 'ar' | 'en';
-}
-
-// Neon gradient palette
 const PALETTE = [
-  '#00D4AA', '#00A88F', '#58A6FF', '#3B82F6',
-  '#A78BFA', '#8B5CF6', '#F472B6', '#EC4899',
-  '#FB923C', '#F97316', '#FACC15', '#EAB308',
+  '#00D4AA','#00A88F','#58A6FF','#3B82F6',
+  '#A78BFA','#8B5CF6','#F472B6','#EC4899',
+  '#FB923C','#F97316','#FACC15','#EAB308',
 ];
 
 function PieChartSkeleton() {
@@ -56,9 +42,7 @@ const CustomTooltip = ({ active, payload }: any) => {
         <span className="w-2.5 h-2.5 rounded-full" style={{ background: d.fill }} />
         <span className="font-bold" style={{ color: 'var(--text-main)' }}>{d.symbol}</span>
       </div>
-      <div className="num font-semibold" style={{ color: 'var(--accent)' }}>
-        {d.current_pct.toFixed(2)}%
-      </div>
+      <div className="num font-semibold" style={{ color: 'var(--accent)' }}>{d.current_pct.toFixed(2)}%</div>
       <div className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
         ${d.value_usdt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
       </div>
@@ -81,29 +65,14 @@ export default function PortfolioPieChart({ assets, totalUsdt, loading, lang = '
   const data = assets.map((a, i) => ({ ...a, fill: PALETTE[i % PALETTE.length] }));
 
   return (
-    <motion.div
-      initial={{ opacity: 0, scale: 0.95 }}
-      animate={{ opacity: 1, scale: 1 }}
-      transition={{ duration: 0.4, ease: 'easeOut' }}
-      className="flex flex-col items-center gap-4"
-    >
+    <div className="flex flex-col items-center gap-4">
       <div className="relative w-full" style={{ height: 220 }}>
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
-            <defs>
-              {data.map((d, i) => (
-                <radialGradient key={i} id={`grad-${i}`} cx="50%" cy="50%" r="50%">
-                  <stop offset="0%" stopColor={d.fill} stopOpacity={0.9} />
-                  <stop offset="100%" stopColor={d.fill} stopOpacity={0.6} />
-                </radialGradient>
-              ))}
-            </defs>
             <Pie
               data={data}
-              cx="50%"
-              cy="50%"
-              innerRadius={60}
-              outerRadius={90}
+              cx="50%" cy="50%"
+              innerRadius={60} outerRadius={90}
               paddingAngle={2}
               dataKey="current_pct"
               activeIndex={activeIndex ?? undefined}
@@ -112,10 +81,9 @@ export default function PortfolioPieChart({ assets, totalUsdt, loading, lang = '
               onMouseLeave={() => setActiveIndex(null)}
               animationBegin={0}
               animationDuration={800}
-              animationEasing="ease-out"
             >
               {data.map((d, i) => (
-                <Cell key={i} fill={`url(#grad-${i})`} stroke="transparent" />
+                <Cell key={i} fill={d.fill} stroke="transparent" opacity={activeIndex === null || activeIndex === i ? 1 : 0.6} />
               ))}
             </Pie>
             <Tooltip content={<CustomTooltip />} />
@@ -128,9 +96,7 @@ export default function PortfolioPieChart({ assets, totalUsdt, loading, lang = '
             {lang === 'ar' ? 'الإجمالي' : 'Total'}
           </div>
           <div className="num font-bold text-lg leading-tight" style={{ color: 'var(--text-main)' }}>
-            ${totalUsdt >= 1000
-              ? `${(totalUsdt / 1000).toFixed(1)}K`
-              : totalUsdt.toFixed(0)}
+            ${totalUsdt >= 1000 ? `${(totalUsdt / 1000).toFixed(1)}K` : totalUsdt.toFixed(0)}
           </div>
           <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>USDT</div>
         </div>
@@ -139,7 +105,7 @@ export default function PortfolioPieChart({ assets, totalUsdt, loading, lang = '
       {/* Legend */}
       <div className="flex flex-wrap gap-2 justify-center w-full">
         {data.map((d, i) => (
-          <motion.div
+          <div
             key={d.symbol}
             className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold cursor-pointer transition-all"
             style={{
@@ -149,14 +115,13 @@ export default function PortfolioPieChart({ assets, totalUsdt, loading, lang = '
             }}
             onMouseEnter={() => setActiveIndex(i)}
             onMouseLeave={() => setActiveIndex(null)}
-            whileHover={{ scale: 1.05 }}
           >
             <span className="w-2 h-2 rounded-full" style={{ background: d.fill }} />
             {d.symbol}
             <span className="num">{d.current_pct.toFixed(1)}%</span>
-          </motion.div>
+          </div>
         ))}
       </div>
-    </motion.div>
+    </div>
   );
 }

@@ -1,7 +1,6 @@
 'use client';
 
-import { createContext, useContext, useState, useCallback, useRef, ReactNode } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { createContext, useContext, useState, useCallback, useRef, ReactNode, useEffect } from 'react';
 import { CheckCircle2, XCircle, Info, AlertTriangle, X } from 'lucide-react';
 
 type ToastType = 'success' | 'error' | 'info' | 'warning';
@@ -12,6 +11,7 @@ interface ToastItem {
   title: string;
   message?: string;
   duration?: number;
+  exiting?: boolean;
 }
 
 interface ToastContextValue {
@@ -65,31 +65,21 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     <ToastContext.Provider value={{ toast, success, error, info, warning }}>
       {children}
       <div className="toast-container">
-        <AnimatePresence mode="popLayout">
-          {toasts.map(t => {
-            const Icon = ICONS[t.type];
-            return (
-              <motion.div
-                key={t.id}
-                layout
-                initial={{ opacity: 0, y: 20, scale: 0.9 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: 10, scale: 0.92 }}
-                transition={{ type: 'spring', stiffness: 400, damping: 30 }}
-                className={`toast ${t.type}`}
-              >
-                <Icon size={16} style={{ color: COLORS[t.type], flexShrink: 0, marginTop: 1 }} />
-                <div className="flex-1 min-w-0">
-                  <div className="font-semibold text-[13px]" style={{ color: 'var(--text-main)' }}>{t.title}</div>
-                  {t.message && <div className="text-[12px] mt-0.5" style={{ color: 'var(--text-muted)' }}>{t.message}</div>}
-                </div>
-                <button onClick={() => remove(t.id)} className="shrink-0 opacity-50 hover:opacity-100 transition-opacity">
-                  <X size={14} />
-                </button>
-              </motion.div>
-            );
-          })}
-        </AnimatePresence>
+        {toasts.map(t => {
+          const Icon = ICONS[t.type];
+          return (
+            <div key={t.id} className={`toast ${t.type} animate-fade-up`}>
+              <Icon size={16} style={{ color: COLORS[t.type], flexShrink: 0, marginTop: 1 }} />
+              <div className="flex-1 min-w-0">
+                <div className="font-semibold text-[13px]" style={{ color: 'var(--text-main)' }}>{t.title}</div>
+                {t.message && <div className="text-[12px] mt-0.5" style={{ color: 'var(--text-muted)' }}>{t.message}</div>}
+              </div>
+              <button onClick={() => remove(t.id)} className="shrink-0 opacity-50 hover:opacity-100 transition-opacity">
+                <X size={14} />
+              </button>
+            </div>
+          );
+        })}
       </div>
     </ToastContext.Provider>
   );

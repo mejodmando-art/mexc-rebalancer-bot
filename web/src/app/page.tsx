@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
 import Navbar from '../components/Navbar';
 import Sidebar from '../components/Sidebar';
 import Dashboard from '../components/Dashboard';
@@ -21,7 +20,6 @@ export default function App() {
   const [lang,       setLang]       = useState<Lang>('ar');
   const [dark,       setDark]       = useState(true);
 
-  // Apply dark/light + RTL/LTR
   useEffect(() => {
     const html = document.documentElement;
     dark ? html.classList.add('dark') : html.classList.remove('dark');
@@ -29,7 +27,6 @@ export default function App() {
     html.setAttribute('lang', lang);
   }, [dark, lang]);
 
-  // Restore preferences
   useEffect(() => {
     const savedLang  = localStorage.getItem('lang') as Lang | null;
     const savedTheme = localStorage.getItem('theme');
@@ -49,7 +46,6 @@ export default function App() {
     localStorage.setItem('theme', next ? 'dark' : 'light');
   };
 
-  // Poll bot status
   useEffect(() => {
     const check = () => getBotStatus().then(s => setBotRunning(s.running)).catch(() => {});
     check();
@@ -60,37 +56,22 @@ export default function App() {
   return (
     <ToastProvider>
       <div className="min-h-screen" style={{ background: 'var(--bg-base)' }}>
-        {/* Sidebar — desktop only */}
         <Sidebar active={tab} onNav={setTab} botRunning={botRunning} lang={lang} />
 
-        {/* Right side: navbar + content */}
-        <div className="lg:ps-60 xl:ps-64 flex flex-col min-h-screen">
+        <div className="flex flex-col min-h-screen" style={{ paddingInlineStart: 'clamp(0px, 240px, 240px)' }}>
           <Navbar
-            active={tab}
-            onNav={setTab}
-            botRunning={botRunning}
-            lang={lang}
-            onLangToggle={toggleLang}
-            dark={dark}
-            onThemeToggle={toggleTheme}
+            active={tab} onNav={setTab} botRunning={botRunning}
+            lang={lang} onLangToggle={toggleLang}
+            dark={dark} onThemeToggle={toggleTheme}
           />
-
           <main className="flex-1 px-4 sm:px-6 py-6 pb-24 lg:pb-8 max-w-screen-xl mx-auto w-full">
-            <AnimatePresence mode="wait">
-              <motion.div
-                key={tab}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -6 }}
-                transition={{ duration: 0.2, ease: 'easeOut' }}
-              >
-                {tab === 'dashboard'     && <Dashboard     lang={lang} />}
-                {tab === 'portfolios'    && <Portfolios    lang={lang} onActivated={() => setTab('dashboard')} />}
-                {tab === 'create'        && <CreateBot     lang={lang} onCreated={() => setTab('portfolios')} />}
-                {tab === 'settings'      && <Settings      lang={lang} onSaved={() => setTab('dashboard')} />}
-                {tab === 'notifications' && <Notifications lang={lang} />}
-              </motion.div>
-            </AnimatePresence>
+            <div key={tab} className="animate-fade-up">
+              {tab === 'dashboard'     && <Dashboard     lang={lang} />}
+              {tab === 'portfolios'    && <Portfolios    lang={lang} onActivated={() => setTab('dashboard')} />}
+              {tab === 'create'        && <CreateBot     lang={lang} onCreated={() => setTab('portfolios')} />}
+              {tab === 'settings'      && <Settings      lang={lang} onSaved={() => setTab('dashboard')} />}
+              {tab === 'notifications' && <Notifications lang={lang} />}
+            </div>
           </main>
         </div>
       </div>
