@@ -383,10 +383,13 @@ def get_status():
                 "symbol": a["symbol"],
                 "balance": 0,
                 "price": 0,
+                "price_usdt": 0,
                 "value_usdt": 0,
                 "actual_pct": a["allocation_pct"],
+                "current_pct": a["allocation_pct"],
                 "target_pct": a["allocation_pct"],
                 "deviation": 0,
+                "diff_pct": 0,
             }
             for a in cfg["portfolio"]["assets"]
         ]
@@ -398,6 +401,8 @@ def get_status():
             "last_rebalance": cfg.get("last_rebalance"),
             "assets": assets_out,
             "pnl": {"initial_usdt": 0, "current_usdt": 0, "pnl_usdt": 0, "pnl_pct": 0},
+            "profit_usdt": 0,
+            "profit_pct": 0,
             "warning": "MEXC API key not set — showing config values only",
             "rebalance_config": {
                 "threshold_pct": cfg["rebalance"]["proportional"]["threshold_pct"],
@@ -413,14 +418,18 @@ def get_status():
         pnl = get_pnl(cfg, current_usdt=portfolio["total_usdt"])
         assets_out = []
         for r in portfolio["assets"]:
+            diff = round(r["actual_pct"] - targets[r["symbol"]], 2)
             assets_out.append({
                 "symbol": r["symbol"],
                 "balance": r["balance"],
                 "price": r["price"],
+                "price_usdt": r["price"],
                 "value_usdt": r["value_usdt"],
                 "actual_pct": round(r["actual_pct"], 2),
+                "current_pct": round(r["actual_pct"], 2),
                 "target_pct": targets[r["symbol"]],
-                "deviation": round(r["actual_pct"] - targets[r["symbol"]], 2),
+                "deviation": diff,
+                "diff_pct": diff,
                 "error": r.get("error"),
             })
         invalid = portfolio.get("invalid_symbols", [])
@@ -432,6 +441,8 @@ def get_status():
             "last_rebalance": cfg.get("last_rebalance"),
             "assets": assets_out,
             "pnl": pnl,
+            "profit_usdt": pnl.get("pnl_usdt", 0),
+            "profit_pct": pnl.get("pnl_pct", 0),
             "rebalance_config": {
                 "threshold_pct": cfg["rebalance"]["proportional"]["threshold_pct"],
                 "frequency": cfg["rebalance"]["timed"]["frequency"],
