@@ -383,8 +383,10 @@ def get_status():
                 "actual_pct": round(r["actual_pct"], 2),
                 "target_pct": targets[r["symbol"]],
                 "deviation": round(r["actual_pct"] - targets[r["symbol"]], 2),
+                "error": r.get("error"),
             })
-        return {
+        invalid = portfolio.get("invalid_symbols", [])
+        response = {
             "bot_name": cfg["bot"]["name"],
             "total_usdt": portfolio["total_usdt"],
             "mode": cfg["rebalance"]["mode"],
@@ -397,6 +399,9 @@ def get_status():
                 "frequency": cfg["rebalance"]["timed"]["frequency"],
             },
         }
+        if invalid:
+            response["warning"] = f"رموز غير موجودة على MEXC: {', '.join(invalid)} — تحقق من الإعدادات"
+        return response
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -426,10 +431,32 @@ def update_config(body: ConfigUpdate):
     if body.bot_name is not None:
         cfg["bot"]["name"] = body.bot_name
     if body.assets is not None:
-        # Duplicate symbol check
         symbols = [a.symbol.strip().upper() for a in body.assets]
         if len(symbols) != len(set(symbols)):
             raise HTTPException(status_code=400, detail="لا يمكن تكرار رموز العملات")
+        # Validate symbols exist on MEXC (only when API key is set)
+        if os.environ.get("MEXC_API_KEY"):
+            try:
+                client = _client()
+                invalid = []
+                for sym in symbols:
+                    if sym == "USDT":
+                        continue
+                    try:
+                        price = client.get_price(f"{sym}USDT")
+                        if price <= 0:
+                            invalid.append(sym)
+                    except Exception:
+                        invalid.append(sym)
+                if invalid:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"الرموز التالية غير موجودة على MEXC: {', '.join(invalid)}"
+                    )
+            except HTTPException:
+                raise
+            except Exception:
+                pass  # If validation itself fails, allow save
         cfg["portfolio"]["assets"] = [
             {"symbol": s, "allocation_pct": a.allocation_pct}
             for s, a in zip(symbols, body.assets)

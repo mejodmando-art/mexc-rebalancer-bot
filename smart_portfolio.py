@@ -63,6 +63,14 @@ def save_config(cfg: dict, path: str = CONFIG_PATH) -> None:
 def validate_allocations(assets: list) -> None:
     if not (MIN_ASSETS <= len(assets) <= MAX_ASSETS):
         raise ValueError(f"Number of assets must be between {MIN_ASSETS} and {MAX_ASSETS}.")
+    symbols = [a["symbol"].strip().upper() for a in assets]
+    # Check for empty symbols
+    if any(not s for s in symbols):
+        raise ValueError("All assets must have a symbol.")
+    # Check for duplicates
+    if len(symbols) != len(set(symbols)):
+        dupes = [s for s in symbols if symbols.count(s) > 1]
+        raise ValueError(f"Duplicate symbols: {', '.join(set(dupes))}")
     total = sum(a["allocation_pct"] for a in assets)
     if abs(total - 100.0) > 0.01:
         raise ValueError(f"Allocations must sum to 100% (got {total:.2f}%).")
@@ -206,15 +214,29 @@ def get_portfolio_value(client: MEXCClient, assets: list) -> dict:
     """
     result = []
     total = 0.0
+    invalid_symbols = []
 
     for a in assets:
         sym = a["symbol"]
-        if sym == "USDT":
-            balance = client.get_asset_balance("USDT")
-            price = 1.0
-        else:
-            balance = client.get_asset_balance(sym)
-            price = client.get_price(f"{sym}USDT")
+        try:
+            if sym == "USDT":
+                balance = client.get_asset_balance("USDT")
+                price = 1.0
+            else:
+                balance = client.get_asset_balance(sym)
+                price = client.get_price(f"{sym}USDT")
+        except Exception as e:
+            log.warning("Cannot fetch price for %s: %s – skipping", sym, e)
+            invalid_symbols.append(sym)
+            result.append({
+                "symbol": sym,
+                "balance": 0.0,
+                "price": 0.0,
+                "value_usdt": 0.0,
+                "actual_pct": 0.0,
+                "error": str(e),
+            })
+            continue
         value = balance * price
         total += value
         result.append({
@@ -225,10 +247,13 @@ def get_portfolio_value(client: MEXCClient, assets: list) -> dict:
             "actual_pct": 0.0,
         })
 
+    if invalid_symbols:
+        log.warning("Invalid symbols (not found on MEXC): %s", invalid_symbols)
+
     for r in result:
         r["actual_pct"] = (r["value_usdt"] / total * 100) if total > 0 else 0.0
 
-    return {"total_usdt": total, "assets": result}
+    return {"total_usdt": total, "assets": result, "invalid_symbols": invalid_symbols}
 
 
 # ---------------------------------------------------------------------------
