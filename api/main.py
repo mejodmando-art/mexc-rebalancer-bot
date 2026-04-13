@@ -327,9 +327,6 @@ app.add_middleware(
 )
 
 _static_dir = os.path.join(_root, "static")
-_next_dir = os.path.join(_static_dir, "_next")
-if os.path.isdir(_next_dir):
-    app.mount("/_next", StaticFiles(directory=_next_dir), name="nextjs_assets")
 
 
 @app.get("/", include_in_schema=False)
@@ -338,6 +335,25 @@ def serve_dashboard():
     if os.path.exists(index):
         return FileResponse(index)
     return {"message": "MEXC Rebalancer API", "docs": "/docs"}
+
+
+@app.get("/{full_path:path}", include_in_schema=False)
+def serve_static(full_path: str):
+    # Don't intercept /api/* routes
+    if full_path.startswith("api/"):
+        raise HTTPException(status_code=404)
+    candidate = os.path.join(_static_dir, full_path)
+    if os.path.isfile(candidate):
+        return FileResponse(candidate)
+    # Next.js static export: try path/index.html
+    candidate_index = os.path.join(_static_dir, full_path, "index.html")
+    if os.path.isfile(candidate_index):
+        return FileResponse(candidate_index)
+    # SPA fallback
+    index = os.path.join(_static_dir, "index.html")
+    if os.path.exists(index):
+        return FileResponse(index)
+    raise HTTPException(status_code=404)
 
 
 def _client() -> MEXCClient:
