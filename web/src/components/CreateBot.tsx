@@ -107,7 +107,7 @@ export default function CreateBot({ lang, onCreated }: Props) {
         paper_trading: paperTrading,
         last_rebalance: null,
       };
-      await savePortfolio(fullConfig).catch(() => {}); // non-critical
+      await savePortfolio(fullConfig);
       await startBot().catch(() => {}); // ignore "already running" error
       setSuccess('✅ ' + tr('successCreated', lang));
       setTimeout(onCreated, 1500);

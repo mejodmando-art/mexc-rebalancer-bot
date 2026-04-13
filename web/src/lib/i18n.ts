@@ -106,6 +106,20 @@ export const t: Record<string, Record<Lang, string>> = {
   cantDeleteActive:   { ar: 'لا يمكن حذف المحفظة النشطة', en: 'Cannot delete the active portfolio' },
   createdAt:          { ar: 'تاريخ الإنشاء',             en: 'Created' },
 
+  // Portfolio rebalance actions
+  rebalancePortfolio:    { ar: 'إعادة توازن',              en: 'Rebalance' },
+  rebalanceType:         { ar: 'نوع إعادة التوازن',        en: 'Rebalance Type' },
+  rebalanceMarketValue:  { ar: 'بالقيمة السوقية',          en: 'By Market Value' },
+  rebalanceMarketDesc:   { ar: 'يعيد التوازن حسب النسب المحددة في المحفظة', en: 'Restore configured allocation targets' },
+  rebalanceEqual:        { ar: 'بالتساوي',                 en: 'Equal Split' },
+  rebalanceEqualDesc:    { ar: 'يوزع القيمة بالتساوي على جميع الأصول', en: 'Distribute value equally across all assets' },
+  rebalanceConfirm:      { ar: 'تأكيد إعادة التوازن',      en: 'Confirm Rebalance' },
+  rebalanceCancelBtn:    { ar: 'إلغاء',                    en: 'Cancel' },
+  rebalanceRunning:      { ar: 'جاري إعادة التوازن...',    en: 'Rebalancing...' },
+  rebalanceSuccess:      { ar: 'تمت إعادة التوازن بنجاح', en: 'Rebalance completed' },
+  rebalanceCancelled:    { ar: 'تم إلغاء إعادة التوازن',  en: 'Rebalance cancelled' },
+  activateFirst:         { ar: 'فعّل المحفظة أولاً لإعادة التوازن', en: 'Activate portfolio first to rebalance' },
+
   // Errors / messages
   errDuplicate:     { ar: 'لا يمكن تكرار العملات', en: 'Duplicate coin symbols not allowed' },
   errSum:           { ar: 'مجموع النسب يجب أن يساوي 100%', en: 'Allocations must sum to 100%' },

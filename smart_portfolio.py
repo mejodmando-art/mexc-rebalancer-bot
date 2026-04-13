@@ -372,6 +372,23 @@ def execute_rebalance(client: MEXCClient, cfg: dict) -> list:
     return details
 
 
+def execute_rebalance_equal(client: MEXCClient, cfg: dict) -> list:
+    """
+    Rebalance by redistributing equally across all assets regardless of
+    their configured allocation_pct.  Temporarily overrides targets to
+    equal shares, then delegates to execute_rebalance.
+    """
+    import copy
+    cfg_eq = copy.deepcopy(cfg)
+    assets = cfg_eq["portfolio"]["assets"]
+    n = len(assets)
+    base = round(100.0 / n, 4)
+    remainder = round(100.0 - base * (n - 1), 4)
+    for i, a in enumerate(assets):
+        a["allocation_pct"] = remainder if i == n - 1 else base
+    return execute_rebalance(client, cfg_eq)
+
+
 def get_pnl(cfg: dict) -> dict:
     """Return simple P&L vs initial invested value."""
     initial = cfg["portfolio"].get("initial_value_usdt", cfg["portfolio"].get("total_usdt", 0))
