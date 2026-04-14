@@ -10,7 +10,8 @@ cmds = [
 [phases.build]
 cmds = [
   "npm run build --prefix web",
-  "cp -r web/out/. static/"
+  "cp -r web/out/. static/",
+  "cp -r web/out/. api/static/"
 ]
 
 [start]
