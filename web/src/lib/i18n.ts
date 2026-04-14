@@ -6,6 +6,7 @@ export const t: Record<string, Record<Lang, string>> = {
   // Navbar
   dashboard:        { ar: 'لوحة التحكم',    en: 'Dashboard' },
   createBot:        { ar: 'إنشاء بوت',       en: 'Create Bot' },
+  gridBot:          { ar: 'بوت الشبكات',     en: 'Grid Bot' },
   settings:         { ar: 'الإعدادات',       en: 'Settings' },
   notifications:    { ar: 'الإشعارات',       en: 'Notifications' },
   running:          { ar: 'شغال',            en: 'Running' },

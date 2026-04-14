@@ -1,9 +1,9 @@
 'use client';
 
-import { TrendingUp, ChevronRight, LayoutDashboard, Briefcase, PlusCircle, Settings } from 'lucide-react';
+import { TrendingUp, ChevronRight, LayoutDashboard, Briefcase, PlusCircle, Settings, Grid3x3 } from 'lucide-react';
 import { Lang, tr } from '../lib/i18n';
 
-type Tab = 'dashboard' | 'portfolios' | 'create' | 'settings' | 'copy';
+type Tab = 'dashboard' | 'portfolios' | 'create' | 'settings' | 'copy' | 'grid';
 
 interface SidebarProps {
   active: Tab;
@@ -16,6 +16,7 @@ const TABS: { key: Tab; icon: React.ElementType; labelKey: string; color: string
   { key: 'dashboard',  icon: LayoutDashboard, labelKey: 'dashboard',    color: '#00D4AA', glow: 'rgba(0,212,170,0.4)' },
   { key: 'portfolios', icon: Briefcase,        labelKey: 'myPortfolios', color: '#60A5FA', glow: 'rgba(96,165,250,0.4)' },
   { key: 'create',     icon: PlusCircle,       labelKey: 'createBot',    color: '#A78BFA', glow: 'rgba(167,139,250,0.4)' },
+  { key: 'grid',       icon: Grid3x3,          labelKey: 'gridBot',      color: '#F0B90B', glow: 'rgba(240,185,11,0.4)' },
   { key: 'settings',   icon: Settings,         labelKey: 'settings',     color: '#FB923C', glow: 'rgba(251,146,60,0.4)' },
 ];
 

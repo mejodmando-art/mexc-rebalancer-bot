@@ -8,12 +8,13 @@ import Portfolios from '../components/Portfolios';
 import CreateBot from '../components/CreateBot';
 import Settings from '../components/Settings';
 import CopyPortfolio from '../components/CopyPortfolio';
+import GridBot from '../components/GridBot';
 import { ToastProvider } from '../components/Toast';
 import { getBotStatus } from '../lib/api';
 import { Lang } from '../lib/i18n';
 import ErrorBoundary from '../components/ErrorBoundary';
 
-type Tab = 'dashboard' | 'portfolios' | 'create' | 'settings' | 'copy';
+type Tab = 'dashboard' | 'portfolios' | 'create' | 'settings' | 'copy' | 'grid';
 
 export default function App() {
   const [tab,        setTab]        = useState<Tab>('dashboard');
@@ -73,6 +74,7 @@ export default function App() {
               {tab === 'create'     && <CreateBot      lang={lang} onCreated={() => setTab('portfolios')} />}
               {tab === 'settings'   && <Settings       lang={lang} onSaved={() => setTab('dashboard')} />}
               {tab === 'copy'       && <CopyPortfolio  lang={lang} onCreated={() => setTab('portfolios')} />}
+              {tab === 'grid'       && <GridBot        lang={lang} />}
             </div>
           </main>
         </div>
