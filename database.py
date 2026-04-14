@@ -1,14 +1,16 @@
 """
-Database layer — PostgreSQL (Supabase) when DATABASE_URL is set, SQLite otherwise.
+Database layer — PostgreSQL (Railway) when DATABASE_URL is set, SQLite otherwise.
 
-All public functions have identical signatures regardless of backend so the
-rest of the codebase never needs to know which engine is active.
+PostgreSQL uses a persistent connection pool (psycopg2.pool.ThreadedConnectionPool)
+so every query reuses an existing connection instead of opening a new one.
+Transient errors (dropped connections, Railway restarts) are retried automatically.
 """
 
 import json
 import logging
 import os
 import sqlite3
+import time
 from contextlib import contextmanager
 from datetime import datetime
 from typing import Generator
@@ -19,11 +21,29 @@ _DATABASE_URL: str | None = os.environ.get("DATABASE_URL")
 _SQLITE_PATH = os.path.join(os.path.dirname(__file__), "portfolio.db")
 
 # ---------------------------------------------------------------------------
-# Connection helpers
+# PostgreSQL connection pool
 # ---------------------------------------------------------------------------
 
+_pg_pool = None  # ThreadedConnectionPool, initialised lazily
+
+
+def _get_pg_pool():
+    """Return (or create) the shared PostgreSQL connection pool."""
+    global _pg_pool
+    if _pg_pool is not None:
+        return _pg_pool
+    from psycopg2 import pool as pg_pool
+    _pg_pool = pg_pool.ThreadedConnectionPool(
+        minconn=1,
+        maxconn=10,
+        dsn=_DATABASE_URL,
+        connect_timeout=10,
+    )
+    log.info("PostgreSQL connection pool created (min=1, max=10)")
+    return _pg_pool
+
+
 def _try_postgres() -> bool:
-    """Return True if psycopg2 is available and DATABASE_URL connects."""
     if not _DATABASE_URL:
         log.info("DATABASE_URL not set — using SQLite")
         return False
@@ -33,63 +53,91 @@ def _try_postgres() -> bool:
         log.warning("psycopg2 not installed — falling back to SQLite")
         return False
     try:
-        conn = psycopg2.connect(_DATABASE_URL)
-        conn.close()
-        log.info("PostgreSQL connection OK (Supabase)")
+        _get_pg_pool()
         return True
     except Exception as e:
-        log.warning("PostgreSQL connection failed (%s: %s) — falling back to SQLite", type(e).__name__, e)
+        log.warning("PostgreSQL unavailable (%s) — falling back to SQLite", e)
         return False
 
 
 _USE_POSTGRES = _try_postgres()
 
-if _USE_POSTGRES:
-    import psycopg2
+# ---------------------------------------------------------------------------
+# Connection context managers
+# ---------------------------------------------------------------------------
 
-    @contextmanager
-    def _conn() -> Generator:
-        """Yield a psycopg2 connection; commit on success, rollback on error."""
-        conn = psycopg2.connect(_DATABASE_URL)
+_MAX_RETRIES = 3
+_RETRY_DELAY = 0.5  # seconds
+
+
+@contextmanager
+def _conn() -> Generator:
+    if _USE_POSTGRES:
+        yield from _pg_conn()
+    else:
+        yield from _sqlite_conn()
+
+
+@contextmanager
+def _pg_conn() -> Generator:
+    global _pg_pool
+    last_err = None
+    for attempt in range(_MAX_RETRIES):
+        conn = None
         try:
+            pool = _get_pg_pool()
+            conn = pool.getconn()
+            conn.autocommit = False
             yield conn
             conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            conn.close()
+            pool.putconn(conn)
+            return
+        except Exception as e:
+            last_err = e
+            if conn is not None:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                try:
+                    if _pg_pool:
+                        _pg_pool.putconn(conn, close=True)
+                except Exception:
+                    pass
+            # Reset pool so next attempt creates fresh connections
+            _pg_pool = None
+            log.warning("PostgreSQL error (attempt %d/%d): %s", attempt + 1, _MAX_RETRIES, e)
+            if attempt < _MAX_RETRIES - 1:
+                time.sleep(_RETRY_DELAY * (attempt + 1))
+    raise last_err
 
-    _BACKEND = "postgresql"
 
-else:
-    @contextmanager
-    def _conn() -> Generator:
-        """Yield a sqlite3 connection."""
-        conn = sqlite3.connect(_SQLITE_PATH)
-        conn.row_factory = sqlite3.Row
-        try:
-            yield conn
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            conn.close()
+@contextmanager
+def _sqlite_conn() -> Generator:
+    conn = sqlite3.connect(_SQLITE_PATH)
+    conn.row_factory = sqlite3.Row
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
-    _BACKEND = "sqlite"
 
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 def _q(sql: str) -> str:
-    """Replace '?' with '%s' for PostgreSQL."""
-    if _BACKEND == "postgresql":
+    if _USE_POSTGRES:
         return sql.replace("?", "%s")
     return sql
 
 
 def _rows_to_dicts(rows, cursor=None) -> list[dict]:
-    """Normalise rows from either backend into plain dicts."""
-    if _BACKEND == "postgresql":
+    if _USE_POSTGRES:
         cols = [d[0] for d in cursor.description]
         return [dict(zip(cols, row)) for row in rows]
     return [dict(r) for r in rows]
@@ -100,8 +148,7 @@ def _rows_to_dicts(rows, cursor=None) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def init_db() -> None:
-    """Create tables if they don't exist. Called once at startup."""
-    if _BACKEND == "postgresql":
+    if _USE_POSTGRES:
         stmts = [
             """
             CREATE TABLE IF NOT EXISTS rebalance_history (
@@ -135,12 +182,9 @@ def init_db() -> None:
         ]
         with _conn() as conn:
             cur = conn.cursor()
-            # Drop and recreate tables that have incompatible schemas from
-            # older versions (e.g. extra user_id column with NOT NULL).
             cur.execute("""
                 DO $$
                 BEGIN
-                    -- portfolios: recreate if user_id column exists (old schema)
                     IF EXISTS (
                         SELECT 1 FROM information_schema.columns
                         WHERE table_name='portfolios' AND column_name='user_id'
@@ -151,8 +195,6 @@ def init_db() -> None:
             """)
             for stmt in stmts:
                 cur.execute(stmt)
-            # Safe migrations — add any missing columns to existing tables.
-            # Covers cases where the table was created with an old schema.
             migrations = [
                 "ALTER TABLE rebalance_history ADD COLUMN IF NOT EXISTS ts TEXT NOT NULL DEFAULT ''",
                 "ALTER TABLE rebalance_history ADD COLUMN IF NOT EXISTS mode TEXT NOT NULL DEFAULT ''",
@@ -170,7 +212,7 @@ def init_db() -> None:
                     cur.execute(m)
                 except Exception as e:
                     log.debug("Migration skipped: %s", e)
-        log.info("PostgreSQL tables ready (Supabase)")
+        log.info("PostgreSQL tables ready (Railway)")
     else:
         with _conn() as conn:
             conn.executescript("""
@@ -205,24 +247,13 @@ def init_db() -> None:
 # Rebalance history
 # ---------------------------------------------------------------------------
 
-def record_rebalance(
-    mode: str,
-    total_usdt: float,
-    details: list,
-    paper: bool = False,
-) -> None:
+def record_rebalance(mode: str, total_usdt: float, details: list, paper: bool = False) -> None:
     try:
         with _conn() as conn:
             cur = conn.cursor()
             cur.execute(
                 _q("INSERT INTO rebalance_history (ts, mode, total_usdt, details, paper) VALUES (?,?,?,?,?)"),
-                (
-                    datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
-                    mode,
-                    total_usdt,
-                    json.dumps(details),
-                    int(paper),
-                ),
+                (datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"), mode, total_usdt, json.dumps(details), int(paper)),
             )
     except Exception as e:
         log.error("record_rebalance failed: %s", e)
@@ -232,10 +263,7 @@ def get_rebalance_history(limit: int = 10) -> list:
     try:
         with _conn() as conn:
             cur = conn.cursor()
-            cur.execute(
-                _q("SELECT * FROM rebalance_history ORDER BY id DESC LIMIT ?"),
-                (limit,),
-            )
+            cur.execute(_q("SELECT * FROM rebalance_history ORDER BY id DESC LIMIT ?"), (limit,))
             rows = _rows_to_dicts(cur.fetchall(), cur)
         for d in rows:
             raw = d.get("details") or "[]"
@@ -259,11 +287,7 @@ def record_snapshot(total_usdt: float, assets: list) -> None:
             cur = conn.cursor()
             cur.execute(
                 _q("INSERT INTO portfolio_snapshots (ts, total_usdt, assets_json) VALUES (?,?,?)"),
-                (
-                    datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
-                    total_usdt,
-                    json.dumps(assets),
-                ),
+                (datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"), total_usdt, json.dumps(assets)),
             )
     except Exception as e:
         log.error("record_snapshot failed: %s", e)
@@ -289,39 +313,27 @@ def get_snapshots(limit: int = 90, portfolio_id: int = 1) -> list:
 # ---------------------------------------------------------------------------
 
 def save_portfolio(name: str, config: dict) -> int:
-    """Save a new portfolio. Returns its new id. Raises on failure."""
     with _conn() as conn:
         cur = conn.cursor()
-        if _BACKEND == "postgresql":
+        if _USE_POSTGRES:
             cur.execute(
                 "INSERT INTO portfolios (ts_created, name, config_json, active) VALUES (%s,%s,%s,0) RETURNING id",
-                (
-                    datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
-                    name,
-                    json.dumps(config),
-                ),
+                (datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"), name, json.dumps(config)),
             )
             return cur.fetchone()[0]
         else:
             cur.execute(
                 "INSERT INTO portfolios (ts_created, name, config_json, active) VALUES (?,?,?,0)",
-                (
-                    datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
-                    name,
-                    json.dumps(config),
-                ),
+                (datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"), name, json.dumps(config)),
             )
             return cur.lastrowid
 
 
 def list_portfolios() -> list:
-    """Return all saved portfolios with summary fields."""
     try:
         with _conn() as conn:
             cur = conn.cursor()
-            cur.execute(
-                "SELECT id, name, ts_created, active, config_json FROM portfolios ORDER BY id DESC"
-            )
+            cur.execute("SELECT id, name, ts_created, active, config_json FROM portfolios ORDER BY id DESC")
             rows = _rows_to_dicts(cur.fetchall(), cur)
         result = []
         for r in rows:
@@ -334,10 +346,7 @@ def list_portfolios() -> list:
                 "active": bool(r["active"]),
                 "mode": cfg.get("rebalance", {}).get("mode", "—"),
                 "total_usdt": cfg.get("portfolio", {}).get("total_usdt", 0),
-                "assets": [
-                    {"symbol": a["symbol"], "allocation_pct": a["allocation_pct"]}
-                    for a in assets
-                ],
+                "assets": [{"symbol": a["symbol"], "allocation_pct": a["allocation_pct"]} for a in assets],
                 "paper_trading": cfg.get("paper_trading", False),
             })
         return result
@@ -347,17 +356,13 @@ def list_portfolios() -> list:
 
 
 def get_portfolio(portfolio_id: int) -> dict | None:
-    """Return full config of a saved portfolio."""
     try:
         with _conn() as conn:
             cur = conn.cursor()
-            cur.execute(
-                _q("SELECT config_json FROM portfolios WHERE id=?"),
-                (portfolio_id,),
-            )
+            cur.execute(_q("SELECT config_json FROM portfolios WHERE id=?"), (portfolio_id,))
             row = cur.fetchone()
         if row:
-            val = row[0] if _BACKEND == "postgresql" else row["config_json"]
+            val = row[0] if _USE_POSTGRES else row["config_json"]
             return json.loads(val)
         return None
     except Exception as e:
@@ -366,21 +371,16 @@ def get_portfolio(portfolio_id: int) -> dict | None:
 
 
 def set_active_portfolio(portfolio_id: int) -> None:
-    """Mark one portfolio as active, clear others."""
     try:
         with _conn() as conn:
             cur = conn.cursor()
             cur.execute("UPDATE portfolios SET active=0")
-            cur.execute(
-                _q("UPDATE portfolios SET active=1 WHERE id=?"),
-                (portfolio_id,),
-            )
+            cur.execute(_q("UPDATE portfolios SET active=1 WHERE id=?"), (portfolio_id,))
     except Exception as e:
         log.error("set_active_portfolio failed: %s", e)
 
 
 def delete_portfolio(portfolio_id: int) -> None:
-    """Delete a portfolio and its associated history."""
     try:
         with _conn() as conn:
             cur = conn.cursor()
@@ -392,7 +392,6 @@ def delete_portfolio(portfolio_id: int) -> None:
 
 
 def update_portfolio_config(portfolio_id: int, config: dict) -> None:
-    """Update the stored config of an existing portfolio."""
     try:
         with _conn() as conn:
             cur = conn.cursor()
