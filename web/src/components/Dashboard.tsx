@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import {
-  DollarSign,
+  DollarSign, Wallet,
   Play, Square, RefreshCw, Zap,
   CheckCircle2, XCircle,
 } from 'lucide-react';
@@ -41,19 +41,15 @@ function createRipple(e: React.MouseEvent<HTMLButtonElement>) {
   setTimeout(() => ripple.remove(), 700);
 }
 
-
 export default function Dashboard({ lang }: Props) {
   const toast = useToast();
 
   const [status,       setStatus]       = useState<StatusData | null>(null);
-
   const [botRunning,   setBotRunning]   = useState(false);
   const [loading,      setLoading]      = useState(true);
   const [accountTotal, setAccountTotal] = useState<number | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
-  const [autoRefresh, setAutoRefresh] = useState(true);
-  const autoRefreshRef = useRef(autoRefresh);
-  autoRefreshRef.current = autoRefresh;
+  const [refreshing,   setRefreshing]   = useState(false);
+  const autoRefreshRef = useRef(true);
 
   const [rebalancing,  setRebalancing]  = useState(false);
   const [jobId,        setJobId]        = useState<string | null>(null);
@@ -67,12 +63,9 @@ export default function Dashboard({ lang }: Props) {
     if (!silent) setLoading(true);
     else setRefreshing(true);
     try {
-      const [s, bot] = await Promise.all([
-        getStatus(), getBotStatus(),
-      ]);
+      const [s, bot] = await Promise.all([getStatus(), getBotStatus()]);
       setStatus(s);
       setBotRunning(bot?.running ?? false);
-      // Fetch full account total separately (non-blocking)
       getAccountTotal().then(r => setAccountTotal(r.total_usdt)).catch(() => {});
     } catch (err: any) {
       if (!silent) toast.error(tr('errLoad', lang), err?.message);
@@ -83,7 +76,6 @@ export default function Dashboard({ lang }: Props) {
   }, [lang, toast]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
-
   useEffect(() => {
     const t = setInterval(() => { if (autoRefreshRef.current) fetchAll(true); }, 30000);
     return () => clearInterval(t);
@@ -150,14 +142,11 @@ export default function Dashboard({ lang }: Props) {
   const handleBuyAndActivate = async () => {
     setBuyActivating(true);
     try {
-      // Get active portfolio id
       const portfolios = await listPortfolios();
       const active = portfolios.find((p: any) => p.active) ?? portfolios[0];
       if (!active) throw new Error(lang === 'ar' ? 'لا توجد محفظة' : 'No portfolio found');
-      // Activate → rebalance (buy equal) → start loop
       await activatePortfolio(active.id);
       const job = await rebalancePortfolio(active.id, 'equal');
-      // Poll until done
       let attempts = 0;
       while (attempts < 30) {
         await new Promise(r => setTimeout(r, 2000));
@@ -196,95 +185,110 @@ export default function Dashboard({ lang }: Props) {
     }
   };
 
-
+  const fmtUsd = (n: number) =>
+    '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
 
-      {/* Top action bar */}
+      {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3 animate-fade-up">
         <div>
           <h1 className="font-bold text-xl" style={{ color: 'var(--text-main)' }}>
             {status?.bot_name ?? (lang === 'ar' ? 'لوحة التحكم' : 'Dashboard')}
           </h1>
-          <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+          <p className="text-xs mt-1 flex items-center gap-2 flex-wrap" style={{ color: 'var(--text-muted)' }}>
             {lang === 'ar' ? 'MEXC Spot · محفظة ذكية' : 'MEXC Spot · Smart Portfolio'}
             {status?.mode && (
-              <span className="ms-2 px-1.5 py-0.5 rounded text-[10px] font-semibold"
+              <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold"
                     style={{ background: 'var(--bg-input)', color: 'var(--accent)' }}>
                 {status.mode}
               </span>
             )}
+            <span className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${botRunning ? 'badge-running' : 'badge-stopped'}`}>
+              <span className="w-1.5 h-1.5 rounded-full inline-block"
+                    style={{ background: botRunning ? 'var(--accent)' : '#8B949E' }} />
+              {botRunning ? tr('running', lang) : tr('stopped', lang)}
+            </span>
           </p>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          {/* Buy & Activate */}
           <button
             onClick={handleBuyAndActivate}
             disabled={buyActivating}
-            className="btn-secondary !px-4 !min-h-[36px] !text-xs gap-1.5"
+            className="btn-secondary !px-3 !min-h-[36px] !text-xs gap-1.5"
             style={{ borderColor: '#00D4AA', color: '#00D4AA' }}
           >
             {buyActivating
-              ? <><RefreshCw size={13} className="spin" /> {lang === 'ar' ? 'جاري...' : 'Working...'}</>
+              ? <><RefreshCw size={12} className="spin" /> {lang === 'ar' ? 'جاري...' : 'Working...'}</>
               : <>{lang === 'ar' ? '🛒 شراء وتفعيل' : '🛒 Buy & Activate'}</>
             }
           </button>
 
-          {/* Bot start/stop */}
           <button
             onClick={handleBotToggle}
             disabled={botLoading}
-            className={botRunning ? 'btn-danger !px-4 !min-h-[36px] !text-xs' : 'btn-secondary !px-4 !min-h-[36px] !text-xs'}
+            className={botRunning ? 'btn-danger !px-3 !min-h-[36px] !text-xs' : 'btn-secondary !px-3 !min-h-[36px] !text-xs'}
           >
             {botLoading
-              ? <RefreshCw size={13} className="spin" />
+              ? <RefreshCw size={12} className="spin" />
               : botRunning
-                ? <><Square size={13} /> {tr('pause', lang)}</>
-                : <><Play size={13} /> {tr('start', lang)}</>
+                ? <><Square size={12} /> {tr('pause', lang)}</>
+                : <><Play size={12} /> {tr('start', lang)}</>
             }
           </button>
 
-          {/* Rebalance button */}
           {rebalancing && cancelTimer > 0 ? (
-            <button onClick={handleCancel} className="btn-danger !px-4 !min-h-[36px] !text-xs relative overflow-hidden">
-              <XCircle size={13} />
-              {tr('cancelRebalance', lang)} ({cancelTimer}s)
+            <button onClick={handleCancel} className="btn-danger !px-3 !min-h-[36px] !text-xs relative overflow-hidden">
+              <XCircle size={12} /> {tr('cancelRebalance', lang)} ({cancelTimer}s)
             </button>
           ) : rebalancing ? (
-            <button disabled className="btn-accent !px-4 !min-h-[36px] !text-xs">
-              <RefreshCw size={13} className="spin" />
-              {lang === 'ar' ? 'جاري...' : 'Running...'}
+            <button disabled className="btn-accent !px-3 !min-h-[36px] !text-xs">
+              <RefreshCw size={12} className="spin" /> {lang === 'ar' ? 'جاري...' : 'Running...'}
             </button>
           ) : (
-            <button
-              onClick={handleRebalance}
-              className="btn-accent !px-4 !min-h-[36px] !text-xs relative overflow-hidden"
-            >
-              <Zap size={13} />
-              {tr('rebalanceNow', lang)}
+            <button onClick={handleRebalance} className="btn-accent !px-3 !min-h-[36px] !text-xs relative overflow-hidden">
+              <Zap size={12} /> {tr('rebalanceNow', lang)}
             </button>
           )}
         </div>
       </div>
 
-      {/* Stat Card */}
-      <div className="grid grid-cols-1 gap-3 sm:gap-4">
+      {/* Stat Cards — 2 columns */}
+      <div className="grid grid-cols-2 gap-3 animate-fade-up" style={{ animationDelay: '0.05s' }}>
         <StatCard
           title={lang === 'ar' ? 'إجمالي الحساب' : 'Account Total'}
-          value={accountTotal === null ? '—' : `$${accountTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+          value={accountTotal === null ? '—' : fmtUsd(accountTotal)}
           change={lang === 'ar' ? 'كل الأصول على MEXC' : 'All MEXC assets'}
           changePositive={null}
           icon={DollarSign} iconColor="#58A6FF"
-          loading={loading && accountTotal === null} delay={0}
+          loading={loading && accountTotal === null}
+          delay={0}
+        />
+        <StatCard
+          title={lang === 'ar' ? 'قيمة المحفظة' : 'Portfolio Value'}
+          value={status?.total_usdt == null ? '—' : fmtUsd(status.total_usdt)}
+          change={`${status?.assets?.length ?? 0} ${lang === 'ar' ? 'عملة' : 'coins'}`}
+          changePositive={null}
+          icon={Wallet} iconColor="#00D4AA"
+          loading={loading}
+          delay={0.05}
         />
       </div>
 
-      {/* Charts row */}
-      <div className="card p-5 animate-fade-up" style={{ animationDelay: '0.2s' }}>
+      {/* Pie chart */}
+      <div className="card p-5 animate-fade-up" style={{ animationDelay: '0.1s' }}>
         <div className="flex items-center justify-between mb-4">
           <h2 className="section-title">{tr('assetDist', lang)}</h2>
+          <button
+            onClick={() => fetchAll(true)}
+            disabled={refreshing}
+            className="btn-secondary !px-2.5 !min-h-[30px] !text-xs gap-1"
+          >
+            <RefreshCw size={11} className={refreshing ? 'spin' : ''} />
+            {lang === 'ar' ? 'تحديث' : 'Refresh'}
+          </button>
         </div>
         <PortfolioPieChart
           assets={status?.assets ?? []}
@@ -294,7 +298,7 @@ export default function Dashboard({ lang }: Props) {
       </div>
 
       {/* Assets table */}
-      <div className="card p-5 animate-fade-up" style={{ animationDelay: '0.3s' }}>
+      <div className="card p-5 animate-fade-up" style={{ animationDelay: '0.15s' }}>
         <div className="flex items-center justify-between mb-4">
           <h2 className="section-title">{tr('assetTable', lang)}</h2>
           {!loading && status?.assets?.length ? (
@@ -315,7 +319,7 @@ export default function Dashboard({ lang }: Props) {
         <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
           {refreshing
             ? (lang === 'ar' ? 'جاري التحديث...' : 'Refreshing...')
-            : (lang === 'ar' ? `تحديث تلقائي كل 30 ثانية${autoRefresh ? '' : ' (متوقف)'}` : `Auto-refresh every 30s${autoRefresh ? '' : ' (paused)'}`)}
+            : (lang === 'ar' ? 'تحديث تلقائي كل 30 ثانية' : 'Auto-refresh every 30s')}
         </span>
       </div>
     </div>

@@ -438,24 +438,36 @@ export default function Portfolios({ lang, onActivated }: Props) {
                 </div>
 
                 {/* Stats row */}
-                <div className="flex gap-3 text-sm flex-wrap">
-                  <div className="flex flex-col">
-                    <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{tr('totalPortfolio', lang)}</span>
-                    <span className="font-semibold" style={{ color: 'var(--text-main)' }}>${p.total_usdt.toLocaleString()}</span>
+                <div className="grid grid-cols-3 gap-2 rounded-xl p-3" style={{ background: 'var(--bg-input)' }}>
+                  <div className="flex flex-col items-center text-center">
+                    <span className="text-[10px] font-bold uppercase tracking-wide mb-0.5" style={{ color: 'var(--text-muted)' }}>
+                      {lang === 'ar' ? 'المبلغ' : 'Budget'}
+                    </span>
+                    <span className="num font-bold text-sm" style={{ color: 'var(--text-main)' }}>
+                      ${p.total_usdt.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                    </span>
                   </div>
-                  <div className="flex flex-col">
-                    <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{tr('mode', lang)}</span>
-                    <span className="font-semibold" style={{ color: 'var(--text-main)' }}>{p.mode}</span>
+                  <div className="flex flex-col items-center text-center border-x" style={{ borderColor: 'var(--border)' }}>
+                    <span className="text-[10px] font-bold uppercase tracking-wide mb-0.5" style={{ color: 'var(--text-muted)' }}>
+                      {tr('mode', lang)}
+                    </span>
+                    <span className="font-semibold text-xs" style={{ color: 'var(--accent)' }}>
+                      {MODE_ICON[p.mode] ?? '📁'} {p.mode}
+                    </span>
                   </div>
-                  <div className="flex flex-col">
-                    <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{tr('assetCount', lang)}</span>
-                    <span className="font-semibold" style={{ color: 'var(--text-main)' }}>{p.assets.length}</span>
+                  <div className="flex flex-col items-center text-center">
+                    <span className="text-[10px] font-bold uppercase tracking-wide mb-0.5" style={{ color: 'var(--text-muted)' }}>
+                      {tr('assetCount', lang)}
+                    </span>
+                    <span className="num font-bold text-sm" style={{ color: 'var(--text-main)' }}>
+                      {p.assets.length}
+                    </span>
                   </div>
                 </div>
 
                 {/* Asset allocation bar */}
                 <div>
-                  <div className="flex rounded-full overflow-hidden h-2 w-full gap-px">
+                  <div className="flex rounded-full overflow-hidden h-1.5 w-full gap-px mb-2">
                     {p.assets.map((a: any, i: number) => (
                       <div
                         key={a.symbol}
@@ -464,10 +476,17 @@ export default function Portfolios({ lang, onActivated }: Props) {
                       />
                     ))}
                   </div>
-                  <div className="flex flex-wrap gap-2 mt-2">
+                  <div className="flex flex-wrap gap-1.5">
                     {p.assets.map((a: any, i: number) => (
-                      <span key={a.symbol} className="flex items-center gap-1 text-xs" style={{ color: 'var(--text-muted)' }}>
-                        <span className="w-2 h-2 rounded-full inline-block" style={{ background: COLORS[i % COLORS.length] }} />
+                      <span key={a.symbol}
+                        className="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[11px] font-semibold"
+                        style={{ background: `${COLORS[i % COLORS.length]}18`, color: COLORS[i % COLORS.length] }}>
+                        <img
+                          src={`https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/32/color/${a.symbol.toLowerCase()}.png`}
+                          alt={a.symbol}
+                          className="w-3 h-3 rounded-full"
+                          onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                        />
                         {a.symbol} {a.allocation_pct}%
                       </span>
                     ))}
