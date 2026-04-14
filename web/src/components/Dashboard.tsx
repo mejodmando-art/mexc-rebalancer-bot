@@ -269,13 +269,28 @@ export default function Dashboard({ lang }: Props) {
         <StatCard
           title={lang === 'ar' ? 'قيمة المحفظة' : 'Portfolio Value'}
           value={status?.total_usdt == null ? '—' : fmtUsd(status.total_usdt)}
-          change={`${status?.assets?.length ?? 0} ${lang === 'ar' ? 'عملة' : 'coins'}`}
+          change={lang === 'ar'
+            ? `${status?.assets?.length ?? 0} عملة مخصصة`
+            : `${status?.assets?.length ?? 0} tracked coins`}
           changePositive={null}
           icon={Wallet} iconColor="#00D4AA"
           loading={loading}
           delay={0.05}
         />
       </div>
+
+      {/* Info: explain difference when both values exist */}
+      {accountTotal !== null && status?.total_usdt != null && Math.abs(accountTotal - status.total_usdt) > 1 && (
+        <div className="flex items-start gap-2 px-3 py-2 rounded-xl text-xs animate-fade-up"
+             style={{ background: 'var(--bg-input)', color: 'var(--text-muted)', animationDelay: '0.1s' }}>
+          <span className="shrink-0 mt-0.5">ℹ️</span>
+          <span>
+            {lang === 'ar'
+              ? `إجمالي الحساب (${fmtUsd(accountTotal)}) يشمل كل أصولك على MEXC. قيمة المحفظة (${fmtUsd(status.total_usdt)}) تشمل العملات المخصصة فقط.`
+              : `Account total (${fmtUsd(accountTotal)}) includes all your MEXC assets. Portfolio value (${fmtUsd(status.total_usdt)}) covers only tracked coins.`}
+          </span>
+        </div>
+      )}
 
       {/* Pie chart */}
       <div className="card p-5 animate-fade-up" style={{ animationDelay: '0.1s' }}>

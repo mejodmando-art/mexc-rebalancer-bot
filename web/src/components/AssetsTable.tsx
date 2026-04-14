@@ -10,39 +10,33 @@ interface Asset {
 interface Props { assets: Asset[]; loading?: boolean; lang: Lang; }
 
 const PALETTE = [
-  '#00D4AA','#00A88F','#58A6FF','#3B82F6',
-  '#A78BFA','#8B5CF6','#F472B6','#EC4899',
-  '#FB923C','#F97316','#FACC15','#EAB308',
+  '#00D4AA','#58A6FF','#A78BFA','#F472B6',
+  '#FB923C','#FACC15','#00A88F','#3B82F6',
+  '#8B5CF6','#EC4899','#F97316','#EAB308',
 ];
 
 function TableSkeleton() {
   return (
     <div className="space-y-2">
-      {[1,2,3,4].map(i => <div key={i} className="skeleton h-12 w-full rounded-xl" />)}
+      {[1,2,3,4,5].map(i => (
+        <div key={i} className="skeleton h-12 w-full rounded-xl" />
+      ))}
     </div>
   );
 }
 
-function DiffCell({ diff }: { diff: number }) {
+function DiffBadge({ diff }: { diff: number }) {
   const isPos = diff > 0.05;
   const isNeg = diff < -0.05;
   const Icon = isPos ? TrendingUp : isNeg ? TrendingDown : Minus;
   return (
-    <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold num
-      ${isPos ? 'trend-up' : isNeg ? 'trend-down' : ''}`}
-      style={!isPos && !isNeg ? { color: 'var(--text-muted)', background: 'var(--bg-input)' } : {}}>
-      <Icon size={10} />
-      {isPos ? '+' : ''}{diff.toFixed(2)}%
-    </div>
-  );
-}
-
-function MiniBar({ pct, color }: { pct: number; color: string }) {
-  return (
-    <div className="w-full h-1 rounded-full mt-1" style={{ background: 'var(--border)' }}>
-      <div className="h-full rounded-full transition-all duration-500"
-           style={{ width: `${Math.min(pct, 100)}%`, background: color }} />
-    </div>
+    <span
+      className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold num ${isPos ? 'trend-up' : isNeg ? 'trend-down' : ''}`}
+      style={!isPos && !isNeg ? { color: 'var(--text-muted)', background: 'var(--bg-input)' } : {}}
+    >
+      <Icon size={9} />
+      {isPos ? '+' : ''}{diff.toFixed(1)}%
+    </span>
   );
 }
 
@@ -56,65 +50,84 @@ export default function AssetsTable({ assets, loading, lang }: Props) {
     );
   }
 
+  const fmtVal   = (n: number) => '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtPrice = (n: number) =>
+    n >= 1000
+      ? '$' + n.toLocaleString('en-US', { maximumFractionDigits: 0 })
+      : '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+
   return (
-    <div>
-      <div className="overflow-x-auto rounded-xl" style={{ border: '1px solid var(--border)' }}>
-        <table className="data-table mobile-card-table">
-          <thead>
-            <tr>
-              <th>{tr('coin', lang)}</th>
-              <th>{tr('target', lang)}</th>
-              <th>{tr('current', lang)}</th>
-              <th>{tr('diff', lang)}</th>
-              <th>{tr('valueUsdt', lang)}</th>
-              <th>{tr('balancePrice', lang)}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {assets.map((a, i) => {
-              const color = PALETTE[i % PALETTE.length];
-              return (
-                <tr key={a.symbol} className="animate-fade-up" style={{ animationDelay: `${i * 0.04}s` }}>
-                  <td data-label={tr('coin', lang)}>
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold shrink-0"
-                           style={{ background: `${color}20`, color }}>
-                        {a.symbol.slice(0, 2)}
-                      </div>
-                      <div>
-                        <div className="font-semibold text-sm" style={{ color: 'var(--text-main)' }}>{a.symbol}</div>
-                        <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>USDT</div>
-                      </div>
-                    </div>
-                  </td>
-                  <td data-label={tr('target', lang)}>
-                    <div className="num font-semibold text-sm" style={{ color: 'var(--text-muted)' }}>{a.target_pct.toFixed(1)}%</div>
-                    <MiniBar pct={a.target_pct} color="var(--border)" />
-                  </td>
-                  <td data-label={tr('current', lang)}>
-                    <div className="num font-semibold text-sm" style={{ color }}>{a.current_pct.toFixed(1)}%</div>
-                    <MiniBar pct={a.current_pct} color={color} />
-                  </td>
-                  <td data-label={tr('diff', lang)}><DiffCell diff={a.diff_pct} /></td>
-                  <td data-label={tr('valueUsdt', lang)}>
-                    <div className="num font-semibold text-sm" style={{ color: 'var(--text-main)' }}>
-                      ${a.value_usdt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </div>
-                  </td>
-                  <td data-label={tr('balancePrice', lang)}>
-                    <div className="num text-xs" style={{ color: 'var(--text-main)' }}>
-                      {a.balance.toLocaleString('en-US', { maximumFractionDigits: 6 })}
-                    </div>
-                    <div className="num text-[11px]" style={{ color: 'var(--text-muted)' }}>
-                      @${a.price_usdt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+    <div className="space-y-2">
+      {assets.map((a, i) => {
+        const color = PALETTE[i % PALETTE.length];
+        return (
+          <div
+            key={a.symbol}
+            className="flex items-center gap-3 px-3 py-2.5 rounded-xl"
+            style={{ background: 'var(--bg-input)', border: '1px solid var(--border)' }}
+          >
+            {/* Coin icon */}
+            <div className="shrink-0 relative w-8 h-8">
+              <img
+                src={`https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/32/color/${a.symbol.toLowerCase()}.png`}
+                alt={a.symbol}
+                className="w-8 h-8 rounded-full absolute inset-0"
+                onError={(e) => {
+                  e.currentTarget.style.display = 'none';
+                  const fb = e.currentTarget.nextElementSibling as HTMLElement | null;
+                  if (fb) fb.style.removeProperty('display');
+                }}
+              />
+              <div
+                className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold absolute inset-0"
+                style={{ background: `${color}22`, color, display: 'none' }}
+              >
+                {a.symbol.slice(0, 2)}
+              </div>
+            </div>
+
+            {/* Symbol + price */}
+            <div className="shrink-0 w-14">
+              <div className="font-bold text-sm leading-tight" style={{ color: 'var(--text-main)' }}>
+                {a.symbol}
+              </div>
+              <div className="num text-[10px] leading-tight" style={{ color: 'var(--text-muted)' }}>
+                {fmtPrice(a.price_usdt)}
+              </div>
+            </div>
+
+            {/* Bar + percentages */}
+            <div className="flex-1 min-w-0">
+              <div className="relative h-1.5 rounded-full mb-1" style={{ background: 'var(--border)' }}>
+                <div
+                  className="absolute inset-y-0 start-0 rounded-full transition-all duration-500"
+                  style={{ width: `${Math.min(a.current_pct, 100)}%`, background: color }}
+                />
+                <div
+                  className="absolute top-1/2 -translate-y-1/2 w-px h-3 opacity-50"
+                  style={{ insetInlineStart: `${Math.min(a.target_pct, 100)}%`, background: 'var(--text-muted)' }}
+                />
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="num text-[11px] font-bold" style={{ color }}>
+                  {a.current_pct.toFixed(1)}%
+                </span>
+                <span className="num text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                  /{a.target_pct.toFixed(0)}%
+                </span>
+              </div>
+            </div>
+
+            {/* Value + diff */}
+            <div className="shrink-0 flex flex-col items-end gap-0.5">
+              <span className="num font-bold text-sm" style={{ color: 'var(--text-main)' }}>
+                {fmtVal(a.value_usdt)}
+              </span>
+              <DiffBadge diff={a.diff_pct} />
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
