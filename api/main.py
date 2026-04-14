@@ -19,7 +19,6 @@ GET  /api/notifications/config – Discord / Telegram notification settings
 POST /api/notifications/config – update notification settings
 """
 
-import asyncio
 import io
 import csv
 import os
@@ -61,94 +60,6 @@ from smart_portfolio import (
 )
 
 init_db()
-
-# ---------------------------------------------------------------------------
-# Telegram bot – runs as asyncio background task inside FastAPI event loop
-# ---------------------------------------------------------------------------
-
-async def _run_telegram_async() -> None:
-    token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-    if not token:
-        log.info("TELEGRAM_BOT_TOKEN not set – Telegram bot disabled")
-        return
-    try:
-        from telegram import Update
-        from telegram.ext import Application
-        import telegram_bot as _tg_module
-        from telegram_bot import (
-            button_handler, cmd_export, cmd_help,
-            cmd_history, cmd_rebalance, cmd_start, cmd_stats,
-            cmd_status, cmd_stop, settings_cancel, settings_start,
-            settings_assets_count, settings_asset_symbol, settings_asset_pct,
-            settings_equal_alloc, settings_usdt, settings_mode,
-            settings_threshold, settings_frequency, settings_sell_term,
-            settings_asset_transfer, settings_paper_mode,
-            ST_ASSETS_COUNT, ST_ASSET_SYMBOL, ST_ASSET_PCT, ST_EQUAL_ALLOC,
-            ST_USDT_AMOUNT, ST_REBALANCE_MODE, ST_THRESHOLD, ST_FREQUENCY,
-            ST_SELL_TERM, ST_ASSET_TRANSFER, ST_PAPER_MODE,
-        )
-        from telegram.ext import (
-            CallbackQueryHandler, CommandHandler,
-            ConversationHandler, MessageHandler, filters,
-        )
-
-        async def _api_post_init(app: Application) -> None:
-            """Store app reference in telegram_bot module for button callbacks.
-            The rebalancer loop is managed separately via /api/bot/start."""
-            _tg_module._app_ref = app
-
-        tg_app = (
-            Application.builder()
-            .token(token)
-            .post_init(_api_post_init)
-            .build()
-        )
-
-        settings_conv = ConversationHandler(
-            entry_points=[
-                CommandHandler("settings", settings_start),
-                CallbackQueryHandler(settings_start, pattern="^settings$"),
-            ],
-            states={
-                ST_ASSETS_COUNT:   [MessageHandler(filters.TEXT & ~filters.COMMAND, settings_assets_count)],
-                ST_ASSET_SYMBOL:   [MessageHandler(filters.TEXT & ~filters.COMMAND, settings_asset_symbol)],
-                ST_ASSET_PCT:      [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, settings_asset_pct),
-                    CallbackQueryHandler(settings_equal_alloc, pattern="^equal_alloc$"),
-                ],
-                ST_EQUAL_ALLOC:    [CallbackQueryHandler(settings_equal_alloc, pattern="^equal_alloc$")],
-                ST_USDT_AMOUNT:    [MessageHandler(filters.TEXT & ~filters.COMMAND, settings_usdt)],
-                ST_REBALANCE_MODE: [CallbackQueryHandler(settings_mode, pattern="^mode_")],
-                ST_THRESHOLD:      [CallbackQueryHandler(settings_threshold, pattern="^thr_")],
-                ST_FREQUENCY:      [CallbackQueryHandler(settings_frequency, pattern="^freq_")],
-                ST_SELL_TERM:      [CallbackQueryHandler(settings_sell_term, pattern="^sell_")],
-                ST_ASSET_TRANSFER: [CallbackQueryHandler(settings_asset_transfer, pattern="^transfer_")],
-                ST_PAPER_MODE:     [CallbackQueryHandler(settings_paper_mode, pattern="^paper_")],
-            },
-            fallbacks=[CommandHandler("cancel", settings_cancel)],
-            allow_reentry=True,
-        )
-
-        tg_app.add_handler(settings_conv)
-        tg_app.add_handler(CommandHandler("start",     cmd_start))
-        tg_app.add_handler(CommandHandler("status",    cmd_status))
-        tg_app.add_handler(CommandHandler("rebalance", cmd_rebalance))
-        tg_app.add_handler(CommandHandler("history",   cmd_history))
-        tg_app.add_handler(CommandHandler("stats",     cmd_stats))
-        tg_app.add_handler(CommandHandler("export",    cmd_export))
-        tg_app.add_handler(CommandHandler("stop",      cmd_stop))
-        tg_app.add_handler(CommandHandler("help",      cmd_help))
-        tg_app.add_handler(CallbackQueryHandler(button_handler))
-
-        async with tg_app:
-            await tg_app.start()
-            log.info("Telegram bot polling started")
-            await tg_app.updater.start_polling(drop_pending_updates=True)
-            # Keep running until the FastAPI lifespan cancels this task
-            await asyncio.Event().wait()
-
-    except Exception as e:
-        log.error("Telegram bot error: %s", e)
 
 
 # ---------------------------------------------------------------------------
@@ -308,13 +219,7 @@ def _send_discord(webhook_url: str, message: str) -> None:
 
 @asynccontextmanager
 async def lifespan(app):
-    task = asyncio.create_task(_run_telegram_async())
     yield
-    task.cancel()
-    try:
-        await task
-    except asyncio.CancelledError:
-        pass
 
 
 app = FastAPI(title="MEXC Portfolio Rebalancer API", version="3.0.1", lifespan=lifespan)
@@ -371,7 +276,7 @@ class ConfigUpdate(BaseModel):
 class NotificationConfig(BaseModel):
     discord_webhook_url: Optional[str] = None
     discord_enabled: Optional[bool] = None
-    telegram_enabled: Optional[bool] = None
+
 
 
 # ---------------------------------------------------------------------------
@@ -675,7 +580,7 @@ def get_notification_config():
     return {
         "discord_enabled": notif.get("discord_enabled", False),
         "discord_webhook_url": notif.get("discord_webhook_url", ""),
-        "telegram_enabled": notif.get("telegram_enabled", bool(os.environ.get("TELEGRAM_BOT_TOKEN"))),
+        "telegram_enabled": False,
     }
 
 
@@ -688,8 +593,7 @@ def update_notification_config(body: NotificationConfig):
         cfg["notifications"]["discord_webhook_url"] = body.discord_webhook_url
     if body.discord_enabled is not None:
         cfg["notifications"]["discord_enabled"] = body.discord_enabled
-    if body.telegram_enabled is not None:
-        cfg["notifications"]["telegram_enabled"] = body.telegram_enabled
+
     save_config(cfg)
     return {"ok": True}
 
