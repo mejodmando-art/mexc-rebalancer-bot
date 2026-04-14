@@ -17,9 +17,9 @@ interface Props {
 }
 
 const PALETTE = [
-  '#00D4AA','#58A6FF','#A78BFA','#F472B6',
-  '#FB923C','#FACC15','#00A88F','#3B82F6',
-  '#8B5CF6','#EC4899','#F97316','#EAB308',
+  '#00D4AA','#60A5FA','#A78BFA','#F472B6',
+  '#FB923C','#34D399','#F59E0B','#38BDF8',
+  '#C084FC','#F87171','#4ADE80','#FBBF24',
 ];
 
 function TableSkeleton() {
@@ -195,14 +195,23 @@ export default function AssetsTable({ assets, loading, lang, onRefresh }: Props)
           return (
             <div
               key={a.symbol}
-              className="rounded-xl overflow-hidden"
+              className="rounded-2xl overflow-hidden"
               style={{
-                border: `1px solid ${showActions ? color + '55' : 'var(--border)'}`,
-                transition: 'border-color 0.2s',
+                border: `1px solid ${showActions ? color + '50' : 'var(--border)'}`,
+                transition: 'all 0.2s ease',
+                boxShadow: showActions ? `0 0 16px ${color}18` : 'none',
               }}
             >
               {/* Main row */}
-              <div className="flex items-center gap-3 px-3 py-2.5" style={{ background: 'var(--bg-input)' }}>
+              <div
+                className="flex items-center gap-3 px-3 py-3"
+                style={{
+                  background: showActions
+                    ? `linear-gradient(135deg, ${color}08, var(--bg-input))`
+                    : 'var(--bg-input)',
+                  transition: 'background 0.2s ease',
+                }}
+              >
                 {/* Coin icon */}
                 <div className="shrink-0 relative w-8 h-8">
                   <img
@@ -235,13 +244,17 @@ export default function AssetsTable({ assets, loading, lang, onRefresh }: Props)
 
                 {/* Bar + percentages */}
                 <div className="flex-1 min-w-0">
-                  <div className="relative h-1.5 rounded-full mb-1" style={{ background: 'var(--border)' }}>
+                  <div className="relative h-2 rounded-full mb-1.5" style={{ background: 'var(--border)' }}>
                     <div
-                      className="absolute inset-y-0 start-0 rounded-full transition-all duration-500"
-                      style={{ width: `${Math.min(a.current_pct, 100)}%`, background: color }}
+                      className="absolute inset-y-0 start-0 rounded-full transition-all duration-700"
+                      style={{
+                        width: `${Math.min(a.current_pct, 100)}%`,
+                        background: `linear-gradient(90deg, ${color}cc, ${color})`,
+                        boxShadow: a.current_pct > 0 ? `0 0 8px ${color}60` : 'none',
+                      }}
                     />
                     <div
-                      className="absolute top-1/2 -translate-y-1/2 w-px h-3 opacity-50"
+                      className="absolute top-1/2 -translate-y-1/2 w-0.5 h-3.5 rounded-full opacity-60"
                       style={{ insetInlineStart: `${Math.min(a.target_pct, 100)}%`, background: 'var(--text-muted)' }}
                     />
                   </div>
@@ -266,15 +279,17 @@ export default function AssetsTable({ assets, loading, lang, onRefresh }: Props)
                 {/* Options toggle */}
                 <button
                   onClick={() => setActionSymbol(showActions ? null : a.symbol)}
-                  className="shrink-0 w-7 h-7 rounded-lg flex items-center justify-center transition-all"
+                  className="shrink-0 w-7 h-7 rounded-xl flex items-center justify-center transition-all"
                   style={{
-                    background: showActions ? `${color}22` : 'var(--border)',
+                    background: showActions ? `${color}25` : 'var(--bg-card)',
+                    border: `1px solid ${showActions ? color + '50' : 'var(--border)'}`,
                     color: showActions ? color : 'var(--text-muted)',
+                    boxShadow: showActions ? `0 0 10px ${color}30` : 'none',
                   }}
                 >
                   {showActions
-                    ? <X size={13} />
-                    : <span className="text-[15px] leading-none font-bold tracking-widest">···</span>
+                    ? <X size={12} />
+                    : <span className="text-[13px] leading-none font-bold" style={{ letterSpacing: '1px' }}>···</span>
                   }
                 </button>
               </div>
@@ -282,31 +297,46 @@ export default function AssetsTable({ assets, loading, lang, onRefresh }: Props)
               {/* Action bar */}
               {showActions && (
                 <div
-                  className="flex items-center gap-2 px-3 py-2"
-                  style={{ background: `${color}0d`, borderTop: `1px solid ${color}33` }}
+                  className="flex items-center gap-2 px-3 py-2.5"
+                  style={{
+                    background: `linear-gradient(135deg, ${color}10, ${color}06)`,
+                    borderTop: `1px solid ${color}25`,
+                  }}
                 >
-                  <span className="text-[11px] flex-1" style={{ color: 'var(--text-muted)' }}>
-                    {lang === 'ar' ? `إجراء على ${a.symbol}` : `Action on ${a.symbol}`}
+                  <div
+                    className="w-1 h-4 rounded-full shrink-0"
+                    style={{ background: color, boxShadow: `0 0 6px ${color}` }}
+                  />
+                  <span className="text-[11px] font-semibold flex-1" style={{ color }}>
+                    {a.symbol}
                   </span>
 
                   <button
                     onClick={() => { setReplaceSymbol(a.symbol); setActionSymbol(null); }}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold"
-                    style={{ background: '#58A6FF1a', color: '#58A6FF', border: '1px solid #58A6FF33' }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-bold transition-all"
+                    style={{
+                      background: 'rgba(96,165,250,0.12)',
+                      color: '#60A5FA',
+                      border: '1px solid rgba(96,165,250,0.25)',
+                    }}
                   >
-                    <RefreshCw size={11} />
+                    <RefreshCw size={10} />
                     {lang === 'ar' ? 'استبدال' : 'Replace'}
                   </button>
 
                   <button
                     onClick={() => handleDelete(a.symbol)}
                     disabled={isDeleting}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold"
-                    style={{ background: '#F473681a', color: '#F47368', border: '1px solid #F4736833' }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-bold transition-all"
+                    style={{
+                      background: 'rgba(255,123,114,0.12)',
+                      color: '#FF7B72',
+                      border: '1px solid rgba(255,123,114,0.25)',
+                    }}
                   >
                     {isDeleting
-                      ? <RefreshCw size={11} className="spin" />
-                      : <Trash2 size={11} />
+                      ? <RefreshCw size={10} className="spin" />
+                      : <Trash2 size={10} />
                     }
                     {lang === 'ar' ? 'حذف' : 'Delete'}
                   </button>

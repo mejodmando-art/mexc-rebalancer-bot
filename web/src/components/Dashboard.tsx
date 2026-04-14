@@ -283,67 +283,96 @@ export default function Dashboard({ lang }: Props) {
         />
       </div>
 
-      {/* Invested + P&L card */}
+      {/* P&L Card */}
       {(() => {
-        const current = status?.total_usdt ?? null;
+        // P&L = portfolio value (tracked coins only) minus the configured invested amount
+        const current  = status?.total_usdt ?? null;
         const invested = investedUsdt;
-        const pnl = current !== null && invested !== null ? current - invested : null;
-        const pnlPct = pnl !== null && invested && invested > 0 ? (pnl / invested) * 100 : null;
+        const pnl      = current !== null && invested !== null && invested > 0 ? current - invested : null;
+        const pnlPct   = pnl !== null && invested && invested > 0 ? (pnl / invested) * 100 : null;
         const isProfit = pnl !== null && pnl >= 0;
+        const pnlColor = isProfit ? '#00D4AA' : '#FF7B72';
+        const pnlBg    = isProfit ? 'rgba(0,212,170,0.08)' : 'rgba(255,123,114,0.08)';
+        const pnlBorder= isProfit ? 'rgba(0,212,170,0.2)'  : 'rgba(255,123,114,0.2)';
 
         return (
-          <div className="card p-4 animate-fade-up" style={{ animationDelay: '0.08s' }}>
-            <div className="flex items-center justify-between gap-3">
-              {/* Invested */}
-              <div className="flex-1">
-                <p className="text-[11px] mb-1" style={{ color: 'var(--text-muted)' }}>
+          <div
+            className="animate-fade-up rounded-2xl overflow-hidden"
+            style={{ animationDelay: '0.08s', border: `1px solid ${pnl !== null ? pnlBorder : 'var(--border)'}`, background: 'var(--bg-card)' }}
+          >
+            {/* Top accent bar */}
+            {pnl !== null && (
+              <div className="h-0.5 w-full" style={{ background: `linear-gradient(90deg, ${pnlColor}, transparent)` }} />
+            )}
+
+            <div className="p-4">
+              {/* Row: labels */}
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-[11px] font-bold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
                   {lang === 'ar' ? 'المبلغ المستثمر' : 'Invested'}
-                </p>
-                {loading ? (
-                  <div className="skeleton h-5 w-20 rounded" />
-                ) : (
-                  <p className="num font-bold text-base" style={{ color: 'var(--text-main)' }}>
-                    {invested !== null ? fmtUsd(invested) : '—'}
-                  </p>
-                )}
+                </span>
+                <span className="text-[11px] font-bold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+                  {lang === 'ar' ? 'الربح / الخسارة' : 'P&L'}
+                </span>
               </div>
 
-              {/* Divider */}
-              <div className="w-px h-10 shrink-0" style={{ background: 'var(--border)' }} />
-
-              {/* P&L */}
-              <div className="flex-1 text-end">
-                <p className="text-[11px] mb-1" style={{ color: 'var(--text-muted)' }}>
-                  {lang === 'ar' ? 'الربح / الخسارة' : 'Profit / Loss'}
-                </p>
+              {/* Row: values */}
+              <div className="flex items-center justify-between gap-3">
+                {/* Invested value */}
                 {loading ? (
-                  <div className="skeleton h-5 w-20 rounded ms-auto" />
+                  <div className="skeleton h-7 w-24 rounded-lg" />
+                ) : (
+                  <div>
+                    <span className="num font-bold text-xl" style={{ color: 'var(--text-main)' }}>
+                      {invested !== null ? fmtUsd(invested) : '—'}
+                    </span>
+                    <p className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                      {lang === 'ar' ? 'رأس المال' : 'Capital'}
+                    </p>
+                  </div>
+                )}
+
+                {/* Arrow divider */}
+                <div className="flex items-center gap-1 shrink-0" style={{ color: 'var(--border)' }}>
+                  <div className="h-px w-6" style={{ background: 'var(--border)' }} />
+                  <div className="w-1.5 h-1.5 rounded-full" style={{ background: 'var(--border)' }} />
+                </div>
+
+                {/* P&L value */}
+                {loading ? (
+                  <div className="skeleton h-7 w-28 rounded-lg" />
                 ) : pnl !== null ? (
-                  <div className="flex items-center justify-end gap-1.5">
+                  <div
+                    className="flex items-center gap-2 px-3 py-2 rounded-xl"
+                    style={{ background: pnlBg, border: `1px solid ${pnlBorder}` }}
+                  >
                     <div
-                      className="flex items-center justify-center w-5 h-5 rounded-full shrink-0"
-                      style={{ background: isProfit ? '#00D4AA22' : '#F4736822' }}
+                      className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
+                      style={{ background: `${pnlColor}22` }}
                     >
                       {isProfit
-                        ? <TrendingUp size={11} style={{ color: '#00D4AA' }} />
-                        : <TrendingDown size={11} style={{ color: '#F47368' }} />
+                        ? <TrendingUp  size={14} style={{ color: pnlColor }} />
+                        : <TrendingDown size={14} style={{ color: pnlColor }} />
                       }
                     </div>
                     <div>
-                      <p className="num font-bold text-base leading-tight"
-                         style={{ color: isProfit ? '#00D4AA' : '#F47368' }}>
+                      <p className="num font-bold text-base leading-tight" style={{ color: pnlColor }}>
                         {isProfit ? '+' : ''}{fmtUsd(pnl)}
                       </p>
                       {pnlPct !== null && (
-                        <p className="num text-[10px] leading-tight"
-                           style={{ color: isProfit ? '#00D4AA' : '#F47368' }}>
+                        <p className="num text-[11px] font-semibold leading-tight" style={{ color: pnlColor }}>
                           {isProfit ? '+' : ''}{pnlPct.toFixed(2)}%
                         </p>
                       )}
                     </div>
                   </div>
                 ) : (
-                  <p className="num text-base" style={{ color: 'var(--text-muted)' }}>—</p>
+                  <div className="px-3 py-2 rounded-xl" style={{ background: 'var(--bg-input)' }}>
+                    <p className="num text-base font-bold" style={{ color: 'var(--text-muted)' }}>—</p>
+                    <p className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                      {lang === 'ar' ? 'لا يوجد مبلغ مستثمر' : 'No invested amount set'}
+                    </p>
+                  </div>
                 )}
               </div>
             </div>
