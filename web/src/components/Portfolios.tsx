@@ -413,7 +413,11 @@ export default function Portfolios({ lang, onActivated }: Props) {
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+    const t = setInterval(load, 15000);
+    return () => clearInterval(t);
+  }, [load]);
 
   const handleActivate = async (id: number) => {
     setActivating(id); setMsg('');

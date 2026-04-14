@@ -119,7 +119,7 @@ export default function Dashboard({ lang }: Props) {
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
   useEffect(() => {
-    const t = setInterval(() => { if (autoRefreshRef.current) fetchAll(true); }, 30000);
+    const t = setInterval(() => { if (autoRefreshRef.current) fetchAll(true); }, 15000);
     return () => clearInterval(t);
   }, [fetchAll]);
 
@@ -699,7 +699,7 @@ export default function Dashboard({ lang }: Props) {
         <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
           {refreshing
             ? (lang === 'ar' ? 'جاري التحديث...' : 'Refreshing...')
-            : (lang === 'ar' ? 'تحديث تلقائي كل 30 ثانية' : 'Auto-refresh every 30s')}
+            : (lang === 'ar' ? 'تحديث تلقائي كل 15 ثانية' : 'Auto-refresh every 15s')}
         </span>
       </div>
     </div>

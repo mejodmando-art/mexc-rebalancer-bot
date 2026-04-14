@@ -17,7 +17,7 @@ export default function Settings({ lang, onSaved }: Props) {
   const [threshold, setThreshold]     = useState(5);
   const [frequency, setFrequency]     = useState('daily');
   const [timedHour, setTimedHour]     = useState(10);
-  const [paperTrading, setPaperTrading]   = useState(false);
+  const [paperTrading]                    = useState(false);
   const [saving, setSaving]           = useState(false);
   const [resetting, setResetting]     = useState(false);
   const [msg, setMsg]                 = useState('');
@@ -30,7 +30,6 @@ export default function Settings({ lang, onSaved }: Props) {
     setThreshold(c.rebalance.proportional.threshold_pct);
     setFrequency(c.rebalance.timed.frequency);
     setTimedHour(c.rebalance.timed.hour ?? 10);
-    setPaperTrading(c.paper_trading ?? false);
   };
 
   // Load portfolio list + default to active portfolio
@@ -332,25 +331,6 @@ export default function Settings({ lang, onSaved }: Props) {
             ? (lang === 'ar' ? '⏳ جاري المزامنة...' : '⏳ Syncing...')
             : (lang === 'ar' ? '🔄 مزامنة القيمة الابتدائية مع MEXC' : '🔄 Sync initial value from MEXC')}
         </button>
-      </div>
-
-      {/* Toggles */}
-      <div className="card space-y-4">
-        <div className="label mb-0">{tr('extraOptions', lang)}</div>
-        {[
-          { key: 'paper', label: '🧪 ' + tr('paperMode', lang), desc: tr('paperModeDesc', lang), val: paperTrading, set: setPaperTrading, color: 'bg-yellow-500' },
-        ].map(({ key, label, desc, val, set, color }) => (
-          <label key={key} className="flex items-center justify-between cursor-pointer">
-            <div>
-              <div className="text-sm font-medium" style={{ color: 'var(--text-main)' }}>{label}</div>
-              <div className="text-xs" style={{ color: 'var(--text-muted)' }}>{desc}</div>
-            </div>
-            <div className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer ${val ? color : 'bg-gray-700'}`}
-              onClick={() => set(!val)}>
-              <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${val ? 'translate-x-5' : 'translate-x-0.5'}`} />
-            </div>
-          </label>
-        ))}
       </div>
 
       {msg && (
