@@ -11,6 +11,7 @@ import {
   startBot, stopBot, triggerRebalance, cancelRebalance,
   getRebalanceJobStatus, getAccountTotal, getConfig,
   listPortfolios, activatePortfolio, rebalancePortfolio, startPortfolio,
+  stopPortfolio, getPortfolioAssets,
 } from '../lib/api';
 import { Lang, tr } from '../lib/i18n';
 import { useToast } from './Toast';
@@ -62,6 +63,31 @@ export default function Dashboard({ lang }: Props) {
   const [showBuyModal,    setShowBuyModal]    = useState(false);
   const [selectedPortId,  setSelectedPortId]  = useState<number | null>(null);
 
+  // Portfolio view selector: null = "all", number = specific portfolio id
+  const [viewPortId,      setViewPortId]      = useState<number | 'all'>('all');
+  const [showPortPicker,  setShowPortPicker]  = useState(false);
+  // Per-portfolio assets data when viewing "all"
+  const [allPortAssets,   setAllPortAssets]   = useState<Record<number, any>>({});
+  const [loadingPortAssets, setLoadingPortAssets] = useState(false);
+  // Per-portfolio loop toggle state
+  const [togglingLoop,    setTogglingLoop]    = useState<number | null>(null);
+
+
+  const fetchPortfolioAssets = useCallback(async (list: any[]) => {
+    if (list.length === 0) return;
+    setLoadingPortAssets(true);
+    const results: Record<number, any> = {};
+    await Promise.allSettled(
+      list.map(async (p) => {
+        try {
+          const data = await getPortfolioAssets(p.id);
+          results[p.id] = data;
+        } catch { /* skip failed */ }
+      })
+    );
+    setAllPortAssets(results);
+    setLoadingPortAssets(false);
+  }, []);
 
   const fetchAll = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -81,6 +107,7 @@ export default function Dashboard({ lang }: Props) {
           const active = list.find((p: any) => p.active) ?? list[0];
           setSelectedPortId(active.id);
         }
+        fetchPortfolioAssets(list);
       }).catch(() => {});
     } catch (err: any) {
       if (!silent) toast.error(tr('errLoad', lang), err?.message);
@@ -88,7 +115,7 @@ export default function Dashboard({ lang }: Props) {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [lang, toast, selectedPortId]);
+  }, [lang, toast, selectedPortId, fetchPortfolioAssets]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
   useEffect(() => {
@@ -182,6 +209,24 @@ export default function Dashboard({ lang }: Props) {
   };
 
 
+
+  const handlePortfolioToggle = async (p: any) => {
+    setTogglingLoop(p.id);
+    try {
+      if (p.running) {
+        await stopPortfolio(p.id);
+        toast.info(lang === 'ar' ? `تم إيقاف ${p.name}` : `${p.name} stopped`);
+      } else {
+        await startPortfolio(p.id);
+        toast.success(lang === 'ar' ? `تم تشغيل ${p.name}` : `${p.name} started`);
+      }
+      fetchAll(true);
+    } catch (err: any) {
+      toast.error(lang === 'ar' ? 'فشل تغيير الحالة' : 'Toggle failed', err?.message);
+    } finally {
+      setTogglingLoop(null);
+    }
+  };
 
   const handleBotToggle = async () => {
     setBotLoading(true);
@@ -467,17 +512,182 @@ export default function Dashboard({ lang }: Props) {
         </div>
       )}
 
-      {/* Assets table */}
-      <div className="card p-5 animate-fade-up" style={{ animationDelay: '0.15s' }}>
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="section-title">{tr('assetTable', lang)}</h2>
-          {!loading && status?.assets?.length ? (
-            <span className="badge" style={{ background: 'var(--bg-input)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}>
-              {status.assets.length} {lang === 'ar' ? 'عملة' : 'coins'}
+      {/* Portfolio view selector + Assets */}
+      <div className="animate-fade-up space-y-3" style={{ animationDelay: '0.15s' }}>
+
+        {/* Selector bar */}
+        {portfolios.length > 0 && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
+              {lang === 'ar' ? 'عرض:' : 'View:'}
             </span>
-          ) : null}
-        </div>
-        <AssetsTable assets={status?.assets ?? []} loading={loading} lang={lang} onRefresh={() => fetchAll(true)} />
+
+            {/* All button */}
+            <button
+              onClick={() => { setViewPortId('all'); setShowPortPicker(false); }}
+              className="px-3 py-1.5 rounded-xl text-xs font-bold transition-all"
+              style={{
+                background: viewPortId === 'all' ? 'var(--brand)' : 'var(--bg-input)',
+                color: viewPortId === 'all' ? '#000' : 'var(--text-muted)',
+                border: `1px solid ${viewPortId === 'all' ? 'var(--brand)' : 'var(--border)'}`,
+              }}
+            >
+              {lang === 'ar' ? '📂 الجميع' : '📂 All'}
+            </button>
+
+            {/* Individual portfolio buttons */}
+            {portfolios.map(p => (
+              <button
+                key={p.id}
+                onClick={() => { setViewPortId(p.id); setShowPortPicker(false); }}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all"
+                style={{
+                  background: viewPortId === p.id ? 'var(--brand)' : 'var(--bg-input)',
+                  color: viewPortId === p.id ? '#000' : 'var(--text-muted)',
+                  border: `1px solid ${viewPortId === p.id ? 'var(--brand)' : 'var(--border)'}`,
+                  maxWidth: 140,
+                }}
+              >
+                <span
+                  className="w-1.5 h-1.5 rounded-full shrink-0"
+                  style={{ background: p.running ? '#22c55e' : 'var(--text-muted)' }}
+                />
+                <span className="truncate">{p.name}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* ── Single portfolio view ── */}
+        {viewPortId !== 'all' && (
+          <div className="card p-5">
+            {(() => {
+              const portData = allPortAssets[viewPortId as number];
+              const port = portfolios.find(p => p.id === viewPortId);
+              return (
+                <>
+                  <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                    <div className="flex items-center gap-2">
+                      <h2 className="section-title mb-0">{port?.name ?? tr('assetTable', lang)}</h2>
+                      {portData?.running && (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full animate-pulse"
+                          style={{ background: 'rgba(34,197,94,0.15)', color: '#22c55e' }}>
+                          ▶ {lang === 'ar' ? 'شغّالة' : 'Running'}
+                        </span>
+                      )}
+                      {portData?.mode && (
+                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+                          style={{ background: 'var(--bg-input)', color: 'var(--accent)' }}>
+                          {portData.mode}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {portData?.total_usdt != null && (
+                        <span className="num text-sm font-bold" style={{ color: 'var(--accent)' }}>
+                          ${portData.total_usdt.toLocaleString('en-US', { maximumFractionDigits: 2 })}
+                        </span>
+                      )}
+                      {/* Start / Stop toggle */}
+                      {port && (
+                        <button
+                          onClick={() => handlePortfolioToggle(portData ?? port)}
+                          disabled={togglingLoop === (viewPortId as number)}
+                          className={`flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                            portData?.running ? 'bg-gray-700 text-gray-200' : 'btn-primary'
+                          }`}
+                        >
+                          {togglingLoop === viewPortId
+                            ? <RefreshCw size={11} className="spin" />
+                            : portData?.running
+                              ? <><Square size={11} /> {lang === 'ar' ? 'إيقاف' : 'Stop'}</>
+                              : <><Play size={11} /> {lang === 'ar' ? 'تشغيل' : 'Start'}</>
+                          }
+                        </button>
+                      )}
+                      <span className="badge" style={{ background: 'var(--bg-input)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}>
+                        {portData?.assets?.length ?? 0} {lang === 'ar' ? 'عملة' : 'coins'}
+                      </span>
+                    </div>
+                  </div>
+                  <AssetsTable
+                    assets={portData?.assets ?? []}
+                    loading={loadingPortAssets && !portData}
+                    lang={lang}
+                    onRefresh={() => fetchAll(true)}
+                  />
+                </>
+              );
+            })()}
+          </div>
+        )}
+
+        {/* ── All portfolios view ── */}
+        {viewPortId === 'all' && (
+          <div className="space-y-4">
+            {portfolios.length === 0 ? (
+              <div className="card p-5">
+                <AssetsTable assets={status?.assets ?? []} loading={loading} lang={lang} onRefresh={() => fetchAll(true)} />
+              </div>
+            ) : (
+              portfolios.map(p => {
+                const portData = allPortAssets[p.id];
+                return (
+                  <div key={p.id} className="card p-5"
+                    style={p.running ? { border: '1px solid rgba(34,197,94,0.35)' } : {}}>
+                    {/* Portfolio header */}
+                    <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h2 className="section-title mb-0">{p.name}</h2>
+                        {p.running && (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full animate-pulse"
+                            style={{ background: 'rgba(34,197,94,0.15)', color: '#22c55e' }}>
+                            ▶ {lang === 'ar' ? 'شغّالة' : 'Running'}
+                          </span>
+                        )}
+                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+                          style={{ background: 'var(--bg-input)', color: 'var(--accent)' }}>
+                          {p.mode}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {portData?.total_usdt != null && (
+                          <span className="num text-sm font-bold" style={{ color: 'var(--accent)' }}>
+                            ${portData.total_usdt.toLocaleString('en-US', { maximumFractionDigits: 2 })}
+                          </span>
+                        )}
+                        {/* Start / Stop toggle */}
+                        <button
+                          onClick={() => handlePortfolioToggle(portData ?? p)}
+                          disabled={togglingLoop === p.id}
+                          className={`flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                            p.running ? 'bg-gray-700 text-gray-200' : 'btn-primary'
+                          }`}
+                        >
+                          {togglingLoop === p.id
+                            ? <RefreshCw size={11} className="spin" />
+                            : p.running
+                              ? <><Square size={11} /> {lang === 'ar' ? 'إيقاف' : 'Stop'}</>
+                              : <><Play size={11} /> {lang === 'ar' ? 'تشغيل' : 'Start'}</>
+                          }
+                        </button>
+                        <span className="badge" style={{ background: 'var(--bg-input)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}>
+                          {portData?.assets?.length ?? p.assets?.length ?? 0} {lang === 'ar' ? 'عملة' : 'coins'}
+                        </span>
+                      </div>
+                    </div>
+                    <AssetsTable
+                      assets={portData?.assets ?? []}
+                      loading={loadingPortAssets && !portData}
+                      lang={lang}
+                      onRefresh={() => fetchAll(true)}
+                    />
+                  </div>
+                );
+              })
+            )}
+          </div>
+        )}
       </div>
 
       {/* Footer */}

@@ -390,7 +390,7 @@ def execute_rebalance(client: MEXCClient, cfg: dict) -> list:
 
         if diff > 1.0:    # زيادة أكبر من 1$ → بيع
             sells.append({"sym": sym, "diff": diff, "price": actuals[sym]["price"], "entry": entry})
-        elif diff < -1.0: # ناقص أكبر من 1$ → شراء
+        elif diff < -1.0: # ناقص أكبر من 1$ → شراء (الحد الأدنى 1$)
             buys.append({"sym": sym, "diff": abs(diff), "entry": entry})
         else:
             details.append(entry)
