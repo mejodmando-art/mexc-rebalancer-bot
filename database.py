@@ -73,9 +73,11 @@ _RETRY_DELAY = 0.5  # seconds
 @contextmanager
 def _conn() -> Generator:
     if _USE_POSTGRES:
-        yield from _pg_conn()
+        with _pg_conn() as conn:
+            yield conn
     else:
-        yield from _sqlite_conn()
+        with _sqlite_conn() as conn:
+            yield conn
 
 
 @contextmanager
