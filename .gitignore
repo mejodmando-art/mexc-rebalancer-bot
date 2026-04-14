@@ -38,6 +38,5 @@ ENV/
 !web/frontend/dist/
 !web/frontend/dist/**
 web/.next/
-web/out/
 web/tsconfig.tsbuildinfo
 web/node_modules/
