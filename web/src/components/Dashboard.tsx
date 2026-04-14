@@ -2,12 +2,12 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import {
-  DollarSign, TrendingUp, Clock, Layers,
+  DollarSign, Layers,
   Play, Square, RefreshCw, Zap, Timer,
   CheckCircle2, XCircle,
 } from 'lucide-react';
 import {
-  getStatus, getSnapshots, getBotStatus,
+  getStatus, getBotStatus,
   startBot, stopBot, triggerRebalance, cancelRebalance,
   getRebalanceJobStatus, getAccountTotal,
 } from '../lib/api';
@@ -15,7 +15,6 @@ import { Lang, tr } from '../lib/i18n';
 import { useToast } from './Toast';
 import StatCard from './StatCard';
 import PortfolioPieChart from './PortfolioPieChart';
-import PerformanceChart from './PerformanceChart';
 import AssetsTable from './AssetsTable';
 
 interface Asset {
@@ -23,8 +22,7 @@ interface Asset {
   diff_pct: number; value_usdt: number; balance: number; price_usdt: number;
 }
 interface StatusData {
-  total_usdt: number; profit_usdt: number; profit_pct: number;
-  last_rebalance: string | null; assets: Asset[];
+  total_usdt: number; assets: Asset[];
   bot_name?: string; mode?: string;
 }
 interface Props { lang: Lang }
@@ -42,20 +40,12 @@ function createRipple(e: React.MouseEvent<HTMLButtonElement>) {
   setTimeout(() => ripple.remove(), 700);
 }
 
-function formatTime(iso: string | null, lang: Lang): string {
-  if (!iso) return tr('notYet', lang);
-  try {
-    return new Date(iso).toLocaleString(lang === 'ar' ? 'ar-EG' : 'en-US', {
-      month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-    });
-  } catch { return iso; }
-}
 
 export default function Dashboard({ lang }: Props) {
   const toast = useToast();
 
   const [status,       setStatus]       = useState<StatusData | null>(null);
-  const [snapshots,    setSnapshots]    = useState<any[]>([]);
+
   const [botRunning,   setBotRunning]   = useState(false);
   const [loading,      setLoading]      = useState(true);
   const [accountTotal, setAccountTotal] = useState<number | null>(null);
@@ -75,11 +65,10 @@ export default function Dashboard({ lang }: Props) {
     if (!silent) setLoading(true);
     else setRefreshing(true);
     try {
-      const [s, snaps, bot] = await Promise.all([
-        getStatus(), getSnapshots(90), getBotStatus(),
+      const [s, bot] = await Promise.all([
+        getStatus(), getBotStatus(),
       ]);
       setStatus(s);
-      setSnapshots(snaps ?? []);
       setBotRunning(bot?.running ?? false);
       // Fetch full account total separately (non-blocking)
       getAccountTotal().then(r => setAccountTotal(r.total_usdt)).catch(() => {});
@@ -173,7 +162,7 @@ export default function Dashboard({ lang }: Props) {
     }
   };
 
-  const isProfit = (status?.profit_usdt ?? 0) >= 0;
+
 
   return (
     <div className="space-y-6">
@@ -250,7 +239,7 @@ export default function Dashboard({ lang }: Props) {
       </div>
 
       {/* Stat Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4">
         <StatCard
           title={lang === 'ar' ? 'إجمالي الحساب' : 'Account Total'}
           value={accountTotal === null ? '—' : `$${accountTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
@@ -267,46 +256,18 @@ export default function Dashboard({ lang }: Props) {
           icon={Layers} iconColor="#A78BFA"
           loading={loading} delay={0.05}
         />
-        <StatCard
-          title={tr('profitLoss', lang)}
-          value={loading ? '—' : `${isProfit ? '+' : ''}$${(status?.profit_usdt ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-          change={loading ? undefined : `${isProfit ? '+' : ''}${(status?.profit_pct ?? 0).toFixed(2)}%`}
-          changePositive={loading ? null : isProfit}
-          icon={TrendingUp} iconColor={isProfit ? '#00D4AA' : '#FF7B72'}
-          loading={loading} delay={0.1}
-        />
-        <StatCard
-          title={tr('lastRebalance', lang)}
-          value={loading ? '—' : formatTime(status?.last_rebalance ?? null, lang)}
-          icon={Clock} iconColor="#F472B6"
-          loading={loading} delay={0.15}
-        />
       </div>
 
       {/* Charts row */}
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
-        <div className="card p-5 lg:col-span-2 animate-fade-up" style={{ animationDelay: '0.2s' }}>
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="section-title">{tr('assetDist', lang)}</h2>
-          </div>
-          <PortfolioPieChart
-            assets={status?.assets ?? []}
-            totalUsdt={status?.total_usdt ?? 0}
-            loading={loading} lang={lang}
-          />
+      <div className="card p-5 animate-fade-up" style={{ animationDelay: '0.2s' }}>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="section-title">{tr('assetDist', lang)}</h2>
         </div>
-
-        <div className="card p-5 lg:col-span-3 animate-fade-up" style={{ animationDelay: '0.25s' }}>
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="section-title">{tr('portfolioPerf', lang)}</h2>
-            {snapshots.length > 0 && (
-              <span className="text-xs num" style={{ color: 'var(--text-muted)' }}>
-                {snapshots.length} {lang === 'ar' ? 'نقطة' : 'pts'}
-              </span>
-            )}
-          </div>
-          <PerformanceChart snapshots={snapshots} loading={loading} lang={lang} />
-        </div>
+        <PortfolioPieChart
+          assets={status?.assets ?? []}
+          totalUsdt={status?.total_usdt ?? 0}
+          loading={loading} lang={lang}
+        />
       </div>
 
       {/* Assets table */}
