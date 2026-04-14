@@ -1,6 +1,6 @@
 'use client';
 
-import { TrendingUp, ChevronRight, LayoutDashboard, Briefcase, PlusCircle, Settings, Copy } from 'lucide-react';
+import { TrendingUp, ChevronRight, LayoutDashboard, Briefcase, PlusCircle, Settings } from 'lucide-react';
 import { Lang, tr } from '../lib/i18n';
 
 type Tab = 'dashboard' | 'portfolios' | 'create' | 'settings' | 'copy';
@@ -12,12 +12,11 @@ interface SidebarProps {
   lang: Lang;
 }
 
-const TABS: { key: Tab; icon: React.ElementType; labelKey: string }[] = [
-  { key: 'dashboard',  icon: LayoutDashboard, labelKey: 'dashboard' },
-  { key: 'portfolios', icon: Briefcase,        labelKey: 'myPortfolios' },
-  { key: 'create',     icon: PlusCircle,       labelKey: 'createBot' },
-  { key: 'settings',   icon: Settings,         labelKey: 'settings' },
-  { key: 'copy',       icon: Copy,             labelKey: 'copyPortfolio' },
+const TABS: { key: Tab; icon: React.ElementType; labelKey: string; color: string; glow: string }[] = [
+  { key: 'dashboard',  icon: LayoutDashboard, labelKey: 'dashboard',    color: '#00D4AA', glow: 'rgba(0,212,170,0.4)' },
+  { key: 'portfolios', icon: Briefcase,        labelKey: 'myPortfolios', color: '#60A5FA', glow: 'rgba(96,165,250,0.4)' },
+  { key: 'create',     icon: PlusCircle,       labelKey: 'createBot',    color: '#A78BFA', glow: 'rgba(167,139,250,0.4)' },
+  { key: 'settings',   icon: Settings,         labelKey: 'settings',     color: '#FB923C', glow: 'rgba(251,146,60,0.4)' },
 ];
 
 export default function Sidebar({ active, onNav, botRunning, lang }: SidebarProps) {
@@ -36,21 +35,71 @@ export default function Sidebar({ active, onNav, botRunning, lang }: SidebarProp
       </div>
 
       {/* Nav */}
-      <nav className="flex flex-col gap-1 flex-1">
+      <nav className="flex flex-col gap-1.5 flex-1">
         <div className="px-3 mb-2">
           <span className="label">{lang === 'ar' ? 'القائمة' : 'Menu'}</span>
         </div>
-        {TABS.map(({ key, icon: Icon, labelKey }) => (
-          <button
-            key={key}
-            onClick={() => onNav(key)}
-            className={`sidebar-item w-full text-start animate-fade-up ${active === key ? 'active' : ''}`}
-          >
-            <Icon size={16} strokeWidth={active === key ? 2.5 : 1.8} />
-            <span className="flex-1">{tr(labelKey, lang)}</span>
-            {active === key && <ChevronRight size={14} className="opacity-50" />}
-          </button>
-        ))}
+        {TABS.map(({ key, icon: Icon, labelKey, color, glow }) => {
+          const isActive = active === key;
+          return (
+            <button
+              key={key}
+              onClick={() => onNav(key)}
+              className="sidebar-item w-full text-start animate-fade-up"
+              style={{
+                color: isActive ? color : 'var(--text-muted)',
+                background: isActive ? `linear-gradient(135deg, ${color}18, ${color}08)` : undefined,
+                borderColor: isActive ? `${color}44` : 'transparent',
+                boxShadow: isActive
+                  ? `0 2px 12px ${glow}, inset 0 1px 0 rgba(255,255,255,0.08)`
+                  : 'none',
+              }}
+            >
+              {/* 3D icon wrapper */}
+              <span
+                className="flex items-center justify-center rounded-xl shrink-0 transition-all duration-200"
+                style={{
+                  width: 34,
+                  height: 34,
+                  background: isActive
+                    ? `linear-gradient(145deg, ${color}33, ${color}11)`
+                    : 'var(--bg-input)',
+                  boxShadow: isActive
+                    ? `0 4px 12px ${glow}, inset 0 1px 0 rgba(255,255,255,0.2), inset 0 -1px 0 rgba(0,0,0,0.15)`
+                    : '0 2px 4px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.06)',
+                  border: isActive ? `1px solid ${color}44` : '1px solid var(--border)',
+                }}
+              >
+                <Icon
+                  size={17}
+                  strokeWidth={isActive ? 2.5 : 1.8}
+                  style={{
+                    filter: isActive
+                      ? `drop-shadow(0 0 4px ${glow}) drop-shadow(0 1px 3px rgba(0,0,0,0.4))`
+                      : 'none',
+                    color: isActive ? color : 'var(--text-muted)',
+                  }}
+                />
+              </span>
+              <span
+                className="flex-1 text-sm"
+                style={{
+                  fontWeight: isActive ? 700 : 500,
+                  textShadow: isActive ? `0 0 12px ${glow}` : 'none',
+                  letterSpacing: isActive ? '-0.01em' : 'normal',
+                }}
+              >
+                {tr(labelKey, lang)}
+              </span>
+              {isActive && (
+                <ChevronRight
+                  size={14}
+                  style={{ color, filter: `drop-shadow(0 0 4px ${glow})`, opacity: 0.8 }}
+                />
+              )}
+            </button>
+          );
+        })}
       </nav>
 
       {/* Bot status */}
