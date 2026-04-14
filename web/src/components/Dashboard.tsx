@@ -11,6 +11,7 @@ import {
   startBot, stopBot, triggerRebalance, cancelRebalance,
   getRebalanceJobStatus, getAccountTotal, getConfig,
   listPortfolios, activatePortfolio, rebalancePortfolio, startPortfolio,
+  deletePortfolio,
 } from '../lib/api';
 import { Lang, tr } from '../lib/i18n';
 import { useToast } from './Toast';
@@ -55,9 +56,14 @@ export default function Dashboard({ lang }: Props) {
   const [cancelWindow, setCancelWindow] = useState(0);
   const [cancelTimer,  setCancelTimer]  = useState(0);
   const cancelIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const [botLoading,    setBotLoading]    = useState(false);
-  const [buyActivating, setBuyActivating] = useState(false);
-  const [investedUsdt,  setInvestedUsdt]  = useState<number | null>(null);
+  const [botLoading,      setBotLoading]      = useState(false);
+  const [buyActivating,   setBuyActivating]   = useState(false);
+  const [investedUsdt,    setInvestedUsdt]    = useState<number | null>(null);
+  const [portfolios,      setPortfolios]      = useState<any[]>([]);
+  const [showBuyModal,    setShowBuyModal]    = useState(false);
+  const [selectedPortId,  setSelectedPortId]  = useState<number | null>(null);
+  const [deletingId,      setDeletingId]      = useState<number | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
 
   const fetchAll = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -71,13 +77,20 @@ export default function Dashboard({ lang }: Props) {
         const v = cfg?.portfolio?.total_usdt ?? cfg?.total_usdt ?? null;
         setInvestedUsdt(typeof v === 'number' ? v : null);
       }).catch(() => {});
+      listPortfolios().then(list => {
+        setPortfolios(list);
+        if (selectedPortId === null && list.length > 0) {
+          const active = list.find((p: any) => p.active) ?? list[0];
+          setSelectedPortId(active.id);
+        }
+      }).catch(() => {});
     } catch (err: any) {
       if (!silent) toast.error(tr('errLoad', lang), err?.message);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [lang, toast]);
+  }, [lang, toast, selectedPortId]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
   useEffect(() => {
@@ -143,14 +156,12 @@ export default function Dashboard({ lang }: Props) {
     }
   };
 
-  const handleBuyAndActivate = async () => {
+  const handleBuyAndActivate = async (portfolioId: number) => {
+    setShowBuyModal(false);
     setBuyActivating(true);
     try {
-      const portfolios = await listPortfolios();
-      const active = portfolios.find((p: any) => p.active) ?? portfolios[0];
-      if (!active) throw new Error(lang === 'ar' ? 'لا توجد محفظة' : 'No portfolio found');
-      await activatePortfolio(active.id);
-      const job = await rebalancePortfolio(active.id, 'equal');
+      await activatePortfolio(portfolioId);
+      const job = await rebalancePortfolio(portfolioId, 'equal');
       let attempts = 0;
       while (attempts < 30) {
         await new Promise(r => setTimeout(r, 2000));
@@ -158,7 +169,7 @@ export default function Dashboard({ lang }: Props) {
         if (s.done || s.cancelled) break;
         attempts++;
       }
-      await startPortfolio(active.id);
+      await startPortfolio(portfolioId);
       setBotRunning(true);
       toast.success(
         lang === 'ar' ? 'تم الشراء والتفعيل' : 'Bought & activated',
@@ -169,6 +180,19 @@ export default function Dashboard({ lang }: Props) {
       toast.error(lang === 'ar' ? 'فشل الشراء والتفعيل' : 'Buy & activate failed', err?.message);
     } finally {
       setBuyActivating(false);
+    }
+  };
+
+  const handleDeletePortfolio = async (id: number) => {
+    setDeletingId(id);
+    try {
+      await deletePortfolio(id);
+      setConfirmDeleteId(null);
+      await fetchAll(true);
+    } catch (err: any) {
+      toast.error(lang === 'ar' ? 'فشل الحذف' : 'Delete failed', err?.message);
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -192,8 +216,63 @@ export default function Dashboard({ lang }: Props) {
   const fmtUsd = (n: number) =>
     '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+  const activePortfolio = portfolios.find(p => p.active) ?? null;
+
   return (
     <div className="space-y-5">
+
+      {/* Buy & Activate modal */}
+      {showBuyModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4">
+          <div className="card w-full max-w-md space-y-4" style={{ background: 'var(--bg-card)' }}>
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-bold" style={{ color: 'var(--text-main)' }}>
+                🛒 {lang === 'ar' ? 'اختر المحفظة للشراء والتفعيل' : 'Select Portfolio to Buy & Activate'}
+              </h2>
+              <button onClick={() => setShowBuyModal(false)} className="text-xl" style={{ color: 'var(--text-muted)' }}>✖</button>
+            </div>
+
+            <div className="text-xs rounded-xl px-3 py-2" style={{ background: 'rgba(0,212,170,0.08)', border: '1px solid rgba(0,212,170,0.2)', color: '#00D4AA' }}>
+              ℹ️ {lang === 'ar'
+                ? 'سيتم تفعيل المحفظة المختارة وشراء العملات وعرض الربح/الخسارة'
+                : 'Selected portfolio will be activated, assets purchased, and P&L will be tracked'}
+            </div>
+
+            <div className="space-y-2 max-h-64 overflow-y-auto">
+              {portfolios.map(p => (
+                <button
+                  key={p.id}
+                  onClick={() => { setSelectedPortId(p.id); handleBuyAndActivate(p.id); }}
+                  className="w-full flex items-center justify-between gap-3 px-4 py-3 rounded-xl text-sm text-start transition-all"
+                  style={{
+                    background: selectedPortId === p.id ? 'rgba(0,212,170,0.1)' : 'var(--bg-input)',
+                    border: `1px solid ${selectedPortId === p.id ? 'rgba(0,212,170,0.4)' : 'var(--border)'}`,
+                    color: 'var(--text-main)',
+                  }}
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="w-2 h-2 rounded-full shrink-0" style={{ background: p.active ? '#00D4AA' : 'var(--text-muted)' }} />
+                    <span className="font-semibold truncate">{p.name}</span>
+                    {p.active && (
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0" style={{ background: 'rgba(0,212,170,0.15)', color: '#00D4AA' }}>
+                        {lang === 'ar' ? 'نشطة' : 'Active'}
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-end shrink-0">
+                    <div className="num text-xs font-bold" style={{ color: 'var(--accent)' }}>${p.total_usdt?.toLocaleString('en-US', { maximumFractionDigits: 0 })}</div>
+                    <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{p.assets?.length} {lang === 'ar' ? 'عملة' : 'coins'}</div>
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            <button onClick={() => setShowBuyModal(false)} className="btn-secondary w-full">
+              {lang === 'ar' ? 'إلغاء' : 'Cancel'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3 animate-fade-up">
@@ -219,8 +298,8 @@ export default function Dashboard({ lang }: Props) {
 
         <div className="flex items-center gap-2 flex-wrap">
           <button
-            onClick={handleBuyAndActivate}
-            disabled={buyActivating}
+            onClick={() => setShowBuyModal(true)}
+            disabled={buyActivating || portfolios.length === 0}
             className="btn-secondary !px-3 !min-h-[36px] !text-xs gap-1.5"
             style={{ borderColor: '#00D4AA', color: '#00D4AA' }}
           >
@@ -367,10 +446,10 @@ export default function Dashboard({ lang }: Props) {
                     </div>
                   </div>
                 ) : (
-                  <div className="px-3 py-2 rounded-xl" style={{ background: 'var(--bg-input)' }}>
+                  <div className="px-3 py-2 rounded-xl text-end" style={{ background: 'var(--bg-input)' }}>
                     <p className="num text-base font-bold" style={{ color: 'var(--text-muted)' }}>—</p>
                     <p className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
-                      {lang === 'ar' ? 'لا يوجد مبلغ مستثمر' : 'No invested amount set'}
+                      {lang === 'ar' ? 'فعّل محفظة لعرض الربح/الخسارة' : 'Activate a portfolio to see P&L'}
                     </p>
                   </div>
                 )}
@@ -379,6 +458,27 @@ export default function Dashboard({ lang }: Props) {
           </div>
         );
       })()}
+
+      {/* No active portfolio banner */}
+      {!loading && !activePortfolio && portfolios.length > 0 && (
+        <div
+          className="animate-fade-up rounded-2xl px-4 py-3 flex items-center justify-between gap-3 flex-wrap"
+          style={{ background: 'rgba(248,197,0,0.08)', border: '1px solid rgba(248,197,0,0.25)', animationDelay: '0.1s' }}
+        >
+          <div className="flex items-center gap-2 text-sm" style={{ color: '#F8C500' }}>
+            ⚠️ <span className="font-semibold">
+              {lang === 'ar' ? 'لا توجد محفظة مفعّلة — الربح/الخسارة لن يظهر حتى تفعّل محفظة' : 'No active portfolio — P&L will not show until you activate one'}
+            </span>
+          </div>
+          <button
+            onClick={() => setShowBuyModal(true)}
+            className="text-xs font-bold px-3 py-1.5 rounded-xl shrink-0"
+            style={{ background: 'rgba(248,197,0,0.15)', color: '#F8C500', border: '1px solid rgba(248,197,0,0.3)' }}
+          >
+            🛒 {lang === 'ar' ? 'شراء وتفعيل' : 'Buy & Activate'}
+          </button>
+        </div>
+      )}
 
       {/* Assets table */}
       <div className="card p-5 animate-fade-up" style={{ animationDelay: '0.15s' }}>
@@ -392,6 +492,132 @@ export default function Dashboard({ lang }: Props) {
         </div>
         <AssetsTable assets={status?.assets ?? []} loading={loading} lang={lang} onRefresh={() => fetchAll(true)} />
       </div>
+
+      {/* All portfolios list */}
+      {portfolios.length > 0 && (
+        <div className="animate-fade-up space-y-3" style={{ animationDelay: '0.2s' }}>
+          <h2 className="section-title px-1">
+            {lang === 'ar' ? '📂 جميع المحافظ' : '📂 All Portfolios'}
+          </h2>
+          {portfolios.map(p => (
+            <div
+              key={p.id}
+              className="card p-4 flex flex-col gap-3"
+              style={p.active ? { border: '1px solid rgba(0,212,170,0.4)' } : {}}
+            >
+              {/* Header row */}
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="font-bold text-sm truncate" style={{ color: 'var(--text-main)' }}>{p.name}</span>
+                  {p.active && (
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0" style={{ background: 'rgba(0,212,170,0.15)', color: '#00D4AA' }}>
+                      {lang === 'ar' ? 'نشطة' : 'Active'}
+                    </span>
+                  )}
+                  {p.running && (
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 animate-pulse" style={{ background: 'rgba(34,197,94,0.15)', color: '#22c55e' }}>
+                      ▶ {lang === 'ar' ? 'شغّالة' : 'Running'}
+                    </span>
+                  )}
+                </div>
+                <span className="num text-sm font-bold shrink-0" style={{ color: 'var(--accent)' }}>
+                  ${p.total_usdt?.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                </span>
+              </div>
+
+              {/* Stats */}
+              <div className="flex items-center gap-3 text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                <span>{p.mode}</span>
+                <span>·</span>
+                <span>{p.assets?.length} {lang === 'ar' ? 'عملة' : 'coins'}</span>
+                <span>·</span>
+                <span>{p.ts_created?.slice(0, 10)}</span>
+              </div>
+
+              {/* Asset chips */}
+              <div className="flex flex-wrap gap-1">
+                {p.assets?.slice(0, 6).map((a: any, i: number) => (
+                  <span
+                    key={a.symbol}
+                    className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+                    style={{
+                      background: `${['#00D4AA','#60A5FA','#A78BFA','#F472B6','#FB923C','#34D399'][i % 6]}18`,
+                      color: ['#00D4AA','#60A5FA','#A78BFA','#F472B6','#FB923C','#34D399'][i % 6],
+                    }}
+                  >
+                    {a.symbol} {a.allocation_pct}%
+                  </span>
+                ))}
+                {(p.assets?.length ?? 0) > 6 && (
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: 'var(--bg-input)', color: 'var(--text-muted)' }}>
+                    +{p.assets.length - 6}
+                  </span>
+                )}
+              </div>
+
+              {/* Action buttons */}
+              <div className="flex gap-2 pt-1 border-t flex-wrap" style={{ borderColor: 'var(--border)' }}>
+                {/* Buy & Activate */}
+                {!p.active && (
+                  <button
+                    onClick={() => handleBuyAndActivate(p.id)}
+                    disabled={buyActivating}
+                    className="flex-1 text-xs py-1.5 rounded-xl font-semibold transition-colors disabled:opacity-40"
+                    style={{ background: 'var(--brand)', color: '#000', minWidth: 100 }}
+                  >
+                    {buyActivating ? '⏳' : `🛒 ${lang === 'ar' ? 'شراء وتفعيل' : 'Buy & Activate'}`}
+                  </button>
+                )}
+
+                {/* Replace (activate without buying) */}
+                {!p.active && (
+                  <button
+                    onClick={async () => {
+                      try {
+                        await activatePortfolio(p.id);
+                        toast.success(lang === 'ar' ? 'تم تفعيل المحفظة' : 'Portfolio activated');
+                        fetchAll(true);
+                      } catch (e: any) {
+                        toast.error(lang === 'ar' ? 'فشل التفعيل' : 'Activation failed', e?.message);
+                      }
+                    }}
+                    className="flex-1 text-xs py-1.5 rounded-xl font-semibold border transition-colors"
+                    style={{ borderColor: 'var(--border)', color: 'var(--text-muted)', minWidth: 80 }}
+                  >
+                    🔄 {lang === 'ar' ? 'استبدال' : 'Replace'}
+                  </button>
+                )}
+
+                {/* Delete */}
+                {confirmDeleteId === p.id ? (
+                  <div className="flex gap-1">
+                    <button
+                      onClick={() => handleDeletePortfolio(p.id)}
+                      disabled={deletingId === p.id}
+                      className="btn-danger text-xs px-3 py-1.5 rounded-xl"
+                    >
+                      {deletingId === p.id ? '⏳' : (lang === 'ar' ? 'تأكيد' : 'Confirm')}
+                    </button>
+                    <button
+                      onClick={() => setConfirmDeleteId(null)}
+                      className="btn-secondary text-xs px-3 py-1.5 rounded-xl"
+                    >✖</button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setConfirmDeleteId(p.id)}
+                    disabled={p.running}
+                    className="btn-secondary text-xs px-3 py-1.5 rounded-xl disabled:opacity-30"
+                    title={p.running ? (lang === 'ar' ? 'لا يمكن حذف محفظة شغّالة' : 'Cannot delete running portfolio') : ''}
+                  >
+                    🗑️
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Footer */}
       <div className="flex items-center justify-center gap-2 pb-2">
