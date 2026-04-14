@@ -17,8 +17,6 @@ export default function Settings({ lang, onSaved }: Props) {
   const [threshold, setThreshold]     = useState(5);
   const [frequency, setFrequency]     = useState('daily');
   const [timedHour, setTimedHour]     = useState(10);
-  const [sellTerm, setSellTerm]       = useState(false);
-  const [assetTransfer, setAssetTransfer] = useState(false);
   const [paperTrading, setPaperTrading]   = useState(false);
   const [saving, setSaving]           = useState(false);
   const [resetting, setResetting]     = useState(false);
@@ -32,8 +30,6 @@ export default function Settings({ lang, onSaved }: Props) {
     setThreshold(c.rebalance.proportional.threshold_pct);
     setFrequency(c.rebalance.timed.frequency);
     setTimedHour(c.rebalance.timed.hour ?? 10);
-    setSellTerm(c.termination.sell_at_termination);
-    setAssetTransfer(c.asset_transfer.enable_asset_transfer);
     setPaperTrading(c.paper_trading ?? false);
   };
 
@@ -121,8 +117,6 @@ export default function Settings({ lang, onSaved }: Props) {
           proportional: { ...cfg.rebalance.proportional, threshold_pct: threshold },
           timed: { ...cfg.rebalance.timed, frequency, hour: timedHour },
         },
-        termination: { sell_at_termination: sellTerm },
-        asset_transfer: { enable_asset_transfer: assetTransfer },
         paper_trading: paperTrading,
       };
 
@@ -138,8 +132,6 @@ export default function Settings({ lang, onSaved }: Props) {
           threshold_pct: threshold,
           frequency,
           timed_hour: timedHour,
-          sell_at_termination: sellTerm,
-          enable_asset_transfer: assetTransfer,
           paper_trading: paperTrading,
         });
       }
@@ -346,9 +338,7 @@ export default function Settings({ lang, onSaved }: Props) {
       <div className="card space-y-4">
         <div className="label mb-0">{tr('extraOptions', lang)}</div>
         {[
-          { key: 'sell',     label: tr('sellOnStop', lang),      desc: tr('sellOnStopDesc', lang),    val: sellTerm,      set: setSellTerm,      color: 'bg-brand' },
-          { key: 'transfer', label: tr('assetTransfer', lang),   desc: tr('assetTransferDesc', lang), val: assetTransfer, set: setAssetTransfer, color: 'bg-brand' },
-          { key: 'paper',    label: '🧪 ' + tr('paperMode', lang), desc: tr('paperModeDesc', lang),  val: paperTrading,  set: setPaperTrading,  color: 'bg-yellow-500' },
+          { key: 'paper', label: '🧪 ' + tr('paperMode', lang), desc: tr('paperModeDesc', lang), val: paperTrading, set: setPaperTrading, color: 'bg-yellow-500' },
         ].map(({ key, label, desc, val, set, color }) => (
           <label key={key} className="flex items-center justify-between cursor-pointer">
             <div>

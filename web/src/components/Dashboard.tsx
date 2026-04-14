@@ -11,7 +11,6 @@ import {
   startBot, stopBot, triggerRebalance, cancelRebalance,
   getRebalanceJobStatus, getAccountTotal, getConfig,
   listPortfolios, activatePortfolio, rebalancePortfolio, startPortfolio,
-  deletePortfolio,
 } from '../lib/api';
 import { Lang, tr } from '../lib/i18n';
 import { useToast } from './Toast';
@@ -62,8 +61,7 @@ export default function Dashboard({ lang }: Props) {
   const [portfolios,      setPortfolios]      = useState<any[]>([]);
   const [showBuyModal,    setShowBuyModal]    = useState(false);
   const [selectedPortId,  setSelectedPortId]  = useState<number | null>(null);
-  const [deletingId,      setDeletingId]      = useState<number | null>(null);
-  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
+
 
   const fetchAll = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -183,18 +181,7 @@ export default function Dashboard({ lang }: Props) {
     }
   };
 
-  const handleDeletePortfolio = async (id: number) => {
-    setDeletingId(id);
-    try {
-      await deletePortfolio(id);
-      setConfirmDeleteId(null);
-      await fetchAll(true);
-    } catch (err: any) {
-      toast.error(lang === 'ar' ? 'فشل الحذف' : 'Delete failed', err?.message);
-    } finally {
-      setDeletingId(null);
-    }
-  };
+
 
   const handleBotToggle = async () => {
     setBotLoading(true);
@@ -492,132 +479,6 @@ export default function Dashboard({ lang }: Props) {
         </div>
         <AssetsTable assets={status?.assets ?? []} loading={loading} lang={lang} onRefresh={() => fetchAll(true)} />
       </div>
-
-      {/* All portfolios list */}
-      {portfolios.length > 0 && (
-        <div className="animate-fade-up space-y-3" style={{ animationDelay: '0.2s' }}>
-          <h2 className="section-title px-1">
-            {lang === 'ar' ? '📂 جميع المحافظ' : '📂 All Portfolios'}
-          </h2>
-          {portfolios.map(p => (
-            <div
-              key={p.id}
-              className="card p-4 flex flex-col gap-3"
-              style={p.active ? { border: '1px solid rgba(0,212,170,0.4)' } : {}}
-            >
-              {/* Header row */}
-              <div className="flex items-center justify-between gap-2 flex-wrap">
-                <div className="flex items-center gap-2 min-w-0">
-                  <span className="font-bold text-sm truncate" style={{ color: 'var(--text-main)' }}>{p.name}</span>
-                  {p.active && (
-                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0" style={{ background: 'rgba(0,212,170,0.15)', color: '#00D4AA' }}>
-                      {lang === 'ar' ? 'نشطة' : 'Active'}
-                    </span>
-                  )}
-                  {p.running && (
-                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 animate-pulse" style={{ background: 'rgba(34,197,94,0.15)', color: '#22c55e' }}>
-                      ▶ {lang === 'ar' ? 'شغّالة' : 'Running'}
-                    </span>
-                  )}
-                </div>
-                <span className="num text-sm font-bold shrink-0" style={{ color: 'var(--accent)' }}>
-                  ${p.total_usdt?.toLocaleString('en-US', { maximumFractionDigits: 0 })}
-                </span>
-              </div>
-
-              {/* Stats */}
-              <div className="flex items-center gap-3 text-[11px]" style={{ color: 'var(--text-muted)' }}>
-                <span>{p.mode}</span>
-                <span>·</span>
-                <span>{p.assets?.length} {lang === 'ar' ? 'عملة' : 'coins'}</span>
-                <span>·</span>
-                <span>{p.ts_created?.slice(0, 10)}</span>
-              </div>
-
-              {/* Asset chips */}
-              <div className="flex flex-wrap gap-1">
-                {p.assets?.slice(0, 6).map((a: any, i: number) => (
-                  <span
-                    key={a.symbol}
-                    className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
-                    style={{
-                      background: `${['#00D4AA','#60A5FA','#A78BFA','#F472B6','#FB923C','#34D399'][i % 6]}18`,
-                      color: ['#00D4AA','#60A5FA','#A78BFA','#F472B6','#FB923C','#34D399'][i % 6],
-                    }}
-                  >
-                    {a.symbol} {a.allocation_pct}%
-                  </span>
-                ))}
-                {(p.assets?.length ?? 0) > 6 && (
-                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: 'var(--bg-input)', color: 'var(--text-muted)' }}>
-                    +{p.assets.length - 6}
-                  </span>
-                )}
-              </div>
-
-              {/* Action buttons */}
-              <div className="flex gap-2 pt-1 border-t flex-wrap" style={{ borderColor: 'var(--border)' }}>
-                {/* Buy & Activate */}
-                {!p.active && (
-                  <button
-                    onClick={() => handleBuyAndActivate(p.id)}
-                    disabled={buyActivating}
-                    className="flex-1 text-xs py-1.5 rounded-xl font-semibold transition-colors disabled:opacity-40"
-                    style={{ background: 'var(--brand)', color: '#000', minWidth: 100 }}
-                  >
-                    {buyActivating ? '⏳' : `🛒 ${lang === 'ar' ? 'شراء وتفعيل' : 'Buy & Activate'}`}
-                  </button>
-                )}
-
-                {/* Replace (activate without buying) */}
-                {!p.active && (
-                  <button
-                    onClick={async () => {
-                      try {
-                        await activatePortfolio(p.id);
-                        toast.success(lang === 'ar' ? 'تم تفعيل المحفظة' : 'Portfolio activated');
-                        fetchAll(true);
-                      } catch (e: any) {
-                        toast.error(lang === 'ar' ? 'فشل التفعيل' : 'Activation failed', e?.message);
-                      }
-                    }}
-                    className="flex-1 text-xs py-1.5 rounded-xl font-semibold border transition-colors"
-                    style={{ borderColor: 'var(--border)', color: 'var(--text-muted)', minWidth: 80 }}
-                  >
-                    🔄 {lang === 'ar' ? 'استبدال' : 'Replace'}
-                  </button>
-                )}
-
-                {/* Delete */}
-                {confirmDeleteId === p.id ? (
-                  <div className="flex gap-1">
-                    <button
-                      onClick={() => handleDeletePortfolio(p.id)}
-                      disabled={deletingId === p.id}
-                      className="btn-danger text-xs px-3 py-1.5 rounded-xl"
-                    >
-                      {deletingId === p.id ? '⏳' : (lang === 'ar' ? 'تأكيد' : 'Confirm')}
-                    </button>
-                    <button
-                      onClick={() => setConfirmDeleteId(null)}
-                      className="btn-secondary text-xs px-3 py-1.5 rounded-xl"
-                    >✖</button>
-                  </div>
-                ) : (
-                  <button
-                    onClick={() => setConfirmDeleteId(p.id)}
-                    disabled={p.running}
-                    className="btn-secondary text-xs px-3 py-1.5 rounded-xl disabled:opacity-30"
-                    title={p.running ? (lang === 'ar' ? 'لا يمكن حذف محفظة شغّالة' : 'Cannot delete running portfolio') : ''}
-                  >
-                    🗑️
-                  </button>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
 
       {/* Footer */}
       <div className="flex items-center justify-center gap-2 pb-2">
