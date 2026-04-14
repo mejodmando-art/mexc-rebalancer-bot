@@ -328,6 +328,11 @@ app.add_middleware(
 
 _static_dir = os.path.join(_root, "static")
 
+# Mount Next.js static assets so /_next/static/* is served correctly
+_next_dir = os.path.join(_static_dir, "_next")
+if os.path.isdir(_next_dir):
+    app.mount("/_next", StaticFiles(directory=_next_dir), name="nextjs_static")
+
 
 @app.get("/", include_in_schema=False)
 def serve_dashboard():
