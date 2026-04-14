@@ -2,20 +2,19 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import {
-  DollarSign, Wallet,
+  DollarSign, Wallet, TrendingUp, TrendingDown,
   Play, Square, RefreshCw, Zap,
   CheckCircle2, XCircle,
 } from 'lucide-react';
 import {
   getStatus, getBotStatus,
   startBot, stopBot, triggerRebalance, cancelRebalance,
-  getRebalanceJobStatus, getAccountTotal,
+  getRebalanceJobStatus, getAccountTotal, getConfig,
   listPortfolios, activatePortfolio, rebalancePortfolio, startPortfolio,
 } from '../lib/api';
 import { Lang, tr } from '../lib/i18n';
 import { useToast } from './Toast';
 import StatCard from './StatCard';
-import PortfolioPieChart from './PortfolioPieChart';
 import AssetsTable from './AssetsTable';
 
 interface Asset {
@@ -58,6 +57,7 @@ export default function Dashboard({ lang }: Props) {
   const cancelIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [botLoading,    setBotLoading]    = useState(false);
   const [buyActivating, setBuyActivating] = useState(false);
+  const [investedUsdt,  setInvestedUsdt]  = useState<number | null>(null);
 
   const fetchAll = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -67,6 +67,10 @@ export default function Dashboard({ lang }: Props) {
       setStatus(s);
       setBotRunning(bot?.running ?? false);
       getAccountTotal().then(r => setAccountTotal(r.total_usdt)).catch(() => {});
+      getConfig().then(cfg => {
+        const v = cfg?.portfolio?.total_usdt ?? cfg?.total_usdt ?? null;
+        setInvestedUsdt(typeof v === 'number' ? v : null);
+      }).catch(() => {});
     } catch (err: any) {
       if (!silent) toast.error(tr('errLoad', lang), err?.message);
     } finally {
@@ -279,38 +283,73 @@ export default function Dashboard({ lang }: Props) {
         />
       </div>
 
-      {/* Info: explain difference when both values exist */}
-      {accountTotal !== null && status?.total_usdt != null && Math.abs(accountTotal - status.total_usdt) > 1 && (
-        <div className="flex items-start gap-2 px-3 py-2 rounded-xl text-xs animate-fade-up"
-             style={{ background: 'var(--bg-input)', color: 'var(--text-muted)', animationDelay: '0.1s' }}>
-          <span className="shrink-0 mt-0.5">ℹ️</span>
-          <span>
-            {lang === 'ar'
-              ? `إجمالي الحساب (${fmtUsd(accountTotal)}) يشمل كل أصولك على MEXC. قيمة المحفظة (${fmtUsd(status.total_usdt)}) تشمل العملات المخصصة فقط.`
-              : `Account total (${fmtUsd(accountTotal)}) includes all your MEXC assets. Portfolio value (${fmtUsd(status.total_usdt)}) covers only tracked coins.`}
-          </span>
-        </div>
-      )}
+      {/* Invested + P&L card */}
+      {(() => {
+        const current = status?.total_usdt ?? null;
+        const invested = investedUsdt;
+        const pnl = current !== null && invested !== null ? current - invested : null;
+        const pnlPct = pnl !== null && invested && invested > 0 ? (pnl / invested) * 100 : null;
+        const isProfit = pnl !== null && pnl >= 0;
 
-      {/* Pie chart */}
-      <div className="card p-5 animate-fade-up" style={{ animationDelay: '0.1s' }}>
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="section-title">{tr('assetDist', lang)}</h2>
-          <button
-            onClick={() => fetchAll(true)}
-            disabled={refreshing}
-            className="btn-secondary !px-2.5 !min-h-[30px] !text-xs gap-1"
-          >
-            <RefreshCw size={11} className={refreshing ? 'spin' : ''} />
-            {lang === 'ar' ? 'تحديث' : 'Refresh'}
-          </button>
-        </div>
-        <PortfolioPieChart
-          assets={status?.assets ?? []}
-          totalUsdt={status?.total_usdt ?? 0}
-          loading={loading} lang={lang}
-        />
-      </div>
+        return (
+          <div className="card p-4 animate-fade-up" style={{ animationDelay: '0.08s' }}>
+            <div className="flex items-center justify-between gap-3">
+              {/* Invested */}
+              <div className="flex-1">
+                <p className="text-[11px] mb-1" style={{ color: 'var(--text-muted)' }}>
+                  {lang === 'ar' ? 'المبلغ المستثمر' : 'Invested'}
+                </p>
+                {loading ? (
+                  <div className="skeleton h-5 w-20 rounded" />
+                ) : (
+                  <p className="num font-bold text-base" style={{ color: 'var(--text-main)' }}>
+                    {invested !== null ? fmtUsd(invested) : '—'}
+                  </p>
+                )}
+              </div>
+
+              {/* Divider */}
+              <div className="w-px h-10 shrink-0" style={{ background: 'var(--border)' }} />
+
+              {/* P&L */}
+              <div className="flex-1 text-end">
+                <p className="text-[11px] mb-1" style={{ color: 'var(--text-muted)' }}>
+                  {lang === 'ar' ? 'الربح / الخسارة' : 'Profit / Loss'}
+                </p>
+                {loading ? (
+                  <div className="skeleton h-5 w-20 rounded ms-auto" />
+                ) : pnl !== null ? (
+                  <div className="flex items-center justify-end gap-1.5">
+                    <div
+                      className="flex items-center justify-center w-5 h-5 rounded-full shrink-0"
+                      style={{ background: isProfit ? '#00D4AA22' : '#F4736822' }}
+                    >
+                      {isProfit
+                        ? <TrendingUp size={11} style={{ color: '#00D4AA' }} />
+                        : <TrendingDown size={11} style={{ color: '#F47368' }} />
+                      }
+                    </div>
+                    <div>
+                      <p className="num font-bold text-base leading-tight"
+                         style={{ color: isProfit ? '#00D4AA' : '#F47368' }}>
+                        {isProfit ? '+' : ''}{fmtUsd(pnl)}
+                      </p>
+                      {pnlPct !== null && (
+                        <p className="num text-[10px] leading-tight"
+                           style={{ color: isProfit ? '#00D4AA' : '#F47368' }}>
+                          {isProfit ? '+' : ''}{pnlPct.toFixed(2)}%
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <p className="num text-base" style={{ color: 'var(--text-muted)' }}>—</p>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Assets table */}
       <div className="card p-5 animate-fade-up" style={{ animationDelay: '0.15s' }}>
@@ -322,7 +361,7 @@ export default function Dashboard({ lang }: Props) {
             </span>
           ) : null}
         </div>
-        <AssetsTable assets={status?.assets ?? []} loading={loading} lang={lang} />
+        <AssetsTable assets={status?.assets ?? []} loading={loading} lang={lang} onRefresh={() => fetchAll(true)} />
       </div>
 
       {/* Footer */}
