@@ -5,6 +5,7 @@ import {
   listPortfolios, activatePortfolio, deletePortfolio,
   rebalancePortfolio, getRebalanceJobStatus, cancelRebalance,
   stopAndSellPortfolio, startPortfolio, stopPortfolio,
+  savePortfolio, getPortfolio,
 } from '../lib/api';
 import { Lang, tr } from '../lib/i18n';
 
@@ -262,6 +263,132 @@ function StopAndSellModal({ portfolioId, portfolioName, lang, onClose, onDone }:
   );
 }
 
+// ── Copy Portfolio Modal ─────────────────────────────────────────────────────
+interface CopyModalProps {
+  source: any; // summary object from listPortfolios (has id, name, total_usdt)
+  lang: Lang;
+  onClose: () => void;
+  onDone: () => void;
+}
+
+function CopyModal({ source, lang, onClose, onDone }: CopyModalProps) {
+  const srcName: string = source?.name ?? '';
+  const srcUsdt: number = source?.total_usdt ?? 0;
+
+  const [newName,    setNewName]    = useState((lang === 'ar' ? 'نسخة من ' : 'Copy of ') + srcName);
+  const [customUsdt, setCustomUsdt] = useState('');
+  const [saving,     setSaving]     = useState(false);
+  const [error,      setError]      = useState('');
+
+  const handleClone = async () => {
+    const name = newName.trim();
+    if (!name) {
+      setError(lang === 'ar' ? 'أدخل اسم المحفظة الجديدة' : 'Enter a name for the new portfolio');
+      return;
+    }
+    const usdtVal = customUsdt.trim() !== '' ? parseFloat(customUsdt) : srcUsdt;
+    if (isNaN(usdtVal) || usdtVal <= 0) {
+      setError(lang === 'ar' ? 'أدخل مبلغ صحيح' : 'Enter a valid amount');
+      return;
+    }
+
+    setSaving(true);
+    setError('');
+    try {
+      // Fetch full config from backend (returns raw config JSON), then deep-clone with overrides
+      const full = await getPortfolio(source.id);
+      const cfg: any = full;
+      const cloned = JSON.parse(JSON.stringify(cfg));
+      cloned.bot = { ...(cloned.bot ?? {}), name };
+      cloned.portfolio = {
+        ...(cloned.portfolio ?? {}),
+        total_usdt: usdtVal,
+        initial_value_usdt: usdtVal,
+      };
+      cloned.last_rebalance = null;
+
+      await savePortfolio(cloned);
+      onDone();
+    } catch (e: any) {
+      setError(lang === 'ar' ? 'فشل النسخ: ' + e.message : 'Clone failed: ' + e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4">
+      <div className="card w-full max-w-md space-y-5" style={{ background: 'var(--bg-card)' }}>
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-bold" style={{ color: 'var(--text-main)' }}>
+            📋 {tr('copyPortfolio', lang)}
+          </h2>
+          <button onClick={onClose} className="text-xl" style={{ color: 'var(--text-muted)' }}>✖</button>
+        </div>
+
+        <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+          {lang === 'ar' ? 'المصدر: ' : 'Source: '}<strong>{srcName}</strong>
+          {' · '}${srcUsdt.toLocaleString('en-US', { maximumFractionDigits: 2 })}
+        </p>
+
+        {/* New name */}
+        <div className="space-y-1.5">
+          <label className="label">
+            {lang === 'ar' ? 'اسم المحفظة الجديدة (اختياري)' : 'New Portfolio Name (optional)'}
+          </label>
+          <input
+            className="input"
+            value={newName}
+            onChange={e => setNewName(e.target.value)}
+            placeholder={lang === 'ar' ? 'اسم المحفظة الجديدة' : 'New portfolio name'}
+          />
+        </div>
+
+        {/* Custom USDT */}
+        <div className="space-y-1.5">
+          <label className="label">
+            {lang === 'ar' ? 'مبلغ الاستثمار (اختياري)' : 'Investment Amount (optional)'}
+          </label>
+          <div className="relative">
+            <span
+              className="absolute inset-y-0 start-3 flex items-center text-sm font-bold pointer-events-none"
+              style={{ color: 'var(--text-muted)' }}
+            >$</span>
+            <input
+              className="input !ps-7 num"
+              type="number"
+              min="0"
+              step="any"
+              value={customUsdt}
+              onChange={e => setCustomUsdt(e.target.value)}
+              placeholder={srcUsdt > 0 ? srcUsdt.toFixed(2) : '0.00'}
+            />
+          </div>
+          <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+            {lang === 'ar'
+              ? 'اتركه فارغاً للإبقاء على نفس مبلغ المصدر — رصيد كل محفظة مستقل'
+              : 'Leave empty to keep source amount — each portfolio has its own isolated balance'}
+          </p>
+        </div>
+
+        {error && <div className="text-sm text-red-400">{error}</div>}
+
+        <div className="flex gap-2 pt-1">
+          <button onClick={onClose} className="btn-secondary flex-1">
+            {lang === 'ar' ? 'إلغاء' : 'Cancel'}
+          </button>
+          <button onClick={handleClone} disabled={saving} className="btn-accent flex-1 disabled:opacity-40">
+            {saving
+              ? (lang === 'ar' ? '⏳ جاري النسخ...' : '⏳ Cloning...')
+              : `📋 ${tr('copyBtn', lang)}`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main component ───────────────────────────────────────────────────────────
 export default function Portfolios({ lang, onActivated }: Props) {
   const [portfolios, setPortfolios]       = useState<any[]>([]);
@@ -273,6 +400,7 @@ export default function Portfolios({ lang, onActivated }: Props) {
   const [rebalModal, setRebalModal]         = useState<{ id: number; name: string; active: boolean } | null>(null);
   const [stopSellModal, setStopSellModal]   = useState<{ id: number; name: string } | null>(null);
   const [togglingLoop, setTogglingLoop]     = useState<number | null>(null);
+  const [copyModal, setCopyModal]           = useState<any | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -373,6 +501,18 @@ export default function Portfolios({ lang, onActivated }: Props) {
           lang={lang}
           onClose={() => setStopSellModal(null)}
           onDone={(m) => { setMsg('✅ ' + m); load(); }}
+        />
+      )}
+      {copyModal && (
+        <CopyModal
+          source={copyModal}
+          lang={lang}
+          onClose={() => setCopyModal(null)}
+          onDone={() => {
+            setCopyModal(null);
+            setMsg('✅ ' + tr('copySuccess', lang));
+            load();
+          }}
         />
       )}
 
@@ -504,6 +644,19 @@ export default function Portfolios({ lang, onActivated }: Props) {
                     {activating === p.id ? '⏳' : `🛒 ${tr('buyAndActivate', lang)}`}
                   </button>
                 )}
+
+                {/* Copy portfolio button */}
+                <button
+                  onClick={() => setCopyModal(p)}
+                  className="w-full py-2 rounded-xl text-sm font-semibold transition-colors"
+                  style={{
+                    background: 'var(--bg-input)',
+                    border: '1px solid var(--border)',
+                    color: 'var(--text-muted)',
+                  }}
+                >
+                  📋 {tr('copyPortfolio', lang)}
+                </button>
 
                 {/* Rebalance button */}
                 <button
