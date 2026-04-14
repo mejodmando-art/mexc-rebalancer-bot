@@ -443,6 +443,31 @@ def update_config(body: ConfigUpdate):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     save_config(cfg)
+    # Mirror changes to the active portfolio's DB record so total_usdt stays isolated per portfolio
+    try:
+        portfolios_list = list_portfolios()
+        active = next((p for p in portfolios_list if p.get("active")), None)
+        if active:
+            active_cfg = get_portfolio(active["id"])
+            if active_cfg:
+                if body.assets is not None:
+                    active_cfg["portfolio"]["assets"] = cfg["portfolio"]["assets"]
+                if body.total_usdt is not None:
+                    active_cfg["portfolio"]["total_usdt"] = cfg["portfolio"]["total_usdt"]
+                    active_cfg["portfolio"]["initial_value_usdt"] = cfg["portfolio"]["initial_value_usdt"]
+                if body.rebalance_mode is not None:
+                    active_cfg["rebalance"]["mode"] = cfg["rebalance"]["mode"]
+                if body.threshold_pct is not None:
+                    active_cfg["rebalance"]["proportional"]["threshold_pct"] = cfg["rebalance"]["proportional"]["threshold_pct"]
+                if body.frequency is not None:
+                    active_cfg["rebalance"]["timed"]["frequency"] = cfg["rebalance"]["timed"]["frequency"]
+                if body.timed_hour is not None:
+                    active_cfg["rebalance"]["timed"]["hour"] = cfg["rebalance"]["timed"]["hour"]
+                if body.paper_trading is not None:
+                    active_cfg["paper_trading"] = cfg["paper_trading"]
+                update_portfolio_config(active["id"], active_cfg)
+    except Exception as e:
+        log.warning("update_config: could not mirror to active portfolio DB record: %s", e)
     return {"ok": True}
 
 
@@ -486,8 +511,18 @@ def get_account_total():
 
 @app.post("/api/config/reset-initial-value")
 def reset_initial_value():
-    """Reset initial_value_usdt to the current live portfolio value from MEXC."""
-    cfg = load_config()
+    """Reset initial_value_usdt for the active portfolio to the current live MEXC value."""
+    # Operate on the active portfolio in DB so each portfolio's total_usdt stays isolated
+    portfolios = list_portfolios()
+    active = next((p for p in portfolios if p.get("active")), None)
+    if active:
+        cfg = get_portfolio(active["id"])
+        portfolio_id = active["id"]
+    else:
+        cfg = load_config()
+        portfolio_id = None
+    if cfg is None:
+        raise HTTPException(status_code=404, detail="لا توجد محفظة نشطة")
     try:
         client = _client()
         portfolio = get_portfolio_value(client, cfg["portfolio"]["assets"], budget_usdt=None)
@@ -496,7 +531,10 @@ def reset_initial_value():
             raise HTTPException(status_code=400, detail="القيمة الحالية صفر — تحقق من الرصيد")
         cfg["portfolio"]["total_usdt"] = round(live_total, 2)
         cfg["portfolio"]["initial_value_usdt"] = round(live_total, 2)
-        save_config(cfg)
+        if portfolio_id is not None:
+            update_portfolio_config(portfolio_id, cfg)
+        else:
+            save_config(cfg)
         return {"ok": True, "initial_value_usdt": round(live_total, 2)}
     except HTTPException:
         raise
@@ -862,7 +900,7 @@ def api_get_portfolio(portfolio_id: int):
 
 @app.post("/api/portfolios/{portfolio_id}/activate")
 def api_activate_portfolio(portfolio_id: int):
-    """Mark portfolio as the default active one in DB and sync config.json."""
+    """Mark portfolio as the active one in DB. Each portfolio keeps its own total_usdt."""
     cfg = get_portfolio(portfolio_id)
     if cfg is None:
         raise HTTPException(status_code=404, detail="المحفظة غير موجودة")
@@ -870,7 +908,7 @@ def api_activate_portfolio(portfolio_id: int):
         validate_allocations(cfg["portfolio"]["assets"])
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    # Snapshot real portfolio value from MEXC and store as initial baseline
+    # Snapshot real portfolio value from MEXC and persist to this portfolio's DB record only
     try:
         client = _client()
         portfolio = get_portfolio_value(client, cfg["portfolio"]["assets"], budget_usdt=None)
@@ -878,16 +916,16 @@ def api_activate_portfolio(portfolio_id: int):
         if live_total > 0:
             cfg["portfolio"]["total_usdt"] = round(live_total, 2)
             cfg["portfolio"]["initial_value_usdt"] = round(live_total, 2)
+            update_portfolio_config(portfolio_id, cfg)
     except Exception as e:
         log.warning("activate: could not fetch live value: %s", e)
     set_active_portfolio(portfolio_id)
-    save_config(cfg)
     return {"ok": True, "message": f"تم تفعيل المحفظة: {cfg['bot']['name']}"}
 
 
 @app.post("/api/portfolios/{portfolio_id}/start")
 def api_start_portfolio(portfolio_id: int):
-    """Start the rebalancer loop for a specific portfolio."""
+    """Start the rebalancer loop for a specific portfolio. total_usdt is isolated per portfolio in DB."""
     cfg = get_portfolio(portfolio_id)
     if cfg is None:
         raise HTTPException(status_code=404, detail="المحفظة غير موجودة")
@@ -897,7 +935,7 @@ def api_start_portfolio(portfolio_id: int):
         raise HTTPException(status_code=400, detail=str(e))
     if _is_portfolio_running(portfolio_id):
         return {"ok": False, "message": "المحفظة شغالة بالفعل"}
-    # Sync real portfolio value before starting
+    # Sync real portfolio value before starting — persist to this portfolio's DB record only
     try:
         client = _client()
         portfolio = get_portfolio_value(client, cfg["portfolio"]["assets"], budget_usdt=None)
@@ -906,7 +944,7 @@ def api_start_portfolio(portfolio_id: int):
             cfg["portfolio"]["total_usdt"] = round(live_total, 2)
             if "initial_value_usdt" not in cfg["portfolio"] or cfg["portfolio"].get("initial_value_usdt", 0) <= 0:
                 cfg["portfolio"]["initial_value_usdt"] = round(live_total, 2)
-            save_config(cfg)
+            update_portfolio_config(portfolio_id, cfg)
     except Exception as e:
         log.warning("start: could not fetch live value: %s", e)
     _start_portfolio_loop(portfolio_id)
