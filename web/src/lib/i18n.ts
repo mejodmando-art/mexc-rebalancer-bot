@@ -79,6 +79,17 @@ export const t: Record<string, Record<Lang, string>> = {
   totalSum:         { ar: 'المجموع',         en: 'Total' },
   mustBe100:        { ar: '(يجب أن يساوي 100%)', en: '(must equal 100%)' },
 
+  // Copy portfolio
+  copyPortfolio:    { ar: 'نسخ محفظة',          en: 'Copy Portfolio' },
+  copyPortfolioDesc:{ ar: 'انسخ إعدادات محفظة موجودة وأنشئ محفظة جديدة منها', en: 'Clone an existing portfolio and create a new one from it' },
+  copySource:       { ar: 'المحفظة المصدر',      en: 'Source Portfolio' },
+  copyNewName:      { ar: 'اسم المحفظة الجديدة', en: 'New Portfolio Name' },
+  copyUsdt:         { ar: 'مبلغ الاستثمار (اختياري)', en: 'Investment Amount (optional)' },
+  copyUsdtHint:     { ar: 'اتركه فارغاً للإبقاء على نفس مبلغ المصدر', en: 'Leave empty to keep source amount' },
+  copyBtn:          { ar: 'نسخ وإنشاء',           en: 'Clone & Create' },
+  copySuccess:      { ar: 'تم نسخ المحفظة بنجاح', en: 'Portfolio cloned successfully' },
+  copyNoPortfolios: { ar: 'لا توجد محافظ للنسخ منها', en: 'No portfolios to clone from' },
+
   // Notifications
   notifTitle:       { ar: 'إعدادات الإشعارات', en: 'Notification Settings' },
   discordWebhook:   { ar: 'Discord Webhook URL', en: 'Discord Webhook URL' },

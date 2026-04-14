@@ -1,9 +1,9 @@
 'use client';
 
-import { Sun, Moon, Globe, LayoutDashboard, Briefcase, PlusCircle, Settings, Bell } from 'lucide-react';
+import { Sun, Moon, Globe, LayoutDashboard, Briefcase, PlusCircle, Settings, Copy } from 'lucide-react';
 import { Lang, tr } from '../lib/i18n';
 
-type Tab = 'dashboard' | 'portfolios' | 'create' | 'settings' | 'notifications';
+type Tab = 'dashboard' | 'portfolios' | 'create' | 'settings' | 'copy';
 
 interface NavbarProps {
   active: Tab;
@@ -16,11 +16,11 @@ interface NavbarProps {
 }
 
 const TABS: { key: Tab; icon: React.ElementType; labelKey: string }[] = [
-  { key: 'dashboard',     icon: LayoutDashboard, labelKey: 'dashboard' },
-  { key: 'portfolios',    icon: Briefcase,        labelKey: 'myPortfolios' },
-  { key: 'create',        icon: PlusCircle,       labelKey: 'createBot' },
-  { key: 'settings',      icon: Settings,         labelKey: 'settings' },
-  { key: 'notifications', icon: Bell,             labelKey: 'notifications' },
+  { key: 'dashboard',  icon: LayoutDashboard, labelKey: 'dashboard' },
+  { key: 'portfolios', icon: Briefcase,        labelKey: 'myPortfolios' },
+  { key: 'create',     icon: PlusCircle,       labelKey: 'createBot' },
+  { key: 'settings',   icon: Settings,         labelKey: 'settings' },
+  { key: 'copy',       icon: Copy,             labelKey: 'copyPortfolio' },
 ];
 
 export default function Navbar({ active, onNav, botRunning, lang, onLangToggle, dark, onThemeToggle }: NavbarProps) {
@@ -36,7 +36,7 @@ export default function Navbar({ active, onNav, botRunning, lang, onLangToggle, 
           {/* Desktop page title */}
           <div className="hidden lg:block">
             <span className="font-semibold text-sm" style={{ color: 'var(--text-muted)' }}>
-              {tr(active === 'dashboard' ? 'dashboard' : active === 'portfolios' ? 'myPortfolios' : active === 'create' ? 'createBot' : active === 'settings' ? 'settings' : 'notifications', lang)}
+              {tr(active === 'dashboard' ? 'dashboard' : active === 'portfolios' ? 'myPortfolios' : active === 'create' ? 'createBot' : active === 'settings' ? 'settings' : 'copyPortfolio', lang)}
             </span>
           </div>
 

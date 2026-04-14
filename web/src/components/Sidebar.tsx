@@ -1,9 +1,9 @@
 'use client';
 
-import { TrendingUp, ChevronRight, LayoutDashboard, Briefcase, PlusCircle, Settings, Bell } from 'lucide-react';
+import { TrendingUp, ChevronRight, LayoutDashboard, Briefcase, PlusCircle, Settings, Copy } from 'lucide-react';
 import { Lang, tr } from '../lib/i18n';
 
-type Tab = 'dashboard' | 'portfolios' | 'create' | 'settings' | 'notifications';
+type Tab = 'dashboard' | 'portfolios' | 'create' | 'settings' | 'copy';
 
 interface SidebarProps {
   active: Tab;
@@ -13,11 +13,11 @@ interface SidebarProps {
 }
 
 const TABS: { key: Tab; icon: React.ElementType; labelKey: string }[] = [
-  { key: 'dashboard',     icon: LayoutDashboard, labelKey: 'dashboard' },
-  { key: 'portfolios',    icon: Briefcase,        labelKey: 'myPortfolios' },
-  { key: 'create',        icon: PlusCircle,       labelKey: 'createBot' },
-  { key: 'settings',      icon: Settings,         labelKey: 'settings' },
-  { key: 'notifications', icon: Bell,             labelKey: 'notifications' },
+  { key: 'dashboard',  icon: LayoutDashboard, labelKey: 'dashboard' },
+  { key: 'portfolios', icon: Briefcase,        labelKey: 'myPortfolios' },
+  { key: 'create',     icon: PlusCircle,       labelKey: 'createBot' },
+  { key: 'settings',   icon: Settings,         labelKey: 'settings' },
+  { key: 'copy',       icon: Copy,             labelKey: 'copyPortfolio' },
 ];
 
 export default function Sidebar({ active, onNav, botRunning, lang }: SidebarProps) {

@@ -7,13 +7,13 @@ import Dashboard from '../components/Dashboard';
 import Portfolios from '../components/Portfolios';
 import CreateBot from '../components/CreateBot';
 import Settings from '../components/Settings';
-import Notifications from '../components/Notifications';
+import CopyPortfolio from '../components/CopyPortfolio';
 import { ToastProvider } from '../components/Toast';
 import { getBotStatus } from '../lib/api';
 import { Lang } from '../lib/i18n';
 import ErrorBoundary from '../components/ErrorBoundary';
 
-type Tab = 'dashboard' | 'portfolios' | 'create' | 'settings' | 'notifications';
+type Tab = 'dashboard' | 'portfolios' | 'create' | 'settings' | 'copy';
 
 export default function App() {
   const [tab,        setTab]        = useState<Tab>('dashboard');
@@ -68,11 +68,11 @@ export default function App() {
           />
           <main className="flex-1 px-4 sm:px-6 py-6 pb-24 lg:pb-8 max-w-screen-xl mx-auto w-full">
             <div key={tab} className="animate-fade-up">
-              {tab === 'dashboard'     && <Dashboard     lang={lang} />}
-              {tab === 'portfolios'    && <Portfolios    lang={lang} onActivated={() => setTab('dashboard')} />}
-              {tab === 'create'        && <CreateBot     lang={lang} onCreated={() => setTab('portfolios')} />}
-              {tab === 'settings'      && <Settings      lang={lang} onSaved={() => setTab('dashboard')} />}
-              {tab === 'notifications' && <Notifications lang={lang} />}
+              {tab === 'dashboard'  && <Dashboard      lang={lang} />}
+              {tab === 'portfolios' && <Portfolios     lang={lang} onActivated={() => setTab('dashboard')} />}
+              {tab === 'create'     && <CreateBot      lang={lang} onCreated={() => setTab('portfolios')} />}
+              {tab === 'settings'   && <Settings       lang={lang} onSaved={() => setTab('dashboard')} />}
+              {tab === 'copy'       && <CopyPortfolio  lang={lang} onCreated={() => setTab('portfolios')} />}
             </div>
           </main>
         </div>
