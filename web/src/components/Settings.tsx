@@ -227,10 +227,10 @@ export default function Settings({ lang, onSaved }: Props) {
                   {isDup && <span className="text-red-400 text-xs mt-0.5">⚠️ {tr('errDuplicate', lang)}</span>}
                 </div>
                 <div className="flex-1 relative">
-                  <input type="number" min={0} max={100} step={0.1} className="input"
+                  <input type="number" min={0} max={100} step={0.1} className="input pe-8"
                     value={a.allocation_pct}
                     onChange={e => updatePct(i, parseFloat(e.target.value) || 0)} />
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm" style={{ color: 'var(--text-muted)' }}>%</span>
+                  <span className="absolute end-3 top-1/2 -translate-y-1/2 text-sm" style={{ color: 'var(--text-muted)' }}>%</span>
                 </div>
                 <button onClick={() => removeAsset(i)} disabled={assets.length <= 2}
                   className="text-red-500 hover:text-red-400 disabled:opacity-30 p-1">🗑️</button>
@@ -311,9 +311,9 @@ export default function Settings({ lang, onSaved }: Props) {
       <div className="card">
         <label className="label">{tr('investedUsdt', lang)}</label>
         <div className="relative">
-          <input type="number" min={1} className="input pl-16" value={totalUsdt}
+          <input type="number" min={1} className="input ps-16" value={totalUsdt}
             onChange={e => setTotalUsdt(parseFloat(e.target.value) || 0)} />
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm" style={{ color: 'var(--text-muted)' }}>USDT</span>
+          <span className="absolute start-3 top-1/2 -translate-y-1/2 text-sm" style={{ color: 'var(--text-muted)' }}>USDT</span>
         </div>
         <p className="text-xs mt-2" style={{ color: 'var(--text-muted)' }}>
           {lang === 'ar'

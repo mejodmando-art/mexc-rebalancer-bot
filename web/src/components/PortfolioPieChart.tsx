@@ -111,10 +111,10 @@ function DonutChart({ data, total, lang }: { data: any[]; total: number; lang: s
       </div>
 
       {/* Legend */}
-      <div className="flex flex-wrap gap-2 justify-center w-full">
+      <div className="flex flex-wrap gap-1.5 justify-center w-full">
         {slices.map((d, i) => (
           <div key={d.symbol}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold cursor-pointer transition-all"
+            className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold cursor-pointer transition-all"
             style={{
               background: hovered === i ? `${d.color}22` : 'var(--bg-input)',
               border: `1px solid ${hovered === i ? d.color : 'var(--border)'}`,
@@ -123,7 +123,18 @@ function DonutChart({ data, total, lang }: { data: any[]; total: number; lang: s
             onMouseEnter={() => setHovered(i)}
             onMouseLeave={() => setHovered(null)}
           >
-            <span className="w-2 h-2 rounded-full" style={{ background: d.color }} />
+            <img
+              src={`https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/32/color/${d.symbol.toLowerCase()}.png`}
+              alt={d.symbol}
+              className="w-3.5 h-3.5 rounded-full"
+              onError={(e) => {
+                const t = e.currentTarget;
+                t.style.display = 'none';
+                const dot = t.nextElementSibling as HTMLElement | null;
+                if (dot) dot.style.display = 'inline-block';
+              }}
+            />
+            <span className="w-2 h-2 rounded-full hidden" style={{ background: d.color }} />
             {d.symbol}
             <span className="num">{d.current_pct.toFixed(1)}%</span>
           </div>
