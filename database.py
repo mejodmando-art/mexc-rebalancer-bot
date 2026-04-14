@@ -33,13 +33,20 @@ def _get_pg_pool():
     if _pg_pool is not None:
         return _pg_pool
     from psycopg2 import pool as pg_pool
+    # options: force read-committed so every query sees the latest committed data.
+    # This prevents stale reads when connections are reused from the pool
+    # (critical for Supabase/PgBouncer in transaction-pooling mode on port 6543).
+    dsn = _DATABASE_URL
+    if "options=" not in (dsn or ""):
+        sep = "&" if "?" in (dsn or "") else "?"
+        dsn = f"{dsn}{sep}options=-c%20default_transaction_isolation%3Dread%5C%20committed"
     _pg_pool = pg_pool.ThreadedConnectionPool(
         minconn=1,
-        maxconn=10,
-        dsn=_DATABASE_URL,
+        maxconn=5,
+        dsn=dsn,
         connect_timeout=10,
     )
-    log.info("PostgreSQL connection pool created (min=1, max=10)")
+    log.info("PostgreSQL connection pool created (min=1, max=5)")
     return _pg_pool
 
 
@@ -89,6 +96,14 @@ def _pg_conn() -> Generator:
         try:
             pool = _get_pg_pool()
             conn = pool.getconn()
+            # Always rollback any leftover transaction from a previous use of this
+            # connection. This is essential with PgBouncer transaction-pooling mode
+            # (Supabase port 6543): without it the connection may carry a stale
+            # snapshot and return outdated rows.
+            try:
+                conn.rollback()
+            except Exception:
+                pass
             conn.autocommit = False
             yield conn
             conn.commit()
