@@ -100,6 +100,7 @@ export const t: Record<string, Record<Lang, string>> = {
   noPortfoliosDesc:   { ar: 'أنشئ محفظتك الأولى من تبويب "إنشاء بوت"', en: 'Create your first portfolio from the "Create Bot" tab' },
   activePortfolio:    { ar: 'نشطة',                      en: 'Active' },
   activatePortfolio:  { ar: 'تفعيل',                     en: 'Activate' },
+  buyAndActivate:     { ar: 'شراء وتفعيل',               en: 'Buy & Activate' },
   currentlyActive:    { ar: 'المحفظة الحالية',            en: 'Currently Active' },
   deletePortfolio:    { ar: 'حذف المحفظة',               en: 'Delete Portfolio' },
   confirmDelete:      { ar: 'تأكيد الحذف',               en: 'Confirm Delete' },

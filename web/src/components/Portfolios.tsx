@@ -301,6 +301,20 @@ export default function Portfolios({ lang, onActivated }: Props) {
     }
   };
 
+  const handleBuyAndActivate = async (p: any) => {
+    setActivating(p.id); setMsg('');
+    try {
+      await activatePortfolio(p.id);
+      await load();
+      // Open rebalance modal with equal type pre-selected for the now-active portfolio
+      setRebalModal({ id: p.id, name: p.name, active: true });
+    } catch (e: any) {
+      setMsg('❌ ' + e.message);
+    } finally {
+      setActivating(null);
+    }
+  };
+
   const handleToggleLoop = async (p: any) => {
     setTogglingLoop(p.id); setMsg('');
     try {
@@ -459,6 +473,18 @@ export default function Portfolios({ lang, onActivated }: Props) {
                     ))}
                   </div>
                 </div>
+
+                {/* Buy & Activate button — only for non-active portfolios */}
+                {!p.running && (
+                  <button
+                    onClick={() => handleBuyAndActivate(p)}
+                    disabled={activating === p.id}
+                    className="w-full py-2 rounded-xl text-sm font-semibold transition-colors disabled:opacity-40"
+                    style={{ background: 'var(--brand)', color: '#000' }}
+                  >
+                    {activating === p.id ? '⏳' : `🛒 ${tr('buyAndActivate', lang)}`}
+                  </button>
+                )}
 
                 {/* Rebalance button */}
                 <button
