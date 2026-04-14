@@ -1083,6 +1083,73 @@ def api_stop_and_sell(portfolio_id: int):
     return {"ok": True, "results": results}
 
 
+@app.get("/api/portfolios/{portfolio_id}/assets")
+def api_portfolio_assets(portfolio_id: int):
+    """
+    Return live asset breakdown for a specific portfolio (same shape as /api/status assets).
+    Used by the dashboard portfolio selector to show per-portfolio coin rows.
+    """
+    cfg = get_portfolio(portfolio_id)
+    if cfg is None:
+        raise HTTPException(status_code=404, detail="المحفظة غير موجودة")
+
+    no_key = not os.environ.get("MEXC_API_KEY")
+    port_assets = cfg["portfolio"]["assets"]
+    targets = {a["symbol"]: a["allocation_pct"] for a in port_assets}
+
+    if no_key:
+        assets_out = [
+            {
+                "symbol": a["symbol"],
+                "balance": 0, "price": 0, "price_usdt": 0,
+                "value_usdt": 0,
+                "actual_pct": a["allocation_pct"],
+                "current_pct": a["allocation_pct"],
+                "target_pct": a["allocation_pct"],
+                "deviation": 0, "diff_pct": 0,
+            }
+            for a in port_assets
+        ]
+        return {
+            "portfolio_id": portfolio_id,
+            "portfolio_name": cfg["bot"]["name"],
+            "total_usdt": cfg["portfolio"].get("total_usdt", 0),
+            "mode": cfg["rebalance"]["mode"],
+            "running": _is_portfolio_running(portfolio_id),
+            "assets": assets_out,
+        }
+
+    try:
+        client = _client()
+        portfolio = get_portfolio_value(client, port_assets, budget_usdt=None)
+        assets_out = []
+        for r in portfolio["assets"]:
+            diff = round(r["actual_pct"] - targets.get(r["symbol"], 0), 2)
+            assets_out.append({
+                "symbol": r["symbol"],
+                "balance": r["balance"],
+                "price": r["price"],
+                "price_usdt": r["price"],
+                "value_usdt": r["value_usdt"],
+                "actual_pct": round(r["actual_pct"], 2),
+                "current_pct": round(r["actual_pct"], 2),
+                "target_pct": targets.get(r["symbol"], 0),
+                "deviation": diff,
+                "diff_pct": diff,
+                "error": r.get("error"),
+            })
+        return {
+            "portfolio_id": portfolio_id,
+            "portfolio_name": cfg["bot"]["name"],
+            "total_usdt": portfolio["total_usdt"],
+            "mode": cfg["rebalance"]["mode"],
+            "running": _is_portfolio_running(portfolio_id),
+            "assets": assets_out,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ---------------------------------------------------------------------------
 # Static file serving – must be LAST so API routes take priority
 # build: 2026-04-14
