@@ -1,7 +1,6 @@
 'use client';
 
-import { Download, TrendingUp, TrendingDown, Minus } from 'lucide-react';
-import { exportCsvUrl } from '../lib/api';
+import { TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import { Lang, tr } from '../lib/i18n';
 
 interface Asset {
@@ -59,13 +58,6 @@ export default function AssetsTable({ assets, loading, lang }: Props) {
 
   return (
     <div>
-      <div className="flex justify-end mb-3">
-        <a href={exportCsvUrl()} download className="btn-secondary !px-3 !min-h-[34px] !text-xs gap-1.5">
-          <Download size={13} />
-          {tr('exportCsv', lang)}
-        </a>
-      </div>
-
       <div className="overflow-x-auto rounded-xl" style={{ border: '1px solid var(--border)' }}>
         <table className="data-table mobile-card-table">
           <thead>

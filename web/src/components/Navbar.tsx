@@ -30,9 +30,6 @@ export default function Navbar({ active, onNav, botRunning, lang, onLangToggle, 
         <div className="h-full px-4 lg:pl-4 flex items-center justify-between gap-3">
           {/* Mobile logo */}
           <div className="flex items-center gap-2 lg:hidden">
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs accent-gradient" style={{ color: '#0D1117' }}>
-              SP
-            </div>
             <span className="font-bold text-sm" style={{ color: 'var(--text-main)' }}>Smart Portfolio</span>
           </div>
 

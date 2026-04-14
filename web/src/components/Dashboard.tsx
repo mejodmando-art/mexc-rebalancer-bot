@@ -2,14 +2,15 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import {
-  DollarSign, Layers,
-  Play, Square, RefreshCw, Zap, Timer,
+  DollarSign,
+  Play, Square, RefreshCw, Zap,
   CheckCircle2, XCircle,
 } from 'lucide-react';
 import {
   getStatus, getBotStatus,
   startBot, stopBot, triggerRebalance, cancelRebalance,
   getRebalanceJobStatus, getAccountTotal,
+  listPortfolios, activatePortfolio, rebalancePortfolio, startPortfolio,
 } from '../lib/api';
 import { Lang, tr } from '../lib/i18n';
 import { useToast } from './Toast';
@@ -59,7 +60,8 @@ export default function Dashboard({ lang }: Props) {
   const [cancelWindow, setCancelWindow] = useState(0);
   const [cancelTimer,  setCancelTimer]  = useState(0);
   const cancelIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const [botLoading, setBotLoading] = useState(false);
+  const [botLoading,    setBotLoading]    = useState(false);
+  const [buyActivating, setBuyActivating] = useState(false);
 
   const fetchAll = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -145,6 +147,38 @@ export default function Dashboard({ lang }: Props) {
     }
   };
 
+  const handleBuyAndActivate = async () => {
+    setBuyActivating(true);
+    try {
+      // Get active portfolio id
+      const portfolios = await listPortfolios();
+      const active = portfolios.find((p: any) => p.active) ?? portfolios[0];
+      if (!active) throw new Error(lang === 'ar' ? 'لا توجد محفظة' : 'No portfolio found');
+      // Activate → rebalance (buy equal) → start loop
+      await activatePortfolio(active.id);
+      const job = await rebalancePortfolio(active.id, 'equal');
+      // Poll until done
+      let attempts = 0;
+      while (attempts < 30) {
+        await new Promise(r => setTimeout(r, 2000));
+        const s = await getRebalanceJobStatus(job.job_id);
+        if (s.done || s.cancelled) break;
+        attempts++;
+      }
+      await startPortfolio(active.id);
+      setBotRunning(true);
+      toast.success(
+        lang === 'ar' ? 'تم الشراء والتفعيل' : 'Bought & activated',
+        lang === 'ar' ? 'تم شراء العملات وتشغيل المحفظة' : 'Assets purchased and portfolio started'
+      );
+      fetchAll();
+    } catch (err: any) {
+      toast.error(lang === 'ar' ? 'فشل الشراء والتفعيل' : 'Buy & activate failed', err?.message);
+    } finally {
+      setBuyActivating(false);
+    }
+  };
+
   const handleBotToggle = async () => {
     setBotLoading(true);
     try {
@@ -185,20 +219,17 @@ export default function Dashboard({ lang }: Props) {
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          {/* Auto-refresh toggle */}
+          {/* Buy & Activate */}
           <button
-            onClick={() => setAutoRefresh(v => !v)}
-            className="btn-secondary !px-3 !min-h-[36px] !text-xs gap-1.5"
+            onClick={handleBuyAndActivate}
+            disabled={buyActivating}
+            className="btn-secondary !px-4 !min-h-[36px] !text-xs gap-1.5"
+            style={{ borderColor: '#00D4AA', color: '#00D4AA' }}
           >
-            <Timer size={13} style={{ color: autoRefresh ? 'var(--accent)' : 'var(--text-muted)' }} />
-            <span style={{ color: autoRefresh ? 'var(--accent)' : 'var(--text-muted)' }}>
-              {autoRefresh ? '30s' : lang === 'ar' ? 'متوقف' : 'Off'}
-            </span>
-          </button>
-
-          {/* Manual refresh */}
-          <button onClick={() => fetchAll(true)} disabled={refreshing} className="btn-secondary !px-3 !min-h-[36px]">
-            <RefreshCw size={14} className={refreshing ? 'spin' : ''} />
+            {buyActivating
+              ? <><RefreshCw size={13} className="spin" /> {lang === 'ar' ? 'جاري...' : 'Working...'}</>
+              : <>{lang === 'ar' ? '🛒 شراء وتفعيل' : '🛒 Buy & Activate'}</>
+            }
           </button>
 
           {/* Bot start/stop */}
@@ -238,8 +269,8 @@ export default function Dashboard({ lang }: Props) {
         </div>
       </div>
 
-      {/* Stat Cards */}
-      <div className="grid grid-cols-2 gap-3 sm:gap-4">
+      {/* Stat Card */}
+      <div className="grid grid-cols-1 gap-3 sm:gap-4">
         <StatCard
           title={lang === 'ar' ? 'إجمالي الحساب' : 'Account Total'}
           value={accountTotal === null ? '—' : `$${accountTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
@@ -247,14 +278,6 @@ export default function Dashboard({ lang }: Props) {
           changePositive={null}
           icon={DollarSign} iconColor="#58A6FF"
           loading={loading && accountTotal === null} delay={0}
-        />
-        <StatCard
-          title={tr('totalPortfolio', lang)}
-          value={loading ? '—' : `$${(status?.total_usdt ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-          change={loading ? undefined : `${(status?.assets?.length ?? 0)} ${tr('currency', lang)}`}
-          changePositive={null}
-          icon={Layers} iconColor="#A78BFA"
-          loading={loading} delay={0.05}
         />
       </div>
 
