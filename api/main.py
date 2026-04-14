@@ -1138,6 +1138,7 @@ def api_stop_and_sell(portfolio_id: int):
 
 # ---------------------------------------------------------------------------
 # Static file serving – must be LAST so API routes take priority
+# build: 2026-04-14
 # ---------------------------------------------------------------------------
 
 @app.get("/{full_path:path}", include_in_schema=False)
