@@ -20,8 +20,6 @@ export default function CreateBot({ lang, onCreated }: Props) {
   const [threshold, setThreshold] = useState(5);
   const [frequency, setFrequency] = useState('daily');
   const [timedHour, setTimedHour] = useState(10);
-  const [sellTerm, setSellTerm]   = useState(false);
-  const [assetTransfer, setAssetTransfer] = useState(false);
   const [paperTrading, setPaperTrading]   = useState(false);
   const [saving, setSaving]       = useState(false);
   const [error, setError]         = useState('');
@@ -88,8 +86,8 @@ export default function CreateBot({ lang, onCreated }: Props) {
           timed: { frequency, hour: timedHour },
           unbalanced: {},
         },
-        termination: { sell_at_termination: sellTerm },
-        asset_transfer: { enable_asset_transfer: assetTransfer },
+        termination: { sell_at_termination: false },
+        asset_transfer: { enable_asset_transfer: false },
         paper_trading: paperTrading,
         last_rebalance: null,
       };
@@ -235,9 +233,7 @@ export default function CreateBot({ lang, onCreated }: Props) {
       <div className="card space-y-4">
         <div className="label mb-0">{tr('extraOptions', lang)}</div>
         {[
-          { key: 'sellTerm',      label: tr('sellOnStop', lang),      desc: tr('sellOnStopDesc', lang),      val: sellTerm,      set: setSellTerm,      color: 'bg-brand' },
-          { key: 'assetTransfer', label: tr('assetTransfer', lang),   desc: tr('assetTransferDesc', lang),   val: assetTransfer, set: setAssetTransfer, color: 'bg-brand' },
-          { key: 'paper',         label: '🧪 ' + tr('paperMode', lang), desc: tr('paperModeDesc', lang),    val: paperTrading,  set: setPaperTrading,  color: 'bg-yellow-500' },
+          { key: 'paper', label: '🧪 ' + tr('paperMode', lang), desc: tr('paperModeDesc', lang), val: paperTrading, set: setPaperTrading, color: 'bg-yellow-500' },
         ].map(({ key, label, desc, val, set, color }) => (
           <label key={key} className="flex items-center justify-between cursor-pointer">
             <div>
