@@ -24,7 +24,13 @@ export default function App() {
 
   useEffect(() => {
     const html = document.documentElement;
-    dark ? html.classList.add('dark') : html.classList.remove('dark');
+    if (dark) {
+      html.classList.add('dark');
+      html.classList.remove('light');
+    } else {
+      html.classList.remove('dark');
+      html.classList.add('light');
+    }
     html.setAttribute('dir', lang === 'ar' ? 'rtl' : 'ltr');
     html.setAttribute('lang', lang);
   }, [dark, lang]);
