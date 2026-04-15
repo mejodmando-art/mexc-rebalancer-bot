@@ -324,14 +324,20 @@ from starlette.requests import Request as StarletteRequest
 from starlette.responses import Response as StarletteResponse
 
 class NoCacheHtmlMiddleware(BaseHTTPMiddleware):
-    """Force no-cache on HTML responses so Railway/CDN never serves stale builds."""
+    """
+    Force no-cache on every HTML response so Railway CDN and browsers
+    never serve a stale build.  Also sets Surrogate-Control so Railway's
+    edge layer bypasses its own cache for HTML.
+    """
     async def dispatch(self, request: StarletteRequest, call_next):
         response: StarletteResponse = await call_next(request)
         ct = response.headers.get("content-type", "")
         if "text/html" in ct:
-            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-            response.headers["Pragma"] = "no-cache"
-            response.headers["Expires"] = "0"
+            response.headers["Cache-Control"]   = "no-cache, no-store, must-revalidate"
+            response.headers["Pragma"]          = "no-cache"
+            response.headers["Expires"]         = "0"
+            response.headers["Surrogate-Control"] = "no-store"
+            response.headers["Vary"]            = "*"
         return response
 
 app.add_middleware(NoCacheHtmlMiddleware)
@@ -343,17 +349,43 @@ _static_dir = os.path.join(_root, "static")
 _IMMUTABLE = "public, max-age=31536000, immutable"
 _NO_CACHE   = "no-cache, no-store, must-revalidate"
 
+# Unique token per process start — injected into HTML responses so the
+# browser ETag changes on every Railway redeploy even if the file bytes
+# are identical.
+import hashlib as _hashlib
+import time as _time
+_DEPLOY_ID = _hashlib.md5(str(_time.time()).encode()).hexdigest()[:12]
+
 # Mount Next.js static assets so /_next/static/* is served correctly
 _next_dir = os.path.join(_static_dir, "_next")
 if os.path.isdir(_next_dir):
     app.mount("/_next", StaticFiles(directory=_next_dir), name="nextjs_static")
 
 
+def _html_response(path: str):
+    """Read an HTML file and inject deploy_id so every redeploy busts the cache."""
+    from fastapi.responses import HTMLResponse
+    with open(path, "r", encoding="utf-8") as f:
+        html = f.read()
+    # Inject deploy stamp into <head> so ETag/content changes every deploy
+    stamp = f'<meta name="x-deploy-id" content="{_DEPLOY_ID}">'
+    html = html.replace("</head>", f"{stamp}</head>", 1)
+    headers = {
+        "Cache-Control":    _NO_CACHE,
+        "Pragma":           "no-cache",
+        "Expires":          "0",
+        "Surrogate-Control":"no-store",
+        "Vary":             "*",
+        "X-Deploy-Id":      _DEPLOY_ID,
+    }
+    return HTMLResponse(content=html, headers=headers)
+
+
 @app.get("/", include_in_schema=False)
 def serve_dashboard():
     index = os.path.join(_static_dir, "index.html")
     if os.path.exists(index):
-        return FileResponse(index, headers={"Cache-Control": _NO_CACHE})
+        return _html_response(index)
     return {"message": "MEXC Rebalancer API", "docs": "/docs"}
 
 
@@ -1455,22 +1487,21 @@ def api_delete_grid_bot(bot_id: int):
 def serve_static(full_path: str):
     candidate = os.path.join(_static_dir, full_path)
     if os.path.isfile(candidate):
-        # Hashed Next.js assets are immutable; everything else must revalidate
         if "/_next/static/" in candidate:
-            cache = _IMMUTABLE
+            # Hashed assets: immutable, cache forever
+            return FileResponse(candidate, headers={"Cache-Control": _IMMUTABLE})
         elif candidate.endswith(".html"):
-            cache = _NO_CACHE
+            return _html_response(candidate)
         else:
-            cache = "public, max-age=3600"
-        return FileResponse(candidate, headers={"Cache-Control": cache})
+            return FileResponse(candidate, headers={"Cache-Control": "public, max-age=3600"})
 
     # Next.js static export: try path/index.html
     candidate_index = os.path.join(_static_dir, full_path, "index.html")
     if os.path.isfile(candidate_index):
-        return FileResponse(candidate_index, headers={"Cache-Control": _NO_CACHE})
+        return _html_response(candidate_index)
 
     # SPA fallback
     index = os.path.join(_static_dir, "index.html")
     if os.path.exists(index):
-        return FileResponse(index, headers={"Cache-Control": _NO_CACHE})
+        return _html_response(index)
     raise HTTPException(status_code=404)
