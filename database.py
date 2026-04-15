@@ -230,17 +230,21 @@ def init_db() -> None:
             """,
             """
             CREATE TABLE IF NOT EXISTS grid_bots (
-                id           SERIAL PRIMARY KEY,
-                ts_created   TEXT    NOT NULL,
-                symbol       TEXT    NOT NULL,
-                investment   REAL    NOT NULL,
-                grid_count   INTEGER NOT NULL DEFAULT 10,
-                price_low    REAL    NOT NULL,
-                price_high   REAL    NOT NULL,
-                status       TEXT    NOT NULL DEFAULT 'running',
-                profit       REAL    NOT NULL DEFAULT 0,
-                orders_json  TEXT    NOT NULL DEFAULT '[]',
-                config_json  TEXT    NOT NULL DEFAULT '{}'
+                id              SERIAL PRIMARY KEY,
+                ts_created      TEXT    NOT NULL,
+                symbol          TEXT    NOT NULL,
+                investment      REAL    NOT NULL,
+                grid_count      INTEGER NOT NULL DEFAULT 10,
+                price_low       REAL    NOT NULL,
+                price_high      REAL    NOT NULL,
+                status          TEXT    NOT NULL DEFAULT 'running',
+                profit          REAL    NOT NULL DEFAULT 0,
+                orders_json     TEXT    NOT NULL DEFAULT '[]',
+                config_json     TEXT    NOT NULL DEFAULT '{}',
+                mode            TEXT    NOT NULL DEFAULT 'normal',
+                avg_buy_price   REAL    NOT NULL DEFAULT 0,
+                base_qty        REAL    NOT NULL DEFAULT 0,
+                unrealized_pnl  REAL    NOT NULL DEFAULT 0
             )
             """,
             """
@@ -285,6 +289,10 @@ def init_db() -> None:
                 "ALTER TABLE portfolio_snapshots ADD COLUMN IF NOT EXISTS portfolio_id INTEGER NOT NULL DEFAULT 1",
                 "ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS bot_running INTEGER NOT NULL DEFAULT 0",
                 "ALTER TABLE grid_bots ADD COLUMN IF NOT EXISTS should_run INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE grid_bots ADD COLUMN IF NOT EXISTS mode TEXT NOT NULL DEFAULT 'normal'",
+                "ALTER TABLE grid_bots ADD COLUMN IF NOT EXISTS avg_buy_price REAL NOT NULL DEFAULT 0",
+                "ALTER TABLE grid_bots ADD COLUMN IF NOT EXISTS base_qty REAL NOT NULL DEFAULT 0",
+                "ALTER TABLE grid_bots ADD COLUMN IF NOT EXISTS unrealized_pnl REAL NOT NULL DEFAULT 0",
             ]
             for m in migrations:
                 try:
@@ -319,17 +327,21 @@ def init_db() -> None:
                     active      INTEGER NOT NULL DEFAULT 0
                 );
                 CREATE TABLE IF NOT EXISTS grid_bots (
-                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-                    ts_created   TEXT    NOT NULL,
-                    symbol       TEXT    NOT NULL,
-                    investment   REAL    NOT NULL,
-                    grid_count   INTEGER NOT NULL DEFAULT 10,
-                    price_low    REAL    NOT NULL,
-                    price_high   REAL    NOT NULL,
-                    status       TEXT    NOT NULL DEFAULT 'running',
-                    profit       REAL    NOT NULL DEFAULT 0,
-                    orders_json  TEXT    NOT NULL DEFAULT '[]',
-                    config_json  TEXT    NOT NULL DEFAULT '{}'
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ts_created      TEXT    NOT NULL,
+                    symbol          TEXT    NOT NULL,
+                    investment      REAL    NOT NULL,
+                    grid_count      INTEGER NOT NULL DEFAULT 10,
+                    price_low       REAL    NOT NULL,
+                    price_high      REAL    NOT NULL,
+                    status          TEXT    NOT NULL DEFAULT 'running',
+                    profit          REAL    NOT NULL DEFAULT 0,
+                    orders_json     TEXT    NOT NULL DEFAULT '[]',
+                    config_json     TEXT    NOT NULL DEFAULT '{}',
+                    mode            TEXT    NOT NULL DEFAULT 'normal',
+                    avg_buy_price   REAL    NOT NULL DEFAULT 0,
+                    base_qty        REAL    NOT NULL DEFAULT 0,
+                    unrealized_pnl  REAL    NOT NULL DEFAULT 0
                 );
                 CREATE TABLE IF NOT EXISTS grid_orders (
                     id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -353,7 +365,27 @@ def init_db() -> None:
             with _conn() as conn:
                 conn.execute("ALTER TABLE grid_bots ADD COLUMN should_run INTEGER NOT NULL DEFAULT 0")
         except Exception:
-            pass  # column already exists
+            pass
+        try:
+            with _conn() as conn:
+                conn.execute("ALTER TABLE grid_bots ADD COLUMN mode TEXT NOT NULL DEFAULT 'normal'")
+        except Exception:
+            pass
+        try:
+            with _conn() as conn:
+                conn.execute("ALTER TABLE grid_bots ADD COLUMN avg_buy_price REAL NOT NULL DEFAULT 0")
+        except Exception:
+            pass
+        try:
+            with _conn() as conn:
+                conn.execute("ALTER TABLE grid_bots ADD COLUMN base_qty REAL NOT NULL DEFAULT 0")
+        except Exception:
+            pass
+        try:
+            with _conn() as conn:
+                conn.execute("ALTER TABLE grid_bots ADD COLUMN unrealized_pnl REAL NOT NULL DEFAULT 0")
+        except Exception:
+            pass
         log.info("SQLite tables ready: %s", _SQLITE_PATH)
 
 
@@ -522,22 +554,25 @@ def update_portfolio_config(portfolio_id: int, config: dict) -> None:
 # ---------------------------------------------------------------------------
 
 def create_grid_bot(symbol: str, investment: float, grid_count: int,
-                    price_low: float, price_high: float, config: dict) -> int:
+                    price_low: float, price_high: float, config: dict,
+                    mode: str = "normal") -> int:
     with _conn() as conn:
         cur = conn.cursor()
         ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
         if _USE_POSTGRES:
             cur.execute(
-                "INSERT INTO grid_bots (ts_created,symbol,investment,grid_count,price_low,price_high,status,profit,orders_json,config_json) "
-                "VALUES (%s,%s,%s,%s,%s,%s,'running',0,'[]',%s) RETURNING id",
-                (ts, symbol, investment, grid_count, price_low, price_high, json.dumps(config)),
+                "INSERT INTO grid_bots "
+                "(ts_created,symbol,investment,grid_count,price_low,price_high,status,profit,orders_json,config_json,mode) "
+                "VALUES (%s,%s,%s,%s,%s,%s,'running',0,'[]',%s,%s) RETURNING id",
+                (ts, symbol, investment, grid_count, price_low, price_high, json.dumps(config), mode),
             )
             return cur.fetchone()[0]
         else:
             cur.execute(
-                "INSERT INTO grid_bots (ts_created,symbol,investment,grid_count,price_low,price_high,status,profit,orders_json,config_json) "
-                "VALUES (?,?,?,?,?,?,'running',0,'[]',?)",
-                (ts, symbol, investment, grid_count, price_low, price_high, json.dumps(config)),
+                "INSERT INTO grid_bots "
+                "(ts_created,symbol,investment,grid_count,price_low,price_high,status,profit,orders_json,config_json,mode) "
+                "VALUES (?,?,?,?,?,?,'running',0,'[]',?,?)",
+                (ts, symbol, investment, grid_count, price_low, price_high, json.dumps(config), mode),
             )
             return cur.lastrowid
 
@@ -594,6 +629,34 @@ def update_grid_bot_profit(bot_id: int, profit: float) -> None:
             cur.execute(_q("UPDATE grid_bots SET profit=? WHERE id=?"), (profit, bot_id))
     except Exception as e:
         log.error("update_grid_bot_profit failed: %s", e)
+
+
+def update_grid_bot_position(bot_id: int, avg_buy_price: float,
+                              base_qty: float, unrealized_pnl: float) -> None:
+    """Update position tracking: average buy price, held base qty, unrealized P&L."""
+    try:
+        with _conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                _q("UPDATE grid_bots SET avg_buy_price=?, base_qty=?, unrealized_pnl=? WHERE id=?"),
+                (avg_buy_price, base_qty, unrealized_pnl, bot_id),
+            )
+    except Exception as e:
+        log.error("update_grid_bot_position failed: %s", e)
+
+
+def update_grid_bot_range(bot_id: int, price_low: float, price_high: float,
+                           grid_count: int) -> None:
+    """Update grid range after dynamic re-adjustment."""
+    try:
+        with _conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                _q("UPDATE grid_bots SET price_low=?, price_high=?, grid_count=? WHERE id=?"),
+                (price_low, price_high, grid_count, bot_id),
+            )
+    except Exception as e:
+        log.error("update_grid_bot_range failed: %s", e)
 
 
 def delete_grid_bot(bot_id: int) -> None:

@@ -1327,6 +1327,8 @@ class GridBotCreate(BaseModel):
     grid_count: int | None = None
     price_low: float | None = None
     price_high: float | None = None
+    mode: str = "normal"               # 'normal' | 'infinity'
+    use_base_balance: bool = False     # include existing base-asset value
 
 
 @app.get("/api/grid-bots")
@@ -1335,16 +1337,21 @@ def api_list_grid_bots():
     result = []
     for b in bots:
         result.append({
-            "id":           b["id"],
-            "symbol":       b["symbol"],
-            "investment":   b["investment"],
-            "grid_count":   b["grid_count"],
-            "price_low":    b["price_low"],
-            "price_high":   b["price_high"],
-            "status":       b["status"],
-            "profit":       b["profit"],
-            "running":      grid_is_running(b["id"]),
-            "ts_created":   b["ts_created"],
+            "id":              b["id"],
+            "symbol":          b["symbol"],
+            "investment":      b["investment"],
+            "grid_count":      b["grid_count"],
+            "price_low":       b["price_low"],
+            "price_high":      b["price_high"],
+            "mode":            b.get("mode", "normal"),
+            "status":          b["status"],
+            "profit":          b["profit"],
+            "unrealized_pnl":  b.get("unrealized_pnl", 0),
+            "realised_profit": round(float(b.get("profit") or 0) - float(b.get("unrealized_pnl") or 0), 4),
+            "avg_buy_price":   b.get("avg_buy_price", 0),
+            "base_qty":        b.get("base_qty", 0),
+            "running":         grid_is_running(b["id"]),
+            "ts_created":      b["ts_created"],
         })
     return result
 
@@ -1358,6 +1365,8 @@ def api_create_grid_bot(body: GridBotCreate):
             grid_count=body.grid_count,
             price_low=body.price_low,
             price_high=body.price_high,
+            mode=body.mode,
+            use_base_balance=body.use_base_balance,
         )
         return {"ok": True, "id": bot_id}
     except Exception as e:
@@ -1365,7 +1374,7 @@ def api_create_grid_bot(body: GridBotCreate):
 
 
 @app.get("/api/grid-bots/preview")
-def api_grid_preview(symbol: str, investment: float):
+def api_grid_preview(symbol: str, investment: float, mode: str = "normal"):
     """Return auto-calculated range and grid count without creating a bot."""
     try:
         client = MEXCClient()
@@ -1375,17 +1384,23 @@ def api_grid_preview(symbol: str, investment: float):
         price = client.get_price(sym)
         low, high = calculate_grid_range(client, sym)
         count = calculate_grid_count(investment, low, high)
-        step = round((high - low) / count, 8)
-        profit_per_grid = round(step / low * 100, 4)
+        step  = round((high - low) / count, 8)
+        profit_per_grid_pct = round(step / low * 100, 4)
+        # Grid profit formula from spec:
+        # grid_profit = spread_per_grid * (investment / price_per_grid) * filled_grids
+        usdt_per_grid = round(investment / count, 2)
         return {
-            "symbol":            sym,
-            "current_price":     price,
-            "price_low":         low,
-            "price_high":        high,
-            "grid_count":        count,
-            "usdt_per_grid":     round(investment / count, 2),
-            "step":              step,
-            "profit_per_grid_pct": profit_per_grid,
+            "symbol":               sym,
+            "current_price":        price,
+            "price_low":            low,
+            "price_high":           high,
+            "grid_count":           count,
+            "usdt_per_grid":        usdt_per_grid,
+            "step":                 step,
+            "profit_per_grid_pct":  profit_per_grid_pct,
+            "mode":                 mode,
+            # estimated grid profit per completed round-trip
+            "est_profit_per_grid":  round(step / price * usdt_per_grid, 4),
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

@@ -91,7 +91,7 @@ export const getPortfolioStatus  = (id: number) => req<{ portfolio_id: number; r
 export const listGridBots    = ()                    => req<any[]>('/api/grid-bots');
 export const getGridBot      = (id: number)          => req<any>(`/api/grid-bots/${id}`);
 export const getGridOrders   = (id: number)          => req<any[]>(`/api/grid-bots/${id}/orders`);
-export const createGridBot   = (body: { symbol: string; investment: number; grid_count?: number; price_low?: number; price_high?: number }) =>
+export const createGridBot   = (body: { symbol: string; investment: number; grid_count?: number; price_low?: number; price_high?: number; mode?: 'normal' | 'infinity'; use_base_balance?: boolean }) =>
   req<{ ok: boolean; id: number }>('/api/grid-bots', { method: 'POST', body: JSON.stringify(body) });
 export const stopGridBot     = (id: number)          => req<{ ok: boolean }>(`/api/grid-bots/${id}/stop`,   { method: 'POST' });
 export const resumeGridBot   = (id: number)          => req<{ ok: boolean }>(`/api/grid-bots/${id}/resume`, { method: 'POST' });

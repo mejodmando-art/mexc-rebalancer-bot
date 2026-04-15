@@ -34,12 +34,14 @@ function WaveChart({ low, high, current }: { low: number; high: number; current:
 
 function CreateForm({ lang, onCreated }: { lang: Lang; onCreated: () => void }) {
   const ar = lang === 'ar';
-  const [symbol, setSymbol]         = useState('BTC');
-  const [investment, setInvestment] = useState('');
-  const [preview, setPreview]       = useState<any>(null);
-  const [loading, setLoading]       = useState(false);
-  const [creating, setCreating]     = useState(false);
-  const [error, setError]           = useState('');
+  const [symbol, setSymbol]               = useState('BTC');
+  const [investment, setInvestment]       = useState('');
+  const [mode, setMode]                   = useState<'normal' | 'infinity'>('normal');
+  const [useBaseBalance, setUseBaseBalance] = useState(false);
+  const [preview, setPreview]             = useState<any>(null);
+  const [loading, setLoading]             = useState(false);
+  const [creating, setCreating]           = useState(false);
+  const [error, setError]                 = useState('');
 
   const fetchPreview = useCallback(async () => {
     const inv = parseFloat(investment);
@@ -56,7 +58,10 @@ function CreateForm({ lang, onCreated }: { lang: Lang; onCreated: () => void }) 
     const inv = parseFloat(investment);
     if (!symbol || inv < 1) { setError(ar ? 'أدخل الزوج والمبلغ' : 'Enter symbol and amount'); return; }
     setCreating(true); setError('');
-    try { await createGridBot({ symbol, investment: inv }); onCreated(); }
+    try {
+      await createGridBot({ symbol, investment: inv, mode, use_base_balance: useBaseBalance });
+      onCreated();
+    }
     catch (e: any) { setError(e.message); }
     finally { setCreating(false); }
   };
@@ -100,6 +105,44 @@ function CreateForm({ lang, onCreated }: { lang: Lang; onCreated: () => void }) 
         </div>
       </div>
 
+      {/* Mode selector */}
+      <div className="card p-4 space-y-3">
+        <div className="label">{ar ? 'نوع الشبكة' : 'Grid Mode'}</div>
+        <div className="grid grid-cols-2 gap-2">
+          {([['normal', ar ? 'عادي' : 'Normal', ar ? 'نطاق محدد أعلى وأسفل' : 'Fixed upper & lower bounds'],
+             ['infinity', ar ? 'لامحدود ∞' : 'Infinity ∞', ar ? 'بدون سقف سعري — يبيع للأعلى بلا حد' : 'No upper cap — sells upward without limit']] as const).map(([val, label, desc]) => (
+            <button key={val} onClick={() => setMode(val)}
+              className="p-3 rounded-xl text-start transition-all"
+              style={{
+                background: mode === val ? 'rgba(240,185,11,0.12)' : 'var(--bg-input)',
+                border: `1px solid ${mode === val ? 'rgba(240,185,11,0.4)' : 'var(--border)'}`,
+              }}>
+              <div className="font-bold text-sm" style={{ color: mode === val ? '#F0B90B' : 'var(--text-main)' }}>{label}</div>
+              <div className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>{desc}</div>
+            </button>
+          ))}
+        </div>
+
+        {/* USDT+BASE toggle */}
+        <button onClick={() => setUseBaseBalance(!useBaseBalance)}
+          className="w-full flex items-center justify-between p-3 rounded-xl transition-all"
+          style={{ background: useBaseBalance ? 'rgba(96,165,250,0.1)' : 'var(--bg-input)', border: `1px solid ${useBaseBalance ? 'rgba(96,165,250,0.35)' : 'var(--border)'}` }}>
+          <div className="text-start">
+            <div className="text-sm font-bold" style={{ color: useBaseBalance ? '#60A5FA' : 'var(--text-main)' }}>
+              {ar ? 'USDT + رصيد العملة' : 'USDT + Base Balance'}
+            </div>
+            <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+              {ar ? 'يضيف قيمة العملة الموجودة في المحفظة للاستثمار' : 'Adds existing base-asset value to investment'}
+            </div>
+          </div>
+          <div className="w-10 h-5 rounded-full relative shrink-0 transition-all"
+            style={{ background: useBaseBalance ? '#60A5FA' : 'var(--border)' }}>
+            <div className="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all"
+              style={{ left: useBaseBalance ? '22px' : '2px' }} />
+          </div>
+        </button>
+      </div>
+
       {loading && <div className="card p-4 text-center text-sm animate-pulse" style={{ color: 'var(--text-muted)' }}>{ar ? 'جاري حساب الشبكة...' : 'Calculating grid...'}</div>}
 
       {preview && !loading && (
@@ -107,10 +150,10 @@ function CreateForm({ lang, onCreated }: { lang: Lang; onCreated: () => void }) 
           <WaveChart low={preview.price_low} high={preview.price_high} current={preview.current_price} />
           <div className="grid grid-cols-2 gap-2">
             {[
-              { label: ar ? 'السعر الحالي' : 'Current Price', value: `$${preview.current_price.toFixed(4)}`, color: '#F0B90B' },
-              { label: ar ? 'عدد الشبكات' : 'Grid Count',    value: preview.grid_count,                     color: '#60A5FA' },
-              { label: ar ? 'USDT لكل شبكة' : 'Per Grid',    value: `$${preview.usdt_per_grid.toFixed(2)}`, color: '#A78BFA' },
-              { label: ar ? 'ربح لكل شبكة' : 'Grid Profit',  value: `${preview.profit_per_grid_pct}%`,      color: '#00D4AA' },
+              { label: ar ? 'السعر الحالي' : 'Current Price',   value: `$${preview.current_price.toFixed(4)}`,    color: '#F0B90B' },
+              { label: ar ? 'عدد الشبكات' : 'Grid Count',       value: preview.grid_count,                        color: '#60A5FA' },
+              { label: ar ? 'USDT لكل شبكة' : 'Per Grid',       value: `$${preview.usdt_per_grid.toFixed(2)}`,    color: '#A78BFA' },
+              { label: ar ? 'ربح لكل دورة' : 'Profit/Cycle',    value: `$${(preview.est_profit_per_grid||0).toFixed(4)}`, color: '#00D4AA' },
             ].map(({ label, value, color }) => (
               <div key={label} className="rounded-xl p-3" style={{ background: 'var(--bg-input)', border: '1px solid var(--border)' }}>
                 <div className="text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: 'var(--text-muted)' }}>{label}</div>
@@ -185,11 +228,19 @@ function BotCard({ bot, lang, onRefresh }: { bot: any; lang: Lang; onRefresh: ()
         </span>
       </div>
 
+      {/* Mode badge */}
+      {bot.mode === 'infinity' && (
+        <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold"
+          style={{ background: 'rgba(167,139,250,0.15)', color: '#A78BFA', border: '1px solid rgba(167,139,250,0.3)' }}>
+          ∞ {ar ? 'لامحدود' : 'Infinity'}
+        </div>
+      )}
+
       <div className="grid grid-cols-3 gap-2">
         {[
           { label: ar ? 'الاستثمار' : 'Investment', value: `$${(bot.investment||0).toFixed(0)}`, color: '#60A5FA' },
           { label: ar ? 'الشبكات' : 'Grids',        value: bot.grid_count,                       color: '#A78BFA' },
-          { label: ar ? 'الربح' : 'Profit',          value: `$${(bot.profit||0).toFixed(2)}`,     color: profitColor },
+          { label: ar ? 'إجمالي الربح' : 'Total P&L', value: `$${(bot.profit||0).toFixed(2)}`,   color: profitColor },
         ].map(({ label, value, color }) => (
           <div key={label} className="rounded-xl p-2 text-center" style={{ background: 'var(--bg-input)' }}>
             <div className="text-[9px] font-bold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>{label}</div>
@@ -198,10 +249,31 @@ function BotCard({ bot, lang, onRefresh }: { bot: any; lang: Lang; onRefresh: ()
         ))}
       </div>
 
+      {/* Profit breakdown: realised + unrealized */}
+      <div className="grid grid-cols-2 gap-2">
+        {[
+          { label: ar ? 'ربح محقق' : 'Realised',     value: `$${(bot.realised_profit||0).toFixed(4)}`, color: '#00D4AA' },
+          { label: ar ? 'غير محقق' : 'Unrealized',   value: `$${(bot.unrealized_pnl||0).toFixed(4)}`,  color: (bot.unrealized_pnl||0) >= 0 ? '#60A5FA' : '#FF7B72' },
+        ].map(({ label, value, color }) => (
+          <div key={label} className="rounded-xl p-2 text-center" style={{ background: 'var(--bg-input)' }}>
+            <div className="text-[9px] font-bold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>{label}</div>
+            <div className="num font-bold text-xs mt-0.5" style={{ color }}>{value}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* avg buy price + held qty */}
+      {(bot.avg_buy_price > 0) && (
+        <div className="flex justify-between text-xs px-1" style={{ color: 'var(--text-muted)' }}>
+          <span>{ar ? 'متوسط الشراء:' : 'Avg Buy:'} <span className="num font-bold" style={{ color: 'var(--text-main)' }}>${(bot.avg_buy_price||0).toFixed(4)}</span></span>
+          <span>{ar ? 'محتفظ:' : 'Held:'} <span className="num font-bold" style={{ color: 'var(--text-main)' }}>{(bot.base_qty||0).toFixed(6)}</span></span>
+        </div>
+      )}
+
       <div className="flex justify-between text-xs px-1" style={{ color: 'var(--text-muted)' }}>
         <span>↓ ${(bot.price_low||0).toFixed(4)}</span>
         <span style={{ color: 'var(--text-main)', fontWeight: 700 }}>{ar ? 'النطاق' : 'Range'}</span>
-        <span>↑ ${(bot.price_high||0).toFixed(4)}</span>
+        <span>{bot.mode === 'infinity' ? '∞' : `↑ $${(bot.price_high||0).toFixed(4)}`}</span>
       </div>
 
       <button onClick={() => { setShowOrders(!showOrders); if (!showOrders) loadOrders(); }}
