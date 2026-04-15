@@ -87,6 +87,20 @@ export const stopAndSellPortfolio = (id: number) =>
 export const startPortfolio      = (id: number) => req<{ ok: boolean; message: string }>(`/api/portfolios/${id}/start`, { method: 'POST' });
 export const stopPortfolio       = (id: number) => req<{ ok: boolean; message: string }>(`/api/portfolios/${id}/stop`,  { method: 'POST' });
 export const getPortfolioStatus  = (id: number) => req<{ portfolio_id: number; running: boolean; started_at: string | null; error: string | null }>(`/api/portfolios/${id}/status`);
+// ── Grid Bot ─────────────────────────────────────────────────────────────────
+export const listGridBots    = ()                    => req<any[]>('/api/grid-bots');
+export const getGridBot      = (id: number)          => req<any>(`/api/grid-bots/${id}`);
+export const getGridOrders   = (id: number)          => req<any[]>(`/api/grid-bots/${id}/orders`);
+export const createGridBot   = (body: { symbol: string; investment: number; grid_count?: number; price_low?: number; price_high?: number }) =>
+  req<{ ok: boolean; id: number }>('/api/grid-bots', { method: 'POST', body: JSON.stringify(body) });
+export const stopGridBot     = (id: number)          => req<{ ok: boolean }>(`/api/grid-bots/${id}/stop`,   { method: 'POST' });
+export const resumeGridBot   = (id: number)          => req<{ ok: boolean }>(`/api/grid-bots/${id}/resume`, { method: 'POST' });
+export const deleteGridBot   = (id: number)          => req<{ ok: boolean }>(`/api/grid-bots/${id}`,        { method: 'DELETE' });
+export const previewGridBot  = (symbol: string, investment: number) =>
+  req<{ symbol: string; current_price: number; price_low: number; price_high: number; grid_count: number; usdt_per_grid: number; step: number; profit_per_grid_pct: number }>(
+    `/api/grid-bots/preview?symbol=${symbol}&investment=${investment}`
+  );
+
 export const getPortfolioAssets  = (id: number) => req<{
   portfolio_id: number; portfolio_name: string; total_usdt: number;
   mode: string; running: boolean; assets: any[];

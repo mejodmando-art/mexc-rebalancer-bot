@@ -196,6 +196,34 @@ def init_db() -> None:
                 active      INTEGER NOT NULL DEFAULT 0
             )
             """,
+            """
+            CREATE TABLE IF NOT EXISTS grid_bots (
+                id           SERIAL PRIMARY KEY,
+                ts_created   TEXT    NOT NULL,
+                symbol       TEXT    NOT NULL,
+                investment   REAL    NOT NULL,
+                grid_count   INTEGER NOT NULL DEFAULT 10,
+                price_low    REAL    NOT NULL,
+                price_high   REAL    NOT NULL,
+                status       TEXT    NOT NULL DEFAULT 'running',
+                profit       REAL    NOT NULL DEFAULT 0,
+                orders_json  TEXT    NOT NULL DEFAULT '[]',
+                config_json  TEXT    NOT NULL DEFAULT '{}'
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS grid_orders (
+                id           SERIAL PRIMARY KEY,
+                grid_bot_id  INTEGER NOT NULL,
+                ts           TEXT    NOT NULL,
+                order_id     TEXT    NOT NULL DEFAULT '',
+                side         TEXT    NOT NULL,
+                price        REAL    NOT NULL,
+                qty          REAL    NOT NULL,
+                status       TEXT    NOT NULL DEFAULT 'open',
+                profit       REAL    NOT NULL DEFAULT 0
+            )
+            """,
         ]
         with _conn() as conn:
             cur = conn.cursor()
@@ -255,6 +283,30 @@ def init_db() -> None:
                     name        TEXT    NOT NULL,
                     config_json TEXT    NOT NULL,
                     active      INTEGER NOT NULL DEFAULT 0
+                );
+                CREATE TABLE IF NOT EXISTS grid_bots (
+                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ts_created   TEXT    NOT NULL,
+                    symbol       TEXT    NOT NULL,
+                    investment   REAL    NOT NULL,
+                    grid_count   INTEGER NOT NULL DEFAULT 10,
+                    price_low    REAL    NOT NULL,
+                    price_high   REAL    NOT NULL,
+                    status       TEXT    NOT NULL DEFAULT 'running',
+                    profit       REAL    NOT NULL DEFAULT 0,
+                    orders_json  TEXT    NOT NULL DEFAULT '[]',
+                    config_json  TEXT    NOT NULL DEFAULT '{}'
+                );
+                CREATE TABLE IF NOT EXISTS grid_orders (
+                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                    grid_bot_id  INTEGER NOT NULL,
+                    ts           TEXT    NOT NULL,
+                    order_id     TEXT    NOT NULL DEFAULT '',
+                    side         TEXT    NOT NULL,
+                    price        REAL    NOT NULL,
+                    qty          REAL    NOT NULL,
+                    status       TEXT    NOT NULL DEFAULT 'open',
+                    profit       REAL    NOT NULL DEFAULT 0
                 );
             """)
         log.info("SQLite tables ready: %s", _SQLITE_PATH)
@@ -418,3 +470,136 @@ def update_portfolio_config(portfolio_id: int, config: dict) -> None:
             )
     except Exception as e:
         log.error("update_portfolio_config failed: %s", e)
+
+
+# ---------------------------------------------------------------------------
+# Grid bots
+# ---------------------------------------------------------------------------
+
+def create_grid_bot(symbol: str, investment: float, grid_count: int,
+                    price_low: float, price_high: float, config: dict) -> int:
+    with _conn() as conn:
+        cur = conn.cursor()
+        ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        if _USE_POSTGRES:
+            cur.execute(
+                "INSERT INTO grid_bots (ts_created,symbol,investment,grid_count,price_low,price_high,status,profit,orders_json,config_json) "
+                "VALUES (%s,%s,%s,%s,%s,%s,'running',0,'[]',%s) RETURNING id",
+                (ts, symbol, investment, grid_count, price_low, price_high, json.dumps(config)),
+            )
+            return cur.fetchone()[0]
+        else:
+            cur.execute(
+                "INSERT INTO grid_bots (ts_created,symbol,investment,grid_count,price_low,price_high,status,profit,orders_json,config_json) "
+                "VALUES (?,?,?,?,?,?,'running',0,'[]',?)",
+                (ts, symbol, investment, grid_count, price_low, price_high, json.dumps(config)),
+            )
+            return cur.lastrowid
+
+
+def list_grid_bots() -> list:
+    try:
+        with _conn() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT * FROM grid_bots ORDER BY id DESC")
+            rows = _rows_to_dicts(cur.fetchall(), cur)
+        for r in rows:
+            try:
+                r["config"] = json.loads(r.get("config_json") or "{}")
+            except Exception:
+                r["config"] = {}
+        return rows
+    except Exception as e:
+        log.error("list_grid_bots failed: %s", e)
+        return []
+
+
+def get_grid_bot(bot_id: int) -> dict | None:
+    try:
+        with _conn() as conn:
+            cur = conn.cursor()
+            cur.execute(_q("SELECT * FROM grid_bots WHERE id=?"), (bot_id,))
+            rows = _rows_to_dicts(cur.fetchall(), cur)
+        if rows:
+            r = rows[0]
+            try:
+                r["config"] = json.loads(r.get("config_json") or "{}")
+            except Exception:
+                r["config"] = {}
+            return r
+        return None
+    except Exception as e:
+        log.error("get_grid_bot failed: %s", e)
+        return None
+
+
+def update_grid_bot_status(bot_id: int, status: str) -> None:
+    try:
+        with _conn() as conn:
+            cur = conn.cursor()
+            cur.execute(_q("UPDATE grid_bots SET status=? WHERE id=?"), (status, bot_id))
+    except Exception as e:
+        log.error("update_grid_bot_status failed: %s", e)
+
+
+def update_grid_bot_profit(bot_id: int, profit: float) -> None:
+    try:
+        with _conn() as conn:
+            cur = conn.cursor()
+            cur.execute(_q("UPDATE grid_bots SET profit=? WHERE id=?"), (profit, bot_id))
+    except Exception as e:
+        log.error("update_grid_bot_profit failed: %s", e)
+
+
+def delete_grid_bot(bot_id: int) -> None:
+    try:
+        with _conn() as conn:
+            cur = conn.cursor()
+            cur.execute(_q("DELETE FROM grid_bots WHERE id=?"), (bot_id,))
+            cur.execute(_q("DELETE FROM grid_orders WHERE grid_bot_id=?"), (bot_id,))
+    except Exception as e:
+        log.error("delete_grid_bot failed: %s", e)
+
+
+def add_grid_order(bot_id: int, order_id: str, side: str,
+                   price: float, qty: float) -> int:
+    with _conn() as conn:
+        cur = conn.cursor()
+        ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        if _USE_POSTGRES:
+            cur.execute(
+                "INSERT INTO grid_orders (grid_bot_id,ts,order_id,side,price,qty,status,profit) "
+                "VALUES (%s,%s,%s,%s,%s,%s,'open',0) RETURNING id",
+                (bot_id, ts, order_id, side, price, qty),
+            )
+            return cur.fetchone()[0]
+        else:
+            cur.execute(
+                "INSERT INTO grid_orders (grid_bot_id,ts,order_id,side,price,qty,status,profit) "
+                "VALUES (?,?,?,?,?,?,'open',0)",
+                (bot_id, ts, order_id, side, price, qty),
+            )
+            return cur.lastrowid
+
+
+def get_grid_orders(bot_id: int) -> list:
+    try:
+        with _conn() as conn:
+            cur = conn.cursor()
+            cur.execute(_q("SELECT * FROM grid_orders WHERE grid_bot_id=? ORDER BY id DESC"), (bot_id,))
+            return _rows_to_dicts(cur.fetchall(), cur)
+    except Exception as e:
+        log.error("get_grid_orders failed: %s", e)
+        return []
+
+
+def update_grid_order(order_id: str, status: str, profit: float = 0) -> None:
+    try:
+        with _conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                _q("UPDATE grid_orders SET status=?, profit=? WHERE order_id=?"),
+                (status, profit, order_id),
+            )
+    except Exception as e:
+        log.error("update_grid_order failed: %s", e)

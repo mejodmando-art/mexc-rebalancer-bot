@@ -47,6 +47,12 @@ from database import (
     get_rebalance_history, get_snapshots, init_db, record_snapshot,
     save_portfolio, list_portfolios, get_portfolio,
     set_active_portfolio, delete_portfolio, update_portfolio_config,
+    list_grid_bots, get_grid_bot, delete_grid_bot, get_grid_orders,
+)
+from grid_bot import (
+    start_grid_bot, stop_grid_bot, resume_grid_bot,
+    get_grid_bot_status, is_running as grid_is_running,
+    calculate_grid_range, calculate_grid_count,
 )
 from mexc_client import MEXCClient
 from smart_portfolio import (
@@ -1146,6 +1152,121 @@ def api_portfolio_assets(portfolio_id: int):
             "running": _is_portfolio_running(portfolio_id),
             "assets": assets_out,
         }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# Grid Bot endpoints
+# ---------------------------------------------------------------------------
+
+class GridBotCreate(BaseModel):
+    symbol: str
+    investment: float
+    grid_count: int | None = None
+    price_low: float | None = None
+    price_high: float | None = None
+
+
+@app.get("/api/grid-bots")
+def api_list_grid_bots():
+    bots = list_grid_bots()
+    result = []
+    for b in bots:
+        result.append({
+            "id":           b["id"],
+            "symbol":       b["symbol"],
+            "investment":   b["investment"],
+            "grid_count":   b["grid_count"],
+            "price_low":    b["price_low"],
+            "price_high":   b["price_high"],
+            "status":       b["status"],
+            "profit":       b["profit"],
+            "running":      grid_is_running(b["id"]),
+            "ts_created":   b["ts_created"],
+        })
+    return result
+
+
+@app.post("/api/grid-bots")
+def api_create_grid_bot(body: GridBotCreate):
+    try:
+        bot_id = start_grid_bot(
+            symbol=body.symbol,
+            investment=body.investment,
+            grid_count=body.grid_count,
+            price_low=body.price_low,
+            price_high=body.price_high,
+        )
+        return {"ok": True, "id": bot_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/grid-bots/preview")
+def api_grid_preview(symbol: str, investment: float):
+    """Return auto-calculated range and grid count without creating a bot."""
+    try:
+        client = MEXCClient()
+        sym = symbol.upper()
+        if not sym.endswith("USDT"):
+            sym += "USDT"
+        price = client.get_price(sym)
+        low, high = calculate_grid_range(client, sym)
+        count = calculate_grid_count(investment, low, high)
+        step = round((high - low) / count, 8)
+        profit_per_grid = round(step / low * 100, 4)
+        return {
+            "symbol":            sym,
+            "current_price":     price,
+            "price_low":         low,
+            "price_high":        high,
+            "grid_count":        count,
+            "usdt_per_grid":     round(investment / count, 2),
+            "step":              step,
+            "profit_per_grid_pct": profit_per_grid,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/grid-bots/{bot_id}")
+def api_get_grid_bot(bot_id: int):
+    status = get_grid_bot_status(bot_id)
+    if "error" in status and status["error"] == "not found":
+        raise HTTPException(status_code=404, detail="Grid bot not found")
+    return status
+
+
+@app.get("/api/grid-bots/{bot_id}/orders")
+def api_get_grid_orders(bot_id: int):
+    return get_grid_orders(bot_id)
+
+
+@app.post("/api/grid-bots/{bot_id}/stop")
+def api_stop_grid_bot(bot_id: int):
+    try:
+        stop_grid_bot(bot_id)
+        return {"ok": True, "message": "Grid bot stopped"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/grid-bots/{bot_id}/resume")
+def api_resume_grid_bot(bot_id: int):
+    try:
+        resume_grid_bot(bot_id)
+        return {"ok": True, "message": "Grid bot resumed"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/grid-bots/{bot_id}")
+def api_delete_grid_bot(bot_id: int):
+    try:
+        stop_grid_bot(bot_id)
+        delete_grid_bot(bot_id)
+        return {"ok": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
