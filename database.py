@@ -68,6 +68,7 @@ def _try_postgres() -> bool:
 
 
 _USE_POSTGRES = _try_postgres()
+_BACKEND: str = "postgresql" if _USE_POSTGRES else "sqlite"
 
 # ---------------------------------------------------------------------------
 # Connection context managers
@@ -89,26 +90,28 @@ def _conn() -> Generator:
 
 @contextmanager
 def _pg_conn() -> Generator:
+    """Acquire a PostgreSQL connection with retry, then yield it exactly once.
+
+    The retry loop only covers connection *acquisition*.  Once we have a live
+    connection the yield happens outside the loop so @contextmanager never sees
+    a second yield, which would raise RuntimeError.
+    """
     global _pg_pool
+    conn = None
     last_err = None
+
+    # ── Acquire connection with retry ────────────────────────────────────────
     for attempt in range(_MAX_RETRIES):
-        conn = None
         try:
             pool = _get_pg_pool()
             conn = pool.getconn()
-            # Always rollback any leftover transaction from a previous use of this
-            # connection. This is essential with PgBouncer transaction-pooling mode
-            # (Supabase port 6543): without it the connection may carry a stale
-            # snapshot and return outdated rows.
+            # Rollback any stale transaction left by PgBouncer transaction-pooling.
             try:
                 conn.rollback()
             except Exception:
                 pass
             conn.autocommit = False
-            yield conn
-            conn.commit()
-            pool.putconn(conn)
-            return
+            break  # success — exit retry loop
         except Exception as e:
             last_err = e
             if conn is not None:
@@ -121,12 +124,31 @@ def _pg_conn() -> Generator:
                         _pg_pool.putconn(conn, close=True)
                 except Exception:
                     pass
-            # Reset pool so next attempt creates fresh connections
+                conn = None
             _pg_pool = None
-            log.warning("PostgreSQL error (attempt %d/%d): %s", attempt + 1, _MAX_RETRIES, e)
+            log.warning("PostgreSQL connect error (attempt %d/%d): %s", attempt + 1, _MAX_RETRIES, e)
             if attempt < _MAX_RETRIES - 1:
                 time.sleep(_RETRY_DELAY * (attempt + 1))
-    raise last_err
+
+    if conn is None:
+        raise last_err  # all retries exhausted
+
+    # ── Yield exactly once, outside the retry loop ───────────────────────────
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
+    finally:
+        try:
+            if _pg_pool:
+                _pg_pool.putconn(conn)
+        except Exception:
+            pass
 
 
 @contextmanager

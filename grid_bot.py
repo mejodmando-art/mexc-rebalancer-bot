@@ -52,10 +52,10 @@ def calculate_grid_count(investment: float, price_low: float,
                           price_high: float) -> int:
     """
     Choose grid count so each grid has at least MIN_USDT_PER_GRID.
-    Clamps between 3 and 50.
+    Clamps between 3 and 20.
     """
     max_grids = int(investment / MIN_USDT_PER_GRID)
-    return max(3, min(50, max_grids, 20))  # default cap at 20
+    return max(3, min(max_grids, 20))
 
 
 def build_grid_levels(price_low: float, price_high: float,
