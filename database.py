@@ -244,7 +244,8 @@ def init_db() -> None:
                 mode            TEXT    NOT NULL DEFAULT 'normal',
                 avg_buy_price   REAL    NOT NULL DEFAULT 0,
                 base_qty        REAL    NOT NULL DEFAULT 0,
-                unrealized_pnl  REAL    NOT NULL DEFAULT 0
+                unrealized_pnl  REAL    NOT NULL DEFAULT 0,
+                realised_profit REAL    NOT NULL DEFAULT 0
             )
             """,
             """
@@ -293,6 +294,7 @@ def init_db() -> None:
                 "ALTER TABLE grid_bots ADD COLUMN IF NOT EXISTS avg_buy_price REAL NOT NULL DEFAULT 0",
                 "ALTER TABLE grid_bots ADD COLUMN IF NOT EXISTS base_qty REAL NOT NULL DEFAULT 0",
                 "ALTER TABLE grid_bots ADD COLUMN IF NOT EXISTS unrealized_pnl REAL NOT NULL DEFAULT 0",
+                "ALTER TABLE grid_bots ADD COLUMN IF NOT EXISTS realised_profit REAL NOT NULL DEFAULT 0",
             ]
             for m in migrations:
                 try:
@@ -341,7 +343,8 @@ def init_db() -> None:
                     mode            TEXT    NOT NULL DEFAULT 'normal',
                     avg_buy_price   REAL    NOT NULL DEFAULT 0,
                     base_qty        REAL    NOT NULL DEFAULT 0,
-                    unrealized_pnl  REAL    NOT NULL DEFAULT 0
+                    unrealized_pnl  REAL    NOT NULL DEFAULT 0,
+                    realised_profit REAL    NOT NULL DEFAULT 0
                 );
                 CREATE TABLE IF NOT EXISTS grid_orders (
                     id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -384,6 +387,11 @@ def init_db() -> None:
         try:
             with _conn() as conn:
                 conn.execute("ALTER TABLE grid_bots ADD COLUMN unrealized_pnl REAL NOT NULL DEFAULT 0")
+        except Exception:
+            pass
+        try:
+            with _conn() as conn:
+                conn.execute("ALTER TABLE grid_bots ADD COLUMN realised_profit REAL NOT NULL DEFAULT 0")
         except Exception:
             pass
         log.info("SQLite tables ready: %s", _SQLITE_PATH)
@@ -632,15 +640,24 @@ def update_grid_bot_profit(bot_id: int, profit: float) -> None:
 
 
 def update_grid_bot_position(bot_id: int, avg_buy_price: float,
-                              base_qty: float, unrealized_pnl: float) -> None:
-    """Update position tracking: average buy price, held base qty, unrealized P&L."""
+                              base_qty: float, unrealized_pnl: float,
+                              realised_profit: float | None = None) -> None:
+    """Update position tracking: average buy price, held base qty, unrealized P&L.
+    Also updates realised_profit and the combined profit column."""
     try:
         with _conn() as conn:
             cur = conn.cursor()
-            cur.execute(
-                _q("UPDATE grid_bots SET avg_buy_price=?, base_qty=?, unrealized_pnl=? WHERE id=?"),
-                (avg_buy_price, base_qty, unrealized_pnl, bot_id),
-            )
+            if realised_profit is not None:
+                total = round(realised_profit + unrealized_pnl, 4)
+                cur.execute(
+                    _q("UPDATE grid_bots SET avg_buy_price=?, base_qty=?, unrealized_pnl=?, realised_profit=?, profit=? WHERE id=?"),
+                    (avg_buy_price, base_qty, unrealized_pnl, realised_profit, total, bot_id),
+                )
+            else:
+                cur.execute(
+                    _q("UPDATE grid_bots SET avg_buy_price=?, base_qty=?, unrealized_pnl=? WHERE id=?"),
+                    (avg_buy_price, base_qty, unrealized_pnl, bot_id),
+                )
     except Exception as e:
         log.error("update_grid_bot_position failed: %s", e)
 

@@ -28,7 +28,7 @@ from typing import Optional
 from mexc_client import MEXCClient
 from database import (
     create_grid_bot, get_grid_bot, update_grid_bot_status,
-    update_grid_bot_profit, update_grid_bot_position, update_grid_bot_range,
+    update_grid_bot_position, update_grid_bot_range,
     add_grid_order, get_grid_orders,
     update_grid_order, delete_grid_bot, set_grid_bot_should_run,
 )
@@ -164,28 +164,40 @@ def get_error(bot_id: int) -> Optional[str]:
 def _place_initial_orders(client: MEXCClient, bot_id: int, symbol: str,
                             levels: list[float], current_price: float,
                             usdt_per_grid: float, qty_prec: int,
-                            mode: str) -> None:
+                            mode: str,
+                            stop_event: Optional[threading.Event] = None) -> None:
     """
     Place BUY orders below current price and SELL orders above it.
     Orders are placed gradually (PLACE_INTERVAL between each) to avoid
     market impact.  In 'infinity' mode there is no upper bound for SELLs.
+    Respects stop_event so the bot can be stopped mid-placement.
     """
     for level in levels[:-1]:   # N+1 points; skip the very top for BUY
+        if stop_event and stop_event.is_set():
+            return
         if level < current_price:
             qty = usdt_per_grid / level
             _place_limit_order(client, bot_id, symbol, "BUY", level, qty, qty_prec)
-            time.sleep(PLACE_INTERVAL)
+            if stop_event:
+                stop_event.wait(PLACE_INTERVAL)
+            else:
+                time.sleep(PLACE_INTERVAL)
 
     for level in levels[1:]:    # skip the very bottom for SELL
+        if stop_event and stop_event.is_set():
+            return
         if level > current_price:
             sell_qty = round((usdt_per_grid / level) * (1 - FEE_RATE), qty_prec)
             _place_limit_order(client, bot_id, symbol, "SELL", level, sell_qty, qty_prec)
-            time.sleep(PLACE_INTERVAL)
+            if stop_event:
+                stop_event.wait(PLACE_INTERVAL)
+            else:
+                time.sleep(PLACE_INTERVAL)
 
 
 def _rebuild_grid(client: MEXCClient, bot_id: int, symbol: str,
-                   investment: float, mode: str,
-                   qty_prec: int) -> tuple[float, float, float, int, list[float]]:
+                   investment: float, mode: str, qty_prec: int,
+                   stop_event: Optional[threading.Event] = None) -> tuple[float, float, float, int, list[float]]:
     """
     Cancel all open orders, recalculate range around current price, place
     new grid. Returns (price_low, price_high, current_price, grid_count, levels).
@@ -202,7 +214,7 @@ def _rebuild_grid(client: MEXCClient, bot_id: int, symbol: str,
     current_price = client.get_price(symbol)
 
     _place_initial_orders(client, bot_id, symbol, levels, current_price,
-                           usdt_per_grid, qty_prec, mode)
+                           usdt_per_grid, qty_prec, mode, stop_event)
     return price_low, price_high, current_price, grid_count, levels
 
 
@@ -232,15 +244,19 @@ def _grid_loop(bot_id: int, stop_event: threading.Event) -> None:
         usdt_per_grid = investment / grid_count
         _, qty_prec   = get_symbol_precision(client, symbol)
 
-        # Place initial BUY + SELL orders
-        current_price = client.get_price(symbol)
-        _place_initial_orders(client, bot_id, symbol, levels, current_price,
-                               usdt_per_grid, qty_prec, mode)
-
-        # Position tracking — loaded from DB so they survive restarts
+        # Position tracking — loaded from DB so they survive restarts.
+        # Use realised_profit column (not profit which includes unrealized).
         avg_buy_price   = float(bot.get("avg_buy_price") or 0)
         base_qty        = float(bot.get("base_qty") or 0)
-        realised_profit = float(bot.get("profit") or 0)
+        realised_profit = float(bot.get("realised_profit") or 0)
+
+        # Place initial BUY + SELL orders only if no open orders exist
+        # (avoids duplicates on resume after restart)
+        existing_open = [o for o in get_grid_orders(bot_id) if o["status"] == "open"]
+        if not existing_open:
+            current_price = client.get_price(symbol)
+            _place_initial_orders(client, bot_id, symbol, levels, current_price,
+                                   usdt_per_grid, qty_prec, mode, stop_event)
 
         # Monitoring loop
         while not stop_event.is_set():
@@ -254,7 +270,7 @@ def _grid_loop(bot_id: int, stop_event: threading.Event) -> None:
                 )
                 if out_of_range:
                     price_low, price_high, current_price, grid_count, levels = \
-                        _rebuild_grid(client, bot_id, symbol, investment, mode, qty_prec)
+                        _rebuild_grid(client, bot_id, symbol, investment, mode, qty_prec, stop_event)
                     usdt_per_grid = investment / grid_count
                     stop_event.wait(POLL_INTERVAL)
                     continue
@@ -264,9 +280,9 @@ def _grid_loop(bot_id: int, stop_event: threading.Event) -> None:
                     unrealized_pnl = round((current_price - avg_buy_price) * base_qty, 4)
                 else:
                     unrealized_pnl = 0.0
-                update_grid_bot_position(bot_id, avg_buy_price, base_qty, unrealized_pnl)
-                # total profit shown = realised + unrealized (matches spec)
-                update_grid_bot_profit(bot_id, round(realised_profit + unrealized_pnl, 4))
+                # Write realised_profit separately so it survives restarts correctly
+                update_grid_bot_position(bot_id, avg_buy_price, base_qty,
+                                         unrealized_pnl, realised_profit)
 
                 # Check each open order
                 orders      = get_grid_orders(bot_id)
@@ -461,11 +477,11 @@ def get_grid_bot_status(bot_id: int) -> dict:
     open_count   = sum(1 for o in orders if o["status"] == "open")
     filled_count = sum(1 for o in orders if o["status"] == "filled")
 
-    avg_buy_price  = float(bot.get("avg_buy_price") or 0)
-    base_qty       = float(bot.get("base_qty") or 0)
-    unrealized_pnl = float(bot.get("unrealized_pnl") or 0)
-    total_profit   = float(bot.get("profit") or 0)
-    realised       = round(total_profit - unrealized_pnl, 4)
+    avg_buy_price   = float(bot.get("avg_buy_price") or 0)
+    base_qty        = float(bot.get("base_qty") or 0)
+    unrealized_pnl  = float(bot.get("unrealized_pnl") or 0)
+    realised        = float(bot.get("realised_profit") or 0)
+    total_profit    = round(realised + unrealized_pnl, 4)
 
     return {
         "id":              bot["id"],
