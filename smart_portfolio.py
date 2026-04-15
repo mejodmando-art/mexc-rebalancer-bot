@@ -784,10 +784,9 @@ def run(cfg: dict) -> None:
     if mode == "proportional":
         interval_sec = cfg["rebalance"]["proportional"]["check_interval_minutes"] * 60
         log.info("Check interval: %d seconds", interval_sec)
-        try:
-            while True:
+        while True:
+            try:
                 log.info("--- Proportional check ---")
-                # SL/TP guard runs before rebalance
                 triggered = check_sl_tp(client, cfg)
                 if triggered:
                     log.info("SL/TP triggered for: %s", [t["symbol"] for t in triggered])
@@ -795,9 +794,12 @@ def run(cfg: dict) -> None:
                     execute_rebalance(client, cfg)
                 else:
                     log.info("No rebalance needed.")
-                time.sleep(interval_sec)
-        except KeyboardInterrupt:
-            terminate(client, cfg)
+            except KeyboardInterrupt:
+                terminate(client, cfg)
+                return
+            except Exception as e:
+                log.error("Proportional check failed, will retry in %ds: %s", interval_sec, e)
+            time.sleep(interval_sec)
 
     elif mode == "timed":
         timed_cfg = cfg["rebalance"]["timed"]
@@ -805,13 +807,11 @@ def run(cfg: dict) -> None:
         target_hour = timed_cfg.get("hour", 0)
         next_run = next_run_time(frequency, target_hour=target_hour)
         log.info("First rebalance scheduled at %s UTC", next_run.isoformat())
-        # For short intervals, poll every 30 s; for long ones every 60 s.
         short_freq = frequency in TIMED_FREQUENCY_MINUTES and frequency not in ("daily", "weekly", "monthly")
         poll_sec = 30 if short_freq else 60
-        try:
-            while True:
+        while True:
+            try:
                 now = datetime.utcnow()
-                # SL/TP guard runs every poll cycle regardless of schedule
                 triggered = check_sl_tp(client, cfg)
                 if triggered:
                     log.info("SL/TP triggered for: %s", [t["symbol"] for t in triggered])
@@ -823,9 +823,12 @@ def run(cfg: dict) -> None:
                     target_hour = cfg["rebalance"]["timed"].get("hour", 0)
                     next_run = next_run_time(frequency, target_hour=target_hour)
                     log.info("Next rebalance at %s UTC", next_run.isoformat())
-                time.sleep(poll_sec)
-        except KeyboardInterrupt:
-            terminate(client, cfg)
+            except KeyboardInterrupt:
+                terminate(client, cfg)
+                return
+            except Exception as e:
+                log.error("Timed poll cycle failed, will retry in %ds: %s", poll_sec, e)
+            time.sleep(poll_sec)
 
     elif mode == "unbalanced":
         log.info("Mode: unbalanced – no automatic rebalancing.")
