@@ -48,6 +48,8 @@ export default function Dashboard({ lang }: Props) {
   const [botRunning,   setBotRunning]   = useState(false);
   const [loading,      setLoading]      = useState(true);
   const [accountTotal, setAccountTotal] = useState<number | null>(null);
+  const [freeUsdt,     setFreeUsdt]     = useState<number | null>(null);
+  const [lockedUsdt,   setLockedUsdt]   = useState<number | null>(null);
   const [refreshing,   setRefreshing]   = useState(false);
   const autoRefreshRef = useRef(true);
 
@@ -96,7 +98,11 @@ export default function Dashboard({ lang }: Props) {
       const [s, bot] = await Promise.all([getStatus(), getBotStatus()]);
       setStatus(s);
       setBotRunning(bot?.running ?? false);
-      getAccountTotal().then(r => setAccountTotal(r.total_usdt)).catch(() => {});
+      getAccountTotal().then(r => {
+        setAccountTotal(r.total_usdt);
+        setFreeUsdt(r.free_usdt   ?? null);
+        setLockedUsdt(r.locked_usdt ?? null);
+      }).catch(() => {});
       getConfig().then(cfg => {
         const v = cfg?.portfolio?.total_usdt ?? cfg?.total_usdt ?? null;
         setInvestedUsdt(typeof v === 'number' ? v : null);
@@ -366,9 +372,6 @@ export default function Dashboard({ lang }: Props) {
         {(() => {
           const portfolioVal = status?.total_usdt ?? null;
           const invested     = investedUsdt;
-          const free         = accountTotal !== null && portfolioVal !== null
-            ? accountTotal - portfolioVal
-            : accountTotal !== null ? accountTotal : null;
           const activePort   = portfolios.find(p => p.active);
           const portName     = activePort?.name ?? (lang === 'ar' ? 'المحفظة النشطة' : 'Active Portfolio');
 
@@ -391,11 +394,19 @@ export default function Dashboard({ lang }: Props) {
             },
             {
               label: lang === 'ar' ? 'الرصيد الحر' : 'Free Balance',
-              sub:   lang === 'ar' ? 'قابل للتداول' : 'Available to trade',
-              value: free,
+              sub:   lang === 'ar' ? 'قابل للتداول · USDT متاح' : 'Available to trade · USDT',
+              value: freeUsdt,
               color: '#60A5FA',
               glow:  'rgba(96,165,250,0.4)',
               icon:  '💧',
+            },
+            {
+              label: lang === 'ar' ? 'الرصيد المحجوز' : 'Reserved Balance',
+              sub:   lang === 'ar' ? 'في أوردرات مفتوحة' : 'In open orders',
+              value: lockedUsdt,
+              color: '#F59E0B',
+              glow:  'rgba(245,158,11,0.4)',
+              icon:  '🔒',
             },
           ];
 

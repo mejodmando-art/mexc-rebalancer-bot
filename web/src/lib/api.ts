@@ -23,7 +23,7 @@ export const getStatus       = ()       => req<any>('/api/status');
 export const getHistory      = (n = 50) => req<any[]>(`/api/history?limit=${n}`);
 export const getSnapshots    = (n = 90) => req<any[]>(`/api/snapshots?limit=${n}`);
 export const getConfig       = ()       => req<any>('/api/config');
-export const getAccountTotal = ()       => req<{ ok: boolean; total_usdt: number; assets: any[] }>('/api/account/total');
+export const getAccountTotal = ()       => req<{ ok: boolean; total_usdt: number; free_usdt: number; locked_usdt: number; assets: any[] }>('/api/account/total');
 
 // ── Config update ───────────────────────────────────────────────────────────
 export const updateConfig = (body: Record<string, unknown>) =>

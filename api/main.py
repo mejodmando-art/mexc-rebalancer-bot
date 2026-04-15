@@ -646,7 +646,31 @@ def get_account_total():
                 "value_usdt": round(value, 4),
             })
         assets_out.sort(key=lambda x: x["value_usdt"], reverse=True)
-        return {"ok": True, "total_usdt": round(total, 2), "assets": assets_out}
+        # Compute free vs locked totals across all assets
+        free_total   = 0.0
+        locked_total = 0.0
+        for b in balances:
+            sym    = b.get("asset", "").upper()
+            free   = float(b.get("free",   0))
+            locked = float(b.get("locked", 0))
+            if free + locked <= 0:
+                continue
+            if sym == "USDT":
+                price = 1.0
+            else:
+                try:
+                    price = client.get_price(f"{sym}USDT")
+                except Exception:
+                    continue
+            free_total   += free   * price
+            locked_total += locked * price
+        return {
+            "ok": True,
+            "total_usdt":  round(total, 2),
+            "free_usdt":   round(free_total,   2),
+            "locked_usdt": round(locked_total, 2),
+            "assets": assets_out,
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
