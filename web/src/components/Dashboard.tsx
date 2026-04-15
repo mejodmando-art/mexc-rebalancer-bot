@@ -368,103 +368,93 @@ export default function Dashboard({ lang }: Props) {
           )}
         </div>
 
-        {/* ── Balance breakdown list ─────────────────────────────────────── */}
+        {/* ── Balance breakdown 2×2 grid ────────────────────────────────── */}
         {(() => {
           const portfolioVal = status?.total_usdt ?? null;
           const invested     = investedUsdt;
           const activePort   = portfolios.find(p => p.active);
-          const portName     = activePort?.name ?? (lang === 'ar' ? 'المحفظة النشطة' : 'Active Portfolio');
+          const portName     = activePort?.name ?? (lang === 'ar' ? 'المحفظة' : 'Portfolio');
 
-          const rows: { label: string; sub: string; value: number | null; color: string; glow: string; icon: string }[] = [
+          const cells: { label: string; sub: string; value: number | null; color: string; glow: string }[] = [
             {
-              label: lang === 'ar' ? 'الرصيد المستثمر' : 'Invested Balance',
+              label: lang === 'ar' ? 'المستثمر' : 'Invested',
               sub:   portName,
               value: invested,
               color: '#A78BFA',
-              glow:  'rgba(167,139,250,0.4)',
-              icon:  '📊',
+              glow:  'rgba(167,139,250,0.35)',
             },
             {
-              label: lang === 'ar' ? 'قيمة المحفظة' : 'Portfolio Value',
-              sub:   `${status?.assets?.length ?? 0} ${lang === 'ar' ? 'عملة' : 'coins'} · ${status?.mode ?? ''}`,
+              label: lang === 'ar' ? 'قيمة المحفظة' : 'Portfolio',
+              sub:   `${status?.assets?.length ?? 0} ${lang === 'ar' ? 'عملة' : 'coins'}`,
               value: portfolioVal,
               color: '#00D4AA',
-              glow:  'rgba(0,212,170,0.4)',
-              icon:  '💼',
+              glow:  'rgba(0,212,170,0.35)',
             },
             {
-              label: lang === 'ar' ? 'الرصيد الحر' : 'Free Balance',
-              sub:   lang === 'ar' ? 'قابل للتداول · USDT متاح' : 'Available to trade · USDT',
+              label: lang === 'ar' ? 'الرصيد الحر' : 'Free',
+              sub:   lang === 'ar' ? 'متاح للتداول' : 'Available',
               value: freeUsdt,
               color: '#60A5FA',
-              glow:  'rgba(96,165,250,0.4)',
-              icon:  '💧',
+              glow:  'rgba(96,165,250,0.35)',
             },
             {
-              label: lang === 'ar' ? 'الرصيد المحجوز' : 'Reserved Balance',
-              sub:   lang === 'ar' ? 'في أوردرات مفتوحة' : 'In open orders',
+              label: lang === 'ar' ? 'المحجوز' : 'Reserved',
+              sub:   lang === 'ar' ? 'أوردرات مفتوحة' : 'Open orders',
               value: lockedUsdt,
               color: '#F59E0B',
-              glow:  'rgba(245,158,11,0.4)',
-              icon:  '🔒',
+              glow:  'rgba(245,158,11,0.35)',
             },
           ];
 
           return (
-            <div className="mt-4 mb-4 space-y-2">
-              {rows.map((row, idx) => (
+            <div className="grid grid-cols-2 gap-2 mt-3 mb-4">
+              {cells.map((cell, idx) => (
                 <div
                   key={idx}
-                  className="flex items-center gap-3 px-3 py-2.5 rounded-2xl"
+                  className="rounded-2xl px-3 py-2.5 relative overflow-hidden"
                   style={{
-                    background: `linear-gradient(135deg, ${row.color}10, rgba(15,10,40,0.6))`,
-                    border: `1px solid ${row.color}25`,
-                    boxShadow: `0 2px 12px ${row.color}10, inset 0 1px 0 rgba(255,255,255,0.05)`,
+                    background: `linear-gradient(135deg, ${cell.color}12 0%, rgba(15,10,40,0.7) 100%)`,
+                    border: `1px solid ${cell.color}22`,
+                    boxShadow: `inset 0 1px 0 rgba(255,255,255,0.06)`,
                   }}
                 >
-                  {/* Icon */}
-                  <div
-                    className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 text-base"
-                    style={{
-                      background: `linear-gradient(145deg, ${row.color}28, ${row.color}10)`,
-                      border: `1px solid ${row.color}35`,
-                      boxShadow: `0 4px 12px ${row.glow}, inset 0 1px 0 rgba(255,255,255,0.15)`,
-                    }}
-                  >
-                    {row.icon}
-                  </div>
+                  {/* Corner glow */}
+                  <div className="absolute top-0 right-0 w-12 h-12 pointer-events-none"
+                    style={{ background: `radial-gradient(circle at top right, ${cell.color}20, transparent 70%)` }} />
 
                   {/* Label */}
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-bold leading-tight" style={{ color: 'var(--text-main)' }}>
-                      {row.label}
-                    </p>
-                    <p className="text-[10px] truncate mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                      {row.sub}
-                    </p>
-                  </div>
+                  <p className="text-[10px] font-semibold mb-1 truncate" style={{ color: cell.color, opacity: 0.9 }}>
+                    {cell.label}
+                  </p>
 
-                  {/* Value — big 3D number */}
-                  <div className="shrink-0 text-end">
-                    {loading && row.value === null ? (
-                      <div className="skeleton h-6 w-20 rounded-lg" />
-                    ) : (
-                      <p
-                        className="num font-black leading-none"
-                        style={{
-                          fontSize: '1.25rem',
-                          letterSpacing: '-0.03em',
-                          background: `linear-gradient(135deg, #fff 0%, ${row.color} 100%)`,
-                          WebkitBackgroundClip: 'text',
-                          WebkitTextFillColor: 'transparent',
-                          backgroundClip: 'text',
-                          filter: `drop-shadow(0 0 8px ${row.glow})`,
-                        }}
-                      >
-                        {row.value !== null ? fmtUsd(row.value) : '—'}
-                      </p>
-                    )}
-                  </div>
+                  {/* Value */}
+                  {loading && cell.value === null ? (
+                    <div className="skeleton h-5 w-16 rounded-md mb-1" />
+                  ) : (
+                    <p
+                      className="num font-black leading-none mb-1"
+                      style={{
+                        fontSize: '1.05rem',
+                        letterSpacing: '-0.03em',
+                        background: `linear-gradient(135deg, #ffffff 30%, ${cell.color} 100%)`,
+                        WebkitBackgroundClip: 'text',
+                        WebkitTextFillColor: 'transparent',
+                        backgroundClip: 'text',
+                        filter: `drop-shadow(0 0 6px ${cell.glow})`,
+                      }}
+                    >
+                      {cell.value !== null ? fmtUsd(cell.value) : '—'}
+                    </p>
+                  )}
+
+                  {/* Sub */}
+                  <p className="text-[9px] truncate" style={{ color: 'var(--text-muted)' }}>
+                    {cell.sub}
+                  </p>
+
+                  {/* Bottom accent line */}
+                  <div className="absolute bottom-0 left-0 right-0 h-px"
+                    style={{ background: `linear-gradient(90deg, ${cell.color}40, transparent)` }} />
                 </div>
               ))}
             </div>
