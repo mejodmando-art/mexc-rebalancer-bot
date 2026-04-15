@@ -68,7 +68,7 @@ def _try_postgres() -> bool:
 
 
 _USE_POSTGRES = _try_postgres()
-_BACKEND: str = "postgresql" if _USE_POSTGRES else "sqlite"
+_BACKEND = "postgresql" if _USE_POSTGRES else "sqlite"
 
 # ---------------------------------------------------------------------------
 # Connection context managers
@@ -90,65 +90,75 @@ def _conn() -> Generator:
 
 @contextmanager
 def _pg_conn() -> Generator:
-    """Acquire a PostgreSQL connection with retry, then yield it exactly once.
+    """
+    PostgreSQL connection context manager with retry logic on connection errors.
 
-    The retry loop only covers connection *acquisition*.  Once we have a live
-    connection the yield happens outside the loop so @contextmanager never sees
-    a second yield, which would raise RuntimeError.
+    The retry loop only covers *connection acquisition* — the yield happens
+    exactly once, outside the loop.  This prevents the RuntimeError that occurs
+    when a @contextmanager generator tries to yield a second time after catching
+    an exception thrown by the caller's with-block.
     """
     global _pg_pool
-    conn = None
     last_err = None
+    conn = None
+    pool = None
 
-    # ── Acquire connection with retry ────────────────────────────────────────
+    # --- Acquire a connection with retries ---
     for attempt in range(_MAX_RETRIES):
         try:
             pool = _get_pg_pool()
             conn = pool.getconn()
-            # Rollback any stale transaction left by PgBouncer transaction-pooling.
+            # Always rollback any leftover transaction from a previous use of
+            # this connection.  Critical for PgBouncer transaction-pooling mode
+            # (Supabase port 6543) so the connection doesn't carry a stale
+            # snapshot and return outdated rows.
             try:
                 conn.rollback()
             except Exception:
                 pass
             conn.autocommit = False
-            break  # success — exit retry loop
+            break  # connection acquired successfully
         except Exception as e:
             last_err = e
             if conn is not None:
                 try:
-                    conn.rollback()
-                except Exception:
-                    pass
-                try:
-                    if _pg_pool:
-                        _pg_pool.putconn(conn, close=True)
+                    if pool:
+                        pool.putconn(conn, close=True)
                 except Exception:
                     pass
                 conn = None
+            # Reset pool so the next attempt creates fresh connections
             _pg_pool = None
-            log.warning("PostgreSQL connect error (attempt %d/%d): %s", attempt + 1, _MAX_RETRIES, e)
+            pool = None
+            log.warning("PostgreSQL connection error (attempt %d/%d): %s", attempt + 1, _MAX_RETRIES, e)
             if attempt < _MAX_RETRIES - 1:
                 time.sleep(_RETRY_DELAY * (attempt + 1))
+    else:
+        # All retries exhausted — raise the last connection error
+        raise last_err
 
-    if conn is None:
-        raise last_err  # all retries exhausted
-
-    # ── Yield exactly once, outside the retry loop ───────────────────────────
+    # --- Single yield outside the retry loop ---
     try:
         yield conn
         conn.commit()
+        if pool:
+            pool.putconn(conn)
+        else:
+            conn.close()
     except Exception:
         try:
             conn.rollback()
         except Exception:
             pass
-        raise
-    finally:
         try:
-            if _pg_pool:
-                _pg_pool.putconn(conn)
+            if pool:
+                pool.putconn(conn, close=True)
+            else:
+                conn.close()
         except Exception:
             pass
+        _pg_pool = None
+        raise
 
 
 @contextmanager
@@ -215,8 +225,7 @@ def init_db() -> None:
                 ts_created  TEXT    NOT NULL,
                 name        TEXT    NOT NULL,
                 config_json TEXT    NOT NULL,
-                active      INTEGER NOT NULL DEFAULT 0,
-                bot_running INTEGER NOT NULL DEFAULT 0
+                active      INTEGER NOT NULL DEFAULT 0
             )
             """,
             """
@@ -250,8 +259,6 @@ def init_db() -> None:
         ]
         with _conn() as conn:
             cur = conn.cursor()
-            # Safe migration: drop the old user_id column if it exists,
-            # never drop the whole table (that would delete all portfolio data).
             cur.execute("""
                 DO $$
                 BEGIN
@@ -259,14 +266,13 @@ def init_db() -> None:
                         SELECT 1 FROM information_schema.columns
                         WHERE table_name='portfolios' AND column_name='user_id'
                     ) THEN
-                        ALTER TABLE portfolios DROP COLUMN IF EXISTS user_id;
+                        DROP TABLE IF EXISTS portfolios CASCADE;
                     END IF;
                 END$$;
             """)
             for stmt in stmts:
                 cur.execute(stmt)
             migrations = [
-                "ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS bot_running INTEGER NOT NULL DEFAULT 0",
                 "ALTER TABLE rebalance_history ADD COLUMN IF NOT EXISTS ts TEXT NOT NULL DEFAULT ''",
                 "ALTER TABLE rebalance_history ADD COLUMN IF NOT EXISTS mode TEXT NOT NULL DEFAULT ''",
                 "ALTER TABLE rebalance_history ADD COLUMN IF NOT EXISTS total_usdt REAL NOT NULL DEFAULT 0",
@@ -308,8 +314,7 @@ def init_db() -> None:
                     ts_created  TEXT    NOT NULL,
                     name        TEXT    NOT NULL,
                     config_json TEXT    NOT NULL,
-                    active      INTEGER NOT NULL DEFAULT 0,
-                    bot_running INTEGER NOT NULL DEFAULT 0
+                    active      INTEGER NOT NULL DEFAULT 0
                 );
                 CREATE TABLE IF NOT EXISTS grid_bots (
                     id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -343,14 +348,13 @@ def init_db() -> None:
 # Rebalance history
 # ---------------------------------------------------------------------------
 
-def record_rebalance(mode: str, total_usdt: float, details: list, paper: bool = False, portfolio_id: int | None = None) -> None:
+def record_rebalance(mode: str, total_usdt: float, details: list, paper: bool = False) -> None:
     try:
         with _conn() as conn:
             cur = conn.cursor()
-            pid = portfolio_id if portfolio_id is not None else 1
             cur.execute(
-                _q("INSERT INTO rebalance_history (ts, mode, total_usdt, details, paper, portfolio_id) VALUES (?,?,?,?,?,?)"),
-                (datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"), mode, total_usdt, json.dumps(details), int(paper), pid),
+                _q("INSERT INTO rebalance_history (ts, mode, total_usdt, details, paper) VALUES (?,?,?,?,?)"),
+                (datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"), mode, total_usdt, json.dumps(details), int(paper)),
             )
     except Exception as e:
         log.error("record_rebalance failed: %s", e)
@@ -378,14 +382,13 @@ def get_rebalance_history(limit: int = 10) -> list:
 # Portfolio snapshots
 # ---------------------------------------------------------------------------
 
-def record_snapshot(total_usdt: float, assets: list, portfolio_id: int | None = None) -> None:
+def record_snapshot(total_usdt: float, assets: list) -> None:
     try:
         with _conn() as conn:
             cur = conn.cursor()
-            pid = portfolio_id if portfolio_id is not None else 1
             cur.execute(
-                _q("INSERT INTO portfolio_snapshots (ts, total_usdt, assets_json, portfolio_id) VALUES (?,?,?,?)"),
-                (datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"), total_usdt, json.dumps(assets), pid),
+                _q("INSERT INTO portfolio_snapshots (ts, total_usdt, assets_json) VALUES (?,?,?)"),
+                (datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"), total_usdt, json.dumps(assets)),
             )
     except Exception as e:
         log.error("record_snapshot failed: %s", e)
@@ -499,32 +502,6 @@ def update_portfolio_config(portfolio_id: int, config: dict) -> None:
             )
     except Exception as e:
         log.error("update_portfolio_config failed: %s", e)
-
-
-def set_bot_running(portfolio_id: int, running: bool) -> None:
-    """Persist the running state of a portfolio loop so it can be resumed after restart."""
-    try:
-        with _conn() as conn:
-            cur = conn.cursor()
-            cur.execute(
-                _q("UPDATE portfolios SET bot_running=? WHERE id=?"),
-                (1 if running else 0, portfolio_id),
-            )
-    except Exception as e:
-        log.error("set_bot_running failed: %s", e)
-
-
-def get_running_portfolios() -> list[int]:
-    """Return IDs of all portfolios that were running before the last restart."""
-    try:
-        with _conn() as conn:
-            cur = conn.cursor()
-            cur.execute("SELECT id FROM portfolios WHERE bot_running=1")
-            rows = cur.fetchall()
-        return [r[0] if not isinstance(r, dict) else r["id"] for r in rows]
-    except Exception as e:
-        log.error("get_running_portfolios failed: %s", e)
-        return []
 
 
 # ---------------------------------------------------------------------------

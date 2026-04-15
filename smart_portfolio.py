@@ -25,7 +25,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from mexc_client import MEXCClient
-from database import init_db, record_rebalance, record_snapshot, get_rebalance_history, get_snapshots, update_portfolio_config
+from database import init_db, record_rebalance, record_snapshot, get_rebalance_history, get_snapshots
 
 logging.basicConfig(
     level=logging.INFO,
@@ -367,7 +367,7 @@ def get_portfolio_value(
 # Rebalance execution
 # ---------------------------------------------------------------------------
 
-def execute_rebalance(client: MEXCClient, cfg: dict, portfolio_id: Optional[int] = None) -> list:
+def execute_rebalance(client: MEXCClient, cfg: dict) -> list:
     """
     Rebalance logic:
     1. Compute the effective portfolio total = sum(asset values) + free USDT
@@ -376,9 +376,8 @@ def execute_rebalance(client: MEXCClient, cfg: dict, portfolio_id: Optional[int]
     2. Sell assets that are worth more than their target share of that total.
     3. After sells settle, buy assets that are worth less than their target.
 
-    portfolio_id: when provided, last_rebalance is written directly to that
-    portfolio's DB record instead of the currently-active portfolio, so
-    multi-portfolio setups don't cross-contaminate each other's records.
+    The effective total is recalculated after sells so that the USDT freed by
+    selling is available for buys.
     """
     env_paper = os.environ.get("PAPER_TRADING", "").lower()
     if env_paper in ("true", "1", "yes"):
@@ -391,10 +390,6 @@ def execute_rebalance(client: MEXCClient, cfg: dict, portfolio_id: Optional[int]
     assets_cfg = cfg["portfolio"]["assets"]
     budget_usdt = cfg["portfolio"].get("total_usdt", 0)
     details = []
-
-    if budget_usdt <= 0:
-        log.error("execute_rebalance: budget_usdt=%.2f — refusing to rebalance to prevent accidental liquidation", budget_usdt)
-        return []
 
     log.info("Rebalance start | budget=%.2f USDT%s", budget_usdt, " [PAPER]" if paper else "")
 
@@ -427,10 +422,6 @@ def execute_rebalance(client: MEXCClient, cfg: dict, portfolio_id: Optional[int]
         "assets_value=%.2f$ free_usdt=%.2f$ budget=%.2f$ → effective_total=%.2f$",
         assets_value, free_usdt, budget_usdt, effective_total,
     )
-
-    if effective_total <= 0:
-        log.error("execute_rebalance: effective_total=0 (all price fetches failed?) — aborting to prevent liquidation")
-        return []
 
     sells = []
     buys  = []
@@ -530,23 +521,14 @@ def execute_rebalance(client: MEXCClient, cfg: dict, portfolio_id: Optional[int]
 
     # Persist to DB and config
     mode = cfg["rebalance"]["mode"]
-    record_rebalance(mode, effective_total, details, paper=paper, portfolio_id=portfolio_id)
+    record_rebalance(mode, effective_total, details, paper=paper)
     record_snapshot(effective_total, [
         {"symbol": a["symbol"], "value_usdt": round(effective_total * a["allocation_pct"] / 100, 2), "actual_pct": a["allocation_pct"]}
         for a in assets_cfg
-    ], portfolio_id=portfolio_id)
+    ])
 
     cfg["last_rebalance"] = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
-    if portfolio_id is not None:
-        # Write directly to the running portfolio's DB record — avoids
-        # save_config's "find active portfolio" logic which would write to
-        # the wrong portfolio when multiple portfolios exist.
-        try:
-            update_portfolio_config(portfolio_id, cfg)
-        except Exception as e:
-            log.warning("execute_rebalance: could not update portfolio %d in DB: %s", portfolio_id, e)
-    else:
-        save_config(cfg)
+    save_config(cfg)
 
     return details
 
@@ -607,7 +589,6 @@ def needs_rebalance_proportional(client: MEXCClient, cfg: dict) -> bool:
     budget_usdt = cfg["portfolio"].get("total_usdt", 0)
 
     # Compute effective total the same way execute_rebalance does.
-    asset_symbols = {a["symbol"].upper() for a in assets_cfg}
     assets_value = 0.0
     actuals = {}
     for a in assets_cfg:
