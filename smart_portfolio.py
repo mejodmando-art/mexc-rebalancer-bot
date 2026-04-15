@@ -40,9 +40,21 @@ CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.json")
 init_db()
 
 VALID_THRESHOLDS = {1, 3, 5}
-VALID_TIMED_FREQUENCIES = {"daily", "weekly", "monthly"}
-MIN_ASSETS = 2
-MAX_ASSETS = 10
+VALID_TIMED_FREQUENCIES = {"30min", "1h", "4h", "8h", "12h", "daily", "weekly", "monthly"}
+# Interval in minutes for each timed frequency
+TIMED_FREQUENCY_MINUTES: dict[str, int] = {
+    "30min": 30,
+    "1h": 60,
+    "4h": 240,
+    "8h": 480,
+    "12h": 720,
+    "daily": 1440,
+    "weekly": 10080,
+    "monthly": 43200,
+}
+VALID_ALLOCATION_MODES = {"ai_balance", "equal", "market_cap"}
+MIN_ASSETS = 1
+MAX_ASSETS = 12
 
 
 # ---------------------------------------------------------------------------
@@ -95,6 +107,49 @@ def validate_allocations(assets: list) -> None:
     total = sum(a["allocation_pct"] for a in assets)
     if abs(total - 100.0) > 0.01:
         raise ValueError(f"Allocations must sum to 100% (got {total:.2f}%).")
+
+
+# ---------------------------------------------------------------------------
+# Allocation mode helpers
+# ---------------------------------------------------------------------------
+
+def apply_equal_allocation(assets: list) -> list:
+    """Distribute 100% equally across all assets."""
+    n = len(assets)
+    base = round(100.0 / n, 4)
+    remainder = round(100.0 - base * (n - 1), 4)
+    for i, a in enumerate(assets):
+        a["allocation_pct"] = remainder if i == n - 1 else base
+    return assets
+
+
+def apply_market_cap_allocation(client: MEXCClient, assets: list) -> list:
+    """Weight each asset by its current market price (proxy for market cap rank).
+
+    Uses the live USDT price as a relative weight.  This is a simplified
+    proxy — a full market-cap weighting would require CoinGecko data.
+    """
+    prices: dict[str, float] = {}
+    for a in assets:
+        sym = a["symbol"]
+        try:
+            prices[sym] = client.get_price(f"{sym}USDT") if sym != "USDT" else 1.0
+        except Exception as e:
+            log.warning("Cannot fetch price for %s (market-cap alloc): %s", sym, e)
+            prices[sym] = 0.0
+
+    total_price = sum(prices.values())
+    if total_price <= 0:
+        log.warning("All prices zero — falling back to equal allocation")
+        return apply_equal_allocation(assets)
+
+    for a in assets:
+        a["allocation_pct"] = round(prices[a["symbol"]] / total_price * 100, 4)
+
+    # Fix rounding so total == 100
+    diff = round(100.0 - sum(a["allocation_pct"] for a in assets), 4)
+    assets[-1]["allocation_pct"] = round(assets[-1]["allocation_pct"] + diff, 4)
+    return assets
 
 
 # ---------------------------------------------------------------------------
@@ -592,9 +647,16 @@ def next_run_time(
 ) -> datetime:
     """Return the next scheduled run datetime.
 
-    target_hour: UTC hour (0-23) at which the rebalance should fire.
+    Short intervals (30min, 1h, 4h, 8h, 12h) fire relative to now.
+    Long intervals (daily, weekly, monthly) fire at target_hour UTC.
     """
     now = from_dt or datetime.utcnow()
+
+    # Short fixed-interval frequencies
+    if frequency in TIMED_FREQUENCY_MINUTES and frequency not in ("daily", "weekly", "monthly"):
+        minutes = TIMED_FREQUENCY_MINUTES[frequency]
+        return now + timedelta(minutes=minutes)
+
     if frequency == "daily":
         candidate = now.replace(hour=target_hour, minute=0, second=0, microsecond=0)
         if candidate <= now:
@@ -611,6 +673,77 @@ def next_run_time(
             candidate += timedelta(days=30)
         return candidate
     raise ValueError(f"Unknown frequency: {frequency}")
+
+
+# ---------------------------------------------------------------------------
+# Stop Loss / Take Profit guard
+# ---------------------------------------------------------------------------
+
+def check_sl_tp(client: MEXCClient, cfg: dict) -> list[dict]:
+    """Check each asset against its stop-loss and take-profit thresholds.
+
+    Returns a list of triggered actions (each dict has symbol, action, price).
+    Assets are sold to USDT when triggered.  Entry prices are read from
+    cfg["portfolio"]["assets"][i]["entry_price_usdt"] (optional).
+
+    Stop-loss  : sell when price drops >= stop_loss_pct% below entry.
+    Take-profit: sell when price rises >= take_profit_pct% above entry.
+    """
+    risk_cfg = cfg.get("risk", {})
+    sl_pct = risk_cfg.get("stop_loss_pct")    # e.g. 10  → 10%
+    tp_pct = risk_cfg.get("take_profit_pct")  # e.g. 50  → 50%
+
+    if not sl_pct and not tp_pct:
+        return []
+
+    paper = cfg.get("paper_trading", False)
+    triggered = []
+
+    for a in cfg["portfolio"]["assets"]:
+        sym = a["symbol"]
+        if sym == "USDT":
+            continue
+
+        entry_price = a.get("entry_price_usdt")
+        if not entry_price:
+            continue  # no entry price set — skip SL/TP for this asset
+
+        try:
+            current_price = client.get_price(f"{sym}USDT")
+        except Exception as e:
+            log.warning("SL/TP: cannot fetch price for %s: %s", sym, e)
+            continue
+
+        change_pct = (current_price - entry_price) / entry_price * 100
+
+        action = None
+        if sl_pct and change_pct <= -abs(sl_pct):
+            action = "STOP_LOSS"
+        elif tp_pct and change_pct >= abs(tp_pct):
+            action = "TAKE_PROFIT"
+
+        if action:
+            log.info(
+                "%s %s triggered | entry=%.4f current=%.4f change=%.2f%%",
+                sym, action, entry_price, current_price, change_pct,
+            )
+            if not paper:
+                try:
+                    balance = client.get_asset_balance(sym)
+                    if balance > 0:
+                        resp = client.place_market_sell(f"{sym}USDT", balance)
+                        log.info("%s sell OK: %s", action, resp)
+                except Exception as e:
+                    log.error("%s sell failed for %s: %s", action, sym, e)
+            triggered.append({
+                "symbol": sym,
+                "action": action,
+                "entry_price": entry_price,
+                "current_price": current_price,
+                "change_pct": round(change_pct, 2),
+            })
+
+    return triggered
 
 
 # ---------------------------------------------------------------------------
@@ -655,6 +788,10 @@ def run(cfg: dict) -> None:
         try:
             while True:
                 log.info("--- Proportional check ---")
+                # SL/TP guard runs before rebalance
+                triggered = check_sl_tp(client, cfg)
+                if triggered:
+                    log.info("SL/TP triggered for: %s", [t["symbol"] for t in triggered])
                 if needs_rebalance_proportional(client, cfg):
                     execute_rebalance(client, cfg)
                 else:
@@ -669,9 +806,16 @@ def run(cfg: dict) -> None:
         target_hour = timed_cfg.get("hour", 0)
         next_run = next_run_time(frequency, target_hour=target_hour)
         log.info("First rebalance scheduled at %s UTC", next_run.isoformat())
+        # For short intervals, poll every 30 s; for long ones every 60 s.
+        short_freq = frequency in TIMED_FREQUENCY_MINUTES and frequency not in ("daily", "weekly", "monthly")
+        poll_sec = 30 if short_freq else 60
         try:
             while True:
                 now = datetime.utcnow()
+                # SL/TP guard runs every poll cycle regardless of schedule
+                triggered = check_sl_tp(client, cfg)
+                if triggered:
+                    log.info("SL/TP triggered for: %s", [t["symbol"] for t in triggered])
                 if now >= next_run:
                     log.info("--- Timed rebalance (%s) ---", frequency)
                     execute_rebalance(client, cfg)
@@ -680,7 +824,7 @@ def run(cfg: dict) -> None:
                     target_hour = cfg["rebalance"]["timed"].get("hour", 0)
                     next_run = next_run_time(frequency, target_hour=target_hour)
                     log.info("Next rebalance at %s UTC", next_run.isoformat())
-                time.sleep(60)
+                time.sleep(poll_sec)
         except KeyboardInterrupt:
             terminate(client, cfg)
 

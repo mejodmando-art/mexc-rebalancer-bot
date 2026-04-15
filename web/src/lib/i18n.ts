@@ -150,7 +150,7 @@ export const t: Record<string, Record<Lang, string>> = {
   errSum:           { ar: 'مجموع النسب يجب أن يساوي 100%', en: 'Allocations must sum to 100%' },
   errSymbol:        { ar: 'أدخل رمز كل عملة', en: 'Enter a symbol for each coin' },
   errBotName:       { ar: 'أدخل اسم البوت', en: 'Enter a bot name' },
-  errAssetCount:    { ar: 'عدد العملات يجب أن يكون بين 2 و 10', en: 'Asset count must be between 2 and 10' },
+  errAssetCount:    { ar: 'عدد العملات يجب أن يكون بين 1 و 12', en: 'Asset count must be between 1 and 12' },
   errAmount:        { ar: 'أدخل مبلغ استثمار صحيح', en: 'Enter a valid investment amount' },
   successSaved:     { ar: 'تم حفظ الإعدادات بنجاح', en: 'Settings saved successfully' },
   successCreated:   { ar: 'تم إنشاء البوت وتشغيله بنجاح!', en: 'Bot created and started successfully!' },
@@ -162,6 +162,38 @@ export const t: Record<string, Record<Lang, string>> = {
   experimental:     { ar: 'تجريبي',          en: 'Experimental' },
   cancelWindow:     { ar: 'يمكنك الإلغاء خلال', en: 'You can cancel within' },
   seconds:          { ar: 'ثانية',           en: 'seconds' },
+
+  // Allocation modes
+  allocMode:        { ar: 'طريقة التخصيص',   en: 'Allocation Mode' },
+  allocAiBalance:   { ar: 'رصيد ذكي',        en: 'AI Balance' },
+  allocEqual:       { ar: 'متساوي',           en: 'Equal' },
+  allocMarketCap:   { ar: 'القيمة السوقية',   en: 'By Market Cap' },
+  allocAiDesc:      { ar: 'التخصيص الأولي الذي أنشأه النظام لكل توكن', en: 'System-generated initial allocation per token' },
+  allocEqualDesc:   { ar: 'توزيع متساوٍ على جميع التوكنات المختارة', en: 'Equal split across all selected tokens' },
+  allocMktCapDesc:  { ar: 'التخصيص بناءً على نسبة القيمة السوقية لكل عملة', en: 'Weighted by each token\'s market price (proxy for market cap)' },
+
+  // Entry price
+  entryPrice:       { ar: 'سعر الدخول (USDT)', en: 'Entry Price (USDT)' },
+  entryPriceDesc:   { ar: 'السعر الذي يضع عنده البوت أول أمر شراء أو بيع. اتركه فارغاً للسعر الحالي.', en: 'Price at which the bot places its first order. Leave empty to use market price.' },
+  entryPriceOpt:    { ar: 'اختياري',           en: 'optional' },
+
+  // Stop Loss / Take Profit
+  riskSettings:     { ar: 'إدارة المخاطر',    en: 'Risk Management' },
+  stopLoss:         { ar: 'نسبة وقف الخسارة', en: 'Stop Loss %' },
+  stopLossDesc:     { ar: 'بيع تلقائي عند انخفاض سعر أي توكن بهذه النسبة عن سعر الدخول (1%–100%)', en: 'Auto-sell when any token drops this % below entry price (1%–100%)' },
+  takeProfit:       { ar: 'نسبة جني الربح',   en: 'Take Profit %' },
+  takeProfitDesc:   { ar: 'بيع تلقائي عند ارتفاع سعر أي توكن بهذه النسبة عن سعر الدخول (1%–500%)', en: 'Auto-sell when any token rises this % above entry price (1%–500%)' },
+  disabled:         { ar: 'معطّل',             en: 'Disabled' },
+
+  // Timed intervals
+  interval30m:      { ar: '30 دقيقة',          en: '30 min' },
+  interval1h:       { ar: 'ساعة',              en: '1 Hour' },
+  interval4h:       { ar: '4 ساعات',           en: '4 Hours' },
+  interval8h:       { ar: '8 ساعات',           en: '8 Hours' },
+  interval12h:      { ar: '12 ساعة',           en: '12 Hours' },
+  interval1d:       { ar: 'يوم',               en: '1 Day' },
+  timedModeDesc:    { ar: 'يعيد البوت التوازن على فترات زمنية ثابتة، بالشراء بسعر منخفض والبيع بسعر مرتفع للحفاظ على التخصيص الأصلي.', en: 'Bot rebalances at fixed intervals, buying low and selling high to maintain the original allocation.' },
+  proportionalModeDesc: { ar: 'يُفعّل إعادة التوازن عندما تتجاوز حصة الرمز التخصيص المحدد. النسب المئوية الأصغر تعني إعادة توازن أكثر تواتراً.', en: 'Triggers rebalance when a token\'s share exceeds the set allocation. Smaller percentages mean more frequent rebalancing.' },
 };
 
 export function tr(key: string, lang: Lang): string {

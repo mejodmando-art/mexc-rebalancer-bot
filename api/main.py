@@ -84,7 +84,8 @@ def _make_loop(portfolio_id: int, stop_event: threading.Event) -> None:
     """Rebalancer loop for a single portfolio."""
     from smart_portfolio import (
         execute_rebalance, needs_rebalance_proportional,
-        next_run_time, get_portfolio_value,
+        next_run_time, get_portfolio_value, check_sl_tp,
+        TIMED_FREQUENCY_MINUTES,
     )
     from database import get_portfolio as db_get_portfolio
 
@@ -106,8 +107,10 @@ def _make_loop(portfolio_id: int, stop_event: threading.Event) -> None:
             while not stop_event.is_set():
                 try:
                     cfg = db_get_portfolio(portfolio_id)
-                    if cfg and needs_rebalance_proportional(client, cfg):
-                        execute_rebalance(client, cfg)
+                    if cfg:
+                        check_sl_tp(client, cfg)
+                        if needs_rebalance_proportional(client, cfg):
+                            execute_rebalance(client, cfg)
                 except Exception as e:
                     log.error("Portfolio %d loop error: %s", portfolio_id, e)
                 stop_event.wait(interval)
@@ -117,21 +120,35 @@ def _make_loop(portfolio_id: int, stop_event: threading.Event) -> None:
             frequency = timed_cfg["frequency"]
             target_hour = timed_cfg.get("hour", 0)
             next_run = next_run_time(frequency, target_hour=target_hour)
+            # Short intervals poll every 30 s; long ones every 60 s
+            short_freq = frequency in TIMED_FREQUENCY_MINUTES and frequency not in ("daily", "weekly", "monthly")
+            poll_sec = 30 if short_freq else 60
             while not stop_event.is_set():
                 try:
-                    if datetime.utcnow() >= next_run:
-                        cfg = db_get_portfolio(portfolio_id)
-                        if cfg:
+                    cfg = db_get_portfolio(portfolio_id)
+                    if cfg:
+                        check_sl_tp(client, cfg)
+                        if datetime.utcnow() >= next_run:
                             execute_rebalance(client, cfg)
                             frequency = cfg["rebalance"]["timed"]["frequency"]
                             target_hour = cfg["rebalance"]["timed"].get("hour", 0)
                             next_run = next_run_time(frequency, target_hour=target_hour)
+                            short_freq = frequency in TIMED_FREQUENCY_MINUTES and frequency not in ("daily", "weekly", "monthly")
+                            poll_sec = 30 if short_freq else 60
                 except Exception as e:
                     log.error("Portfolio %d loop error: %s", portfolio_id, e)
-                stop_event.wait(60)
+                stop_event.wait(poll_sec)
 
         elif mode == "unbalanced":
-            stop_event.wait()
+            # Still run SL/TP checks every minute even in manual mode
+            while not stop_event.is_set():
+                try:
+                    cfg = db_get_portfolio(portfolio_id)
+                    if cfg:
+                        check_sl_tp(client, cfg)
+                except Exception as e:
+                    log.error("Portfolio %d SL/TP check error: %s", portfolio_id, e)
+                stop_event.wait(60)
 
     except Exception as e:
         with _loops_lock:
@@ -264,12 +281,14 @@ def _client() -> MEXCClient:
 class AssetAlloc(BaseModel):
     symbol: str
     allocation_pct: float
+    entry_price_usdt: Optional[float] = None
 
 
 class ConfigUpdate(BaseModel):
     bot_name: Optional[str] = None
     assets: Optional[list[AssetAlloc]] = None
     total_usdt: Optional[float] = None
+    allocation_mode: Optional[str] = None          # ai_balance | equal | market_cap
     rebalance_mode: Optional[str] = None
     threshold_pct: Optional[int] = None
     frequency: Optional[str] = None
@@ -277,6 +296,8 @@ class ConfigUpdate(BaseModel):
     sell_at_termination: Optional[bool] = None
     enable_asset_transfer: Optional[bool] = None
     paper_trading: Optional[bool] = None
+    stop_loss_pct: Optional[float] = None          # 1–100, None = disabled
+    take_profit_pct: Optional[float] = None        # 1–500, None = disabled
 
 
 class NotificationConfig(BaseModel):
@@ -423,9 +444,15 @@ def update_config(body: ConfigUpdate):
             except Exception:
                 pass  # If validation itself fails, allow save
         cfg["portfolio"]["assets"] = [
-            {"symbol": s, "allocation_pct": a.allocation_pct}
+            {
+                "symbol": s,
+                "allocation_pct": a.allocation_pct,
+                "entry_price_usdt": a.entry_price_usdt,
+            }
             for s, a in zip(symbols, body.assets)
         ]
+    if body.allocation_mode is not None:
+        cfg["portfolio"]["allocation_mode"] = body.allocation_mode
     if body.total_usdt is not None:
         cfg["portfolio"]["total_usdt"] = body.total_usdt
         # Always update initial baseline when user explicitly sets total_usdt
@@ -444,6 +471,24 @@ def update_config(body: ConfigUpdate):
         cfg["asset_transfer"]["enable_asset_transfer"] = body.enable_asset_transfer
     if body.paper_trading is not None:
         cfg["paper_trading"] = body.paper_trading
+    # Risk settings
+    if body.stop_loss_pct is not None or body.take_profit_pct is not None:
+        if "risk" not in cfg:
+            cfg["risk"] = {}
+        if body.stop_loss_pct is not None:
+            if body.stop_loss_pct == 0:
+                cfg["risk"]["stop_loss_pct"] = None
+            elif 1 <= body.stop_loss_pct <= 100:
+                cfg["risk"]["stop_loss_pct"] = body.stop_loss_pct
+            else:
+                raise HTTPException(status_code=400, detail="stop_loss_pct must be 1–100 or 0 to disable")
+        if body.take_profit_pct is not None:
+            if body.take_profit_pct == 0:
+                cfg["risk"]["take_profit_pct"] = None
+            elif 1 <= body.take_profit_pct <= 500:
+                cfg["risk"]["take_profit_pct"] = body.take_profit_pct
+            else:
+                raise HTTPException(status_code=400, detail="take_profit_pct must be 1–500 or 0 to disable")
     try:
         validate_allocations(cfg["portfolio"]["assets"])
     except ValueError as e:
@@ -471,6 +516,10 @@ def update_config(body: ConfigUpdate):
                     active_cfg["rebalance"]["timed"]["hour"] = cfg["rebalance"]["timed"]["hour"]
                 if body.paper_trading is not None:
                     active_cfg["paper_trading"] = cfg["paper_trading"]
+                if body.allocation_mode is not None:
+                    active_cfg["portfolio"]["allocation_mode"] = cfg["portfolio"]["allocation_mode"]
+                if "risk" in cfg:
+                    active_cfg["risk"] = cfg["risk"]
                 update_portfolio_config(active["id"], active_cfg)
     except Exception as e:
         log.warning("update_config: could not mirror to active portfolio DB record: %s", e)
