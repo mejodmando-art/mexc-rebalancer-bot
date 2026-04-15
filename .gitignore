@@ -40,3 +40,7 @@ ENV/
 web/.next/
 web/tsconfig.tsbuildinfo
 web/node_modules/
+static/
+api/static/
+web/out/
+web/.next/
