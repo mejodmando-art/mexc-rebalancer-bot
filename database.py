@@ -70,6 +70,31 @@ def _try_postgres() -> bool:
 _USE_POSTGRES = _try_postgres()
 _BACKEND = "postgresql" if _USE_POSTGRES else "sqlite"
 
+
+def try_reconnect_postgres() -> bool:
+    """
+    Attempt to (re-)connect to PostgreSQL at runtime.
+
+    Call this after a Railway network interruption and reconnection.
+    Returns True if PostgreSQL is now available.
+
+    If the initial import failed (e.g. Railway DB was not yet ready),
+    this lets the app self-heal without a full restart.
+    """
+    global _USE_POSTGRES, _BACKEND, _pg_pool
+    if not _DATABASE_URL:
+        return False
+    _pg_pool = None          # force pool recreation on next access
+    result = _try_postgres()
+    if result and not _USE_POSTGRES:
+        _USE_POSTGRES = True
+        _BACKEND = "postgresql"
+        log.info("PostgreSQL reconnected successfully — switching backend to postgresql")
+    elif not result and _USE_POSTGRES:
+        # Connection dropped; next query will auto-retry via _pg_conn retry loop
+        log.warning("PostgreSQL reconnect check failed — will keep retrying per-query")
+    return result
+
 # ---------------------------------------------------------------------------
 # Connection context managers
 # ---------------------------------------------------------------------------
