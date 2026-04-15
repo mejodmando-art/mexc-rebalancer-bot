@@ -251,17 +251,31 @@ export default function Dashboard({ lang }: Props) {
   const activePortfolio = portfolios.find(p => p.active) ?? null;
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
 
       {/* Buy & Activate modal */}
       {showBuyModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4">
-          <div className="card w-full max-w-md space-y-4" style={{ background: 'var(--bg-card)' }}>
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center px-4"
+          style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(12px)' }}
+        >
+          <div
+            className="w-full max-w-md space-y-4 rounded-3xl p-5"
+            style={{
+              background: 'rgba(15,10,40,0.98)',
+              border: '1px solid rgba(123,92,245,0.3)',
+              boxShadow: '0 0 60px rgba(123,92,245,0.2)',
+            }}
+          >
             <div className="flex items-center justify-between">
-              <h2 className="text-lg font-bold" style={{ color: 'var(--text-main)' }}>
+              <h2 className="text-base font-bold" style={{ color: 'var(--text-main)' }}>
                 🛒 {lang === 'ar' ? 'اختر المحفظة للشراء والتفعيل' : 'Select Portfolio to Buy & Activate'}
               </h2>
-              <button onClick={() => setShowBuyModal(false)} className="text-xl" style={{ color: 'var(--text-muted)' }}>✖</button>
+              <button
+                onClick={() => setShowBuyModal(false)}
+                className="w-7 h-7 rounded-xl flex items-center justify-center"
+                style={{ background: 'rgba(123,92,245,0.15)', color: 'var(--text-muted)' }}
+              >✖</button>
             </div>
 
             <div className="text-xs rounded-xl px-3 py-2" style={{ background: 'rgba(0,212,170,0.08)', border: '1px solid rgba(0,212,170,0.2)', color: '#00D4AA' }}>
@@ -275,10 +289,10 @@ export default function Dashboard({ lang }: Props) {
                 <button
                   key={p.id}
                   onClick={() => { setSelectedPortId(p.id); handleBuyAndActivate(p.id); }}
-                  className="w-full flex items-center justify-between gap-3 px-4 py-3 rounded-xl text-sm text-start transition-all"
+                  className="w-full flex items-center justify-between gap-3 px-4 py-3 rounded-2xl text-sm text-start transition-all"
                   style={{
-                    background: selectedPortId === p.id ? 'rgba(0,212,170,0.1)' : 'var(--bg-input)',
-                    border: `1px solid ${selectedPortId === p.id ? 'rgba(0,212,170,0.4)' : 'var(--border)'}`,
+                    background: selectedPortId === p.id ? 'rgba(0,212,170,0.1)' : 'rgba(123,92,245,0.08)',
+                    border: `1px solid ${selectedPortId === p.id ? 'rgba(0,212,170,0.4)' : 'rgba(123,92,245,0.2)'}`,
                     color: 'var(--text-main)',
                   }}
                 >
@@ -292,7 +306,7 @@ export default function Dashboard({ lang }: Props) {
                     )}
                   </div>
                   <div className="text-end shrink-0">
-                    <div className="num text-xs font-bold" style={{ color: 'var(--accent)' }}>${p.total_usdt?.toLocaleString('en-US', { maximumFractionDigits: 0 })}</div>
+                    <div className="num text-xs font-bold" style={{ color: '#00D4AA' }}>${p.total_usdt?.toLocaleString('en-US', { maximumFractionDigits: 0 })}</div>
                     <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{p.assets?.length} {lang === 'ar' ? 'عملة' : 'coins'}</div>
                   </div>
                 </button>
@@ -306,190 +320,191 @@ export default function Dashboard({ lang }: Props) {
         </div>
       )}
 
-      {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3 animate-fade-up">
-        <div>
-          <h1 className="font-bold text-xl" style={{ color: 'var(--text-main)' }}>
-            {status?.bot_name ?? (lang === 'ar' ? 'لوحة التحكم' : 'Dashboard')}
-          </h1>
-          <p className="text-xs mt-1 flex items-center gap-2 flex-wrap" style={{ color: 'var(--text-muted)' }}>
-            {lang === 'ar' ? 'MEXC Spot · محفظة ذكية' : 'MEXC Spot · Smart Portfolio'}
-            {status?.mode && (
-              <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold"
-                    style={{ background: 'var(--bg-input)', color: 'var(--accent)' }}>
-                {status.mode}
-              </span>
-            )}
-            <span className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${botRunning ? 'badge-running' : 'badge-stopped'}`}>
-              <span className="w-1.5 h-1.5 rounded-full inline-block"
-                    style={{ background: botRunning ? 'var(--accent)' : '#8B949E' }} />
-              {botRunning ? tr('running', lang) : tr('stopped', lang)}
+      {/* ── HERO CARD ─────────────────────────────────────────────────────── */}
+      <div className="hero-card p-5 animate-fade-up">
+        {/* Top row: LIVE badge + bot name + mode */}
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="live-badge">
+              <span className="w-1.5 h-1.5 rounded-full pulse-dot" style={{ background: '#00D4AA' }} />
+              LIVE
             </span>
-          </p>
+            <span className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
+              {status?.bot_name ?? (lang === 'ar' ? 'My MEXC Portfolio' : 'My MEXC Portfolio')}
+              {status?.mode && ` · ${status.mode}`}
+            </span>
+          </div>
+          <span className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${botRunning ? 'badge-running' : 'badge-stopped'}`}>
+            <span className={`w-1.5 h-1.5 rounded-full ${botRunning ? 'pulse-dot' : ''}`}
+                  style={{ background: botRunning ? '#00D4AA' : 'var(--text-muted)' }} />
+            {botRunning ? tr('running', lang) : tr('stopped', lang)}
+          </span>
         </div>
 
-        <div className="flex items-center gap-2 flex-wrap">
-          <button
-            onClick={() => setShowBuyModal(true)}
-            disabled={buyActivating || portfolios.length === 0}
-            className="btn-secondary !px-3 !min-h-[36px] !text-xs gap-1.5"
-            style={{ borderColor: '#00D4AA', color: '#00D4AA' }}
-          >
-            {buyActivating
-              ? <><RefreshCw size={12} className="spin" /> {lang === 'ar' ? 'جاري...' : 'Working...'}</>
-              : <>{lang === 'ar' ? '🛒 شراء وتفعيل' : '🛒 Buy & Activate'}</>
-            }
-          </button>
-
-          <button
-            onClick={handleBotToggle}
-            disabled={botLoading}
-            className={botRunning ? 'btn-danger !px-3 !min-h-[36px] !text-xs' : 'btn-secondary !px-3 !min-h-[36px] !text-xs'}
-          >
-            {botLoading
-              ? <RefreshCw size={12} className="spin" />
-              : botRunning
-                ? <><Square size={12} /> {tr('pause', lang)}</>
-                : <><Play size={12} /> {tr('start', lang)}</>
-            }
-          </button>
-
-          {rebalancing && cancelTimer > 0 ? (
-            <button onClick={handleCancel} className="btn-danger !px-3 !min-h-[36px] !text-xs relative overflow-hidden">
-              <XCircle size={12} /> {tr('cancelRebalance', lang)} ({cancelTimer}s)
-            </button>
-          ) : rebalancing ? (
-            <button disabled className="btn-accent !px-3 !min-h-[36px] !text-xs">
-              <RefreshCw size={12} className="spin" /> {lang === 'ar' ? 'جاري...' : 'Running...'}
-            </button>
+        {/* Account total */}
+        <div className="mb-1">
+          <p className="text-xs font-semibold mb-1" style={{ color: 'var(--text-muted)' }}>
+            {lang === 'ar' ? 'إجمالي الحساب' : 'Account Total'}
+          </p>
+          {loading && accountTotal === null ? (
+            <div className="skeleton h-10 w-40 rounded-xl" />
           ) : (
-            <button onClick={handleRebalance} className="btn-accent !px-3 !min-h-[36px] !text-xs relative overflow-hidden">
-              <Zap size={12} /> {tr('rebalanceNow', lang)}
-            </button>
+            <div className="flex items-baseline gap-1">
+              <span className="font-black text-4xl tracking-tight" style={{ color: 'var(--text-main)', fontFamily: "'JetBrains Mono', monospace" }}>
+                ${accountTotal !== null ? Math.floor(accountTotal).toLocaleString('en-US') : '—'}
+              </span>
+              {accountTotal !== null && (
+                <span className="font-bold text-xl" style={{ color: 'rgba(240,238,255,0.6)', fontFamily: "'JetBrains Mono', monospace" }}>
+                  .{String(accountTotal.toFixed(2)).split('.')[1]}
+                </span>
+              )}
+            </div>
           )}
         </div>
-      </div>
 
-      {/* Stat Cards — 2 columns */}
-      <div className="grid grid-cols-2 gap-3 animate-fade-up" style={{ animationDelay: '0.05s' }}>
-        <StatCard
-          title={lang === 'ar' ? 'إجمالي الحساب' : 'Account Total'}
-          value={accountTotal === null ? '—' : fmtUsd(accountTotal)}
-          change={lang === 'ar' ? 'كل الأصول على MEXC' : 'All MEXC assets'}
-          changePositive={null}
-          icon={DollarSign} iconColor="#58A6FF"
-          loading={loading && accountTotal === null}
-          delay={0}
-        />
-        <StatCard
-          title={lang === 'ar' ? 'قيمة المحفظة' : 'Portfolio Value'}
-          value={status?.total_usdt == null ? '—' : fmtUsd(status.total_usdt)}
-          change={lang === 'ar'
-            ? `${status?.assets?.length ?? 0} عملة مخصصة`
-            : `${status?.assets?.length ?? 0} tracked coins`}
-          changePositive={null}
-          icon={Wallet} iconColor="#00D4AA"
-          loading={loading}
-          delay={0.05}
-        />
-      </div>
+        {/* Portfolio value + P&L row */}
+        {(() => {
+          const current  = status?.total_usdt ?? null;
+          const invested = investedUsdt;
+          const pnl      = current !== null && invested !== null && invested > 0 ? current - invested : null;
+          const pnlPct   = pnl !== null && invested && invested > 0 ? (pnl / invested) * 100 : null;
+          const isProfit = pnl !== null && pnl >= 0;
+          const pnlColor = isProfit ? '#00D4AA' : '#FF7B72';
 
-      {/* P&L Card */}
-      {(() => {
-        // P&L = portfolio value (tracked coins only) minus the configured invested amount
-        const current  = status?.total_usdt ?? null;
-        const invested = investedUsdt;
-        const pnl      = current !== null && invested !== null && invested > 0 ? current - invested : null;
-        const pnlPct   = pnl !== null && invested && invested > 0 ? (pnl / invested) * 100 : null;
-        const isProfit = pnl !== null && pnl >= 0;
-        const pnlColor = isProfit ? '#00D4AA' : '#FF7B72';
-        const pnlBg    = isProfit ? 'rgba(0,212,170,0.08)' : 'rgba(255,123,114,0.08)';
-        const pnlBorder= isProfit ? 'rgba(0,212,170,0.2)'  : 'rgba(255,123,114,0.2)';
-
-        return (
-          <div
-            className="animate-fade-up rounded-2xl overflow-hidden"
-            style={{ animationDelay: '0.08s', border: `1px solid ${pnl !== null ? pnlBorder : 'var(--border)'}`, background: 'var(--bg-card)' }}
-          >
-            {/* Top accent bar */}
-            {pnl !== null && (
-              <div className="h-0.5 w-full" style={{ background: `linear-gradient(90deg, ${pnlColor}, transparent)` }} />
-            )}
-
-            <div className="p-4">
-              {/* Row: labels */}
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-[11px] font-bold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
-                  {lang === 'ar' ? 'المبلغ المستثمر' : 'Invested'}
-                </span>
-                <span className="text-[11px] font-bold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
-                  {lang === 'ar' ? 'الربح / الخسارة' : 'P&L'}
-                </span>
+          return (
+            <div className="grid grid-cols-2 gap-3 mt-3 mb-4">
+              {/* Portfolio value */}
+              <div>
+                <p className="text-[10px] font-semibold mb-0.5" style={{ color: 'var(--text-muted)' }}>
+                  {lang === 'ar' ? 'قيمة المحفظة' : 'Portfolio Value'}
+                </p>
+                {loading ? (
+                  <div className="skeleton h-6 w-20 rounded-lg" />
+                ) : (
+                  <span className="num font-bold text-lg" style={{
+                    background: 'linear-gradient(135deg, #00D4AA, #00A88F)',
+                    WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text',
+                  }}>
+                    {current !== null ? fmtUsd(current) : '—'}
+                  </span>
+                )}
+                <p className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                  {status?.assets?.length ?? 0} {lang === 'ar' ? 'عملة مخصصة' : 'tracked coins'}
+                </p>
               </div>
 
-              {/* Row: values */}
-              <div className="flex items-center justify-between gap-3">
-                {/* Invested value */}
+              {/* P&L */}
+              <div>
+                <p className="text-[10px] font-semibold mb-0.5" style={{ color: 'var(--text-muted)' }}>
+                  {lang === 'ar' ? 'الخسارة / الربح' : 'P&L'}
+                </p>
                 {loading ? (
-                  <div className="skeleton h-7 w-24 rounded-lg" />
-                ) : (
-                  <div>
-                    <span className="num font-bold text-xl" style={{ color: 'var(--text-main)' }}>
-                      {invested !== null ? fmtUsd(invested) : '—'}
-                    </span>
-                    <p className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                      {lang === 'ar' ? 'رأس المال' : 'Capital'}
-                    </p>
-                  </div>
-                )}
-
-                {/* Arrow divider */}
-                <div className="flex items-center gap-1 shrink-0" style={{ color: 'var(--border)' }}>
-                  <div className="h-px w-6" style={{ background: 'var(--border)' }} />
-                  <div className="w-1.5 h-1.5 rounded-full" style={{ background: 'var(--border)' }} />
-                </div>
-
-                {/* P&L value */}
-                {loading ? (
-                  <div className="skeleton h-7 w-28 rounded-lg" />
+                  <div className="skeleton h-6 w-24 rounded-lg" />
                 ) : pnl !== null ? (
-                  <div
-                    className="flex items-center gap-2 px-3 py-2 rounded-xl"
-                    style={{ background: pnlBg, border: `1px solid ${pnlBorder}` }}
-                  >
-                    <div
-                      className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
-                      style={{ background: `${pnlColor}22` }}
-                    >
-                      {isProfit
-                        ? <TrendingUp  size={14} style={{ color: pnlColor }} />
-                        : <TrendingDown size={14} style={{ color: pnlColor }} />
-                      }
-                    </div>
-                    <div>
-                      <p className="num font-bold text-base leading-tight" style={{ color: pnlColor }}>
-                        {isProfit ? '+' : ''}{fmtUsd(pnl)}
-                      </p>
-                      {pnlPct !== null && (
-                        <p className="num text-[11px] font-semibold leading-tight" style={{ color: pnlColor }}>
-                          {isProfit ? '+' : ''}{pnlPct.toFixed(2)}%
-                        </p>
-                      )}
-                    </div>
-                  </div>
+                  <>
+                    <span className="num font-bold text-lg" style={{
+                      background: isProfit
+                        ? 'linear-gradient(135deg, #00D4AA, #00A88F)'
+                        : 'linear-gradient(135deg, #FF7B72, #FF4444)',
+                      WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text',
+                    }}>
+                      {isProfit ? '+' : ''}{fmtUsd(pnl)}
+                    </span>
+                    {pnlPct !== null && (
+                      <div className="mt-0.5">
+                        <span
+                          className="num text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+                          style={{
+                            background: isProfit ? 'rgba(0,212,170,0.15)' : 'rgba(255,123,114,0.15)',
+                            color: pnlColor,
+                            border: `1px solid ${pnlColor}30`,
+                          }}
+                        >
+                          {isProfit ? '↗' : '↘'} {isProfit ? '+' : ''}{pnlPct.toFixed(2)}%
+                        </span>
+                      </div>
+                    )}
+                  </>
                 ) : (
-                  <div className="px-3 py-2 rounded-xl text-end" style={{ background: 'var(--bg-input)' }}>
-                    <p className="num text-base font-bold" style={{ color: 'var(--text-muted)' }}>—</p>
-                    <p className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
-                      {lang === 'ar' ? 'فعّل محفظة لعرض الربح/الخسارة' : 'Activate a portfolio to see P&L'}
-                    </p>
-                  </div>
+                  <span className="text-sm" style={{ color: 'var(--text-muted)' }}>—</span>
                 )}
               </div>
             </div>
+          );
+        })()}
+
+        {/* Progress bar */}
+        {investedUsdt !== null && accountTotal !== null && accountTotal > 0 && (
+          <div className="mb-4">
+            <div className="h-1.5 rounded-full w-full" style={{ background: 'rgba(123,92,245,0.15)' }}>
+              <div
+                className="h-full rounded-full transition-all duration-1000"
+                style={{
+                  width: `${Math.min((investedUsdt / accountTotal) * 100, 100)}%`,
+                  background: 'linear-gradient(90deg, #00D4AA, #7B5CF5)',
+                  boxShadow: '0 0 8px rgba(0,212,170,0.5)',
+                }}
+              />
+            </div>
+            <div className="flex justify-between mt-1">
+              <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>0%</span>
+              <span className="text-[10px] font-semibold" style={{ color: '#00D4AA' }}>
+                {accountTotal > 0 ? ((investedUsdt / accountTotal) * 100).toFixed(1) : 0}% {lang === 'ar' ? 'مستثمر' : 'invested'}
+              </span>
+            </div>
           </div>
-        );
-      })()}
+        )}
+
+        {/* Action buttons */}
+        <div className="flex gap-2">
+          {/* Rebalance — primary */}
+          {rebalancing && cancelTimer > 0 ? (
+            <button
+              onClick={handleCancel}
+              className="btn-danger flex-1 !text-xs !min-h-[42px] relative overflow-hidden"
+            >
+              <XCircle size={13} /> {tr('cancelRebalance', lang)} ({cancelTimer}s)
+            </button>
+          ) : rebalancing ? (
+            <button disabled className="btn-accent flex-1 !text-xs !min-h-[42px]">
+              <RefreshCw size={13} className="spin" /> {lang === 'ar' ? 'جاري...' : 'Running...'}
+            </button>
+          ) : (
+            <button
+              onClick={handleRebalance}
+              className="btn-accent flex-1 !text-xs !min-h-[42px] relative overflow-hidden"
+            >
+              <Zap size={13} /> {lang === 'ar' ? 'Rebalance يدوي' : 'Rebalance'}
+            </button>
+          )}
+
+          {/* Start/Stop */}
+          <button
+            onClick={handleBotToggle}
+            disabled={botLoading}
+            className="btn-secondary !px-4 !min-h-[42px] !text-xs"
+          >
+            {botLoading
+              ? <RefreshCw size={13} className="spin" />
+              : botRunning
+                ? <><Square size={13} /> {tr('pause', lang)}</>
+                : <><Play size={13} /> {lang === 'ar' ? 'تشغيل' : 'Start'}</>
+            }
+          </button>
+
+          {/* Buy */}
+          <button
+            onClick={() => setShowBuyModal(true)}
+            disabled={buyActivating || portfolios.length === 0}
+            className="btn-secondary !px-4 !min-h-[42px] !text-xs"
+          >
+            {buyActivating
+              ? <RefreshCw size={13} className="spin" />
+              : <>{lang === 'ar' ? '🛒 شراء' : '🛒 Buy'}</>
+            }
+          </button>
+        </div>
+      </div>
 
       {/* No active portfolio banner */}
       {!loading && !activePortfolio && portfolios.length > 0 && (
@@ -512,8 +527,16 @@ export default function Dashboard({ lang }: Props) {
         </div>
       )}
 
-      {/* Portfolio view selector + Assets */}
+      {/* ── Coin list section ─────────────────────────────────────────────── */}
       <div className="animate-fade-up space-y-3" style={{ animationDelay: '0.15s' }}>
+        <div className="flex items-center justify-between">
+          <h2 className="font-bold text-base" style={{ color: 'var(--text-main)' }}>
+            {lang === 'ar' ? 'توزيع العملات' : 'Coin Allocation'}
+          </h2>
+          <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+            {lang === 'ar' ? 'اضغط لعرض الشارت' : 'Tap to view chart'}
+          </span>
+        </div>
 
         {/* Selector bar */}
         {portfolios.length > 0 && (
@@ -527,9 +550,10 @@ export default function Dashboard({ lang }: Props) {
               onClick={() => { setViewPortId('all'); setShowPortPicker(false); }}
               className="px-3 py-1.5 rounded-xl text-xs font-bold transition-all"
               style={{
-                background: viewPortId === 'all' ? 'var(--brand)' : 'var(--bg-input)',
-                color: viewPortId === 'all' ? '#000' : 'var(--text-muted)',
-                border: `1px solid ${viewPortId === 'all' ? 'var(--brand)' : 'var(--border)'}`,
+                background: viewPortId === 'all' ? 'rgba(123,92,245,0.25)' : 'rgba(123,92,245,0.08)',
+                color: viewPortId === 'all' ? '#A78BFA' : 'var(--text-muted)',
+                border: `1px solid ${viewPortId === 'all' ? 'rgba(123,92,245,0.5)' : 'rgba(123,92,245,0.15)'}`,
+                boxShadow: viewPortId === 'all' ? '0 0 12px rgba(123,92,245,0.2)' : 'none',
               }}
             >
               {lang === 'ar' ? '📂 الجميع' : '📂 All'}
@@ -542,15 +566,16 @@ export default function Dashboard({ lang }: Props) {
                 onClick={() => { setViewPortId(p.id); setShowPortPicker(false); }}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all"
                 style={{
-                  background: viewPortId === p.id ? 'var(--brand)' : 'var(--bg-input)',
-                  color: viewPortId === p.id ? '#000' : 'var(--text-muted)',
-                  border: `1px solid ${viewPortId === p.id ? 'var(--brand)' : 'var(--border)'}`,
+                  background: viewPortId === p.id ? 'rgba(123,92,245,0.25)' : 'rgba(123,92,245,0.08)',
+                  color: viewPortId === p.id ? '#A78BFA' : 'var(--text-muted)',
+                  border: `1px solid ${viewPortId === p.id ? 'rgba(123,92,245,0.5)' : 'rgba(123,92,245,0.15)'}`,
+                  boxShadow: viewPortId === p.id ? '0 0 12px rgba(123,92,245,0.2)' : 'none',
                   maxWidth: 140,
                 }}
               >
                 <span
                   className="w-1.5 h-1.5 rounded-full shrink-0"
-                  style={{ background: p.running ? '#22c55e' : 'var(--text-muted)' }}
+                  style={{ background: p.running ? '#00D4AA' : 'var(--text-muted)' }}
                 />
                 <span className="truncate">{p.name}</span>
               </button>
@@ -560,7 +585,7 @@ export default function Dashboard({ lang }: Props) {
 
         {/* ── Single portfolio view ── */}
         {viewPortId !== 'all' && (
-          <div className="card p-5">
+          <div className="card p-4">
             {(() => {
               const portData = allPortAssets[viewPortId as number];
               const port = portfolios.find(p => p.id === viewPortId);
@@ -594,7 +619,7 @@ export default function Dashboard({ lang }: Props) {
                           onClick={() => handlePortfolioToggle(portData ?? port)}
                           disabled={togglingLoop === (viewPortId as number)}
                           className={`flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                            portData?.running ? 'bg-gray-700 text-gray-200' : 'btn-primary'
+                            portData?.running ? 'btn-danger' : 'btn-primary'
                           }`}
                         >
                           {togglingLoop === viewPortId
@@ -626,15 +651,15 @@ export default function Dashboard({ lang }: Props) {
         {viewPortId === 'all' && (
           <div className="space-y-4">
             {portfolios.length === 0 ? (
-              <div className="card p-5">
+              <div className="card p-4">
                 <AssetsTable assets={status?.assets ?? []} loading={loading} lang={lang} onRefresh={() => fetchAll(true)} />
               </div>
             ) : (
               portfolios.map(p => {
                 const portData = allPortAssets[p.id];
                 return (
-                  <div key={p.id} className="card p-5"
-                    style={p.running ? { border: '1px solid rgba(34,197,94,0.35)' } : {}}>
+                  <div key={p.id} className="card p-4"
+                    style={p.running ? { border: '1px solid rgba(0,212,170,0.3)', boxShadow: '0 0 20px rgba(0,212,170,0.08)' } : {}}>
                     {/* Portfolio header */}
                     <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
                       <div className="flex items-center gap-2 flex-wrap">
@@ -661,7 +686,7 @@ export default function Dashboard({ lang }: Props) {
                           onClick={() => handlePortfolioToggle(portData ?? p)}
                           disabled={togglingLoop === p.id}
                           className={`flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                            p.running ? 'bg-gray-700 text-gray-200' : 'btn-primary'
+                            p.running ? 'btn-danger' : 'btn-primary'
                           }`}
                         >
                           {togglingLoop === p.id
