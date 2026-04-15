@@ -319,7 +319,29 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request as StarletteRequest
+from starlette.responses import Response as StarletteResponse
+
+class NoCacheHtmlMiddleware(BaseHTTPMiddleware):
+    """Force no-cache on HTML responses so Railway/CDN never serves stale builds."""
+    async def dispatch(self, request: StarletteRequest, call_next):
+        response: StarletteResponse = await call_next(request)
+        ct = response.headers.get("content-type", "")
+        if "text/html" in ct:
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+        return response
+
+app.add_middleware(NoCacheHtmlMiddleware)
+
 _static_dir = os.path.join(_root, "static")
+
+# Next.js hashed assets (_next/static/**) are immutable — cache 1 year.
+# HTML files must never be cached so users always get the latest build.
+_IMMUTABLE = "public, max-age=31536000, immutable"
+_NO_CACHE   = "no-cache, no-store, must-revalidate"
 
 # Mount Next.js static assets so /_next/static/* is served correctly
 _next_dir = os.path.join(_static_dir, "_next")
@@ -331,7 +353,7 @@ if os.path.isdir(_next_dir):
 def serve_dashboard():
     index = os.path.join(_static_dir, "index.html")
     if os.path.exists(index):
-        return FileResponse(index)
+        return FileResponse(index, headers={"Cache-Control": _NO_CACHE})
     return {"message": "MEXC Rebalancer API", "docs": "/docs"}
 
 
@@ -1388,20 +1410,28 @@ def api_delete_grid_bot(bot_id: int):
 
 # ---------------------------------------------------------------------------
 # Static file serving – must be LAST so API routes take priority
-# build: 2026-04-14
 # ---------------------------------------------------------------------------
 
 @app.get("/{full_path:path}", include_in_schema=False)
 def serve_static(full_path: str):
     candidate = os.path.join(_static_dir, full_path)
     if os.path.isfile(candidate):
-        return FileResponse(candidate)
+        # Hashed Next.js assets are immutable; everything else must revalidate
+        if "/_next/static/" in candidate:
+            cache = _IMMUTABLE
+        elif candidate.endswith(".html"):
+            cache = _NO_CACHE
+        else:
+            cache = "public, max-age=3600"
+        return FileResponse(candidate, headers={"Cache-Control": cache})
+
     # Next.js static export: try path/index.html
     candidate_index = os.path.join(_static_dir, full_path, "index.html")
     if os.path.isfile(candidate_index):
-        return FileResponse(candidate_index)
+        return FileResponse(candidate_index, headers={"Cache-Control": _NO_CACHE})
+
     # SPA fallback
     index = os.path.join(_static_dir, "index.html")
     if os.path.exists(index):
-        return FileResponse(index)
+        return FileResponse(index, headers={"Cache-Control": _NO_CACHE})
     raise HTTPException(status_code=404)
