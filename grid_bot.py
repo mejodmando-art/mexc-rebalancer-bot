@@ -25,8 +25,10 @@ from database import (
 
 log = logging.getLogger(__name__)
 
-POLL_INTERVAL = 10   # seconds between order checks
-MIN_USDT_PER_GRID = 1.0  # minimum USDT per grid level
+POLL_INTERVAL = 10        # seconds between order checks
+MIN_USDT_PER_GRID = 1.0   # minimum USDT per grid level
+_RECONNECT_BASE = 5       # initial back-off after a fatal error (seconds)
+_RECONNECT_MAX  = 120     # maximum back-off cap (seconds)
 
 
 # ---------------------------------------------------------------------------
@@ -108,139 +110,166 @@ def get_error(bot_id: int) -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 def _grid_loop(bot_id: int, stop_event: threading.Event) -> None:
-    """Main monitoring loop for a single grid bot."""
+    """
+    Main monitoring loop for a single grid bot.
+
+    Outer retry loop: if any fatal error occurs (network outage, Railway
+    reconnect, etc.) the loop backs off and restarts automatically instead
+    of dying permanently.  Only a manual stop() call or a missing DB record
+    exits the loop for good.
+    """
     client = MEXCClient()
     log.info("[Grid %d] loop started", bot_id)
+    reconnect_delay = _RECONNECT_BASE
 
-    try:
-        bot = get_grid_bot(bot_id)
-        if not bot:
-            log.error("[Grid %d] bot not found in DB", bot_id)
-            return
+    while not stop_event.is_set():
+        try:
+            bot = get_grid_bot(bot_id)
+            if not bot:
+                log.error("[Grid %d] bot not found in DB — stopping loop", bot_id)
+                break
 
-        symbol      = bot["symbol"]
-        investment  = bot["investment"]
-        grid_count  = bot["grid_count"]
-        price_low   = bot["price_low"]
-        price_high  = bot["price_high"]
+            symbol        = bot["symbol"]
+            investment    = bot["investment"]
+            grid_count    = bot["grid_count"]
+            price_low     = bot["price_low"]
+            price_high    = bot["price_high"]
 
-        levels      = build_grid_levels(price_low, price_high, grid_count)
-        usdt_per_grid = investment / grid_count
-        _, qty_prec = get_symbol_precision(client, symbol)
+            levels        = build_grid_levels(price_low, price_high, grid_count)
+            usdt_per_grid = investment / grid_count
+            _, qty_prec   = get_symbol_precision(client, symbol)
 
-        # Place initial BUY limit orders below current price
-        current_price = client.get_price(symbol)
-        placed = 0
-        for level in levels[:-1]:  # skip top level for buys
-            if level < current_price:
-                qty = round(usdt_per_grid / level, qty_prec)
-                if qty <= 0:
-                    continue
+            # Place initial BUY orders only when there are no existing orders.
+            # On reconnect/resume we skip this block so we don't duplicate orders.
+            existing_orders = get_grid_orders(bot_id)
+            if not existing_orders:
+                current_price = client.get_price(symbol)
+                placed = 0
+                for level in levels[:-1]:  # skip top level for buys
+                    if level < current_price:
+                        qty = round(usdt_per_grid / level, qty_prec)
+                        if qty <= 0:
+                            continue
+                        try:
+                            resp = client._post("/api/v3/order", {
+                                "symbol": symbol,
+                                "side": "BUY",
+                                "type": "LIMIT",
+                                "price": str(level),
+                                "quantity": str(qty),
+                                "timeInForce": "GTC",
+                            })
+                            order_id = str(resp.get("orderId", ""))
+                            add_grid_order(bot_id, order_id, "BUY", level, qty)
+                            placed += 1
+                            log.info("[Grid %d] BUY @ %.8f qty=%.6f", bot_id, level, qty)
+                        except Exception as e:
+                            log.warning("[Grid %d] failed to place BUY @ %.8f: %s", bot_id, level, e)
+                log.info("[Grid %d] placed %d initial BUY orders", bot_id, placed)
+            else:
+                log.info("[Grid %d] resuming with %d existing orders", bot_id, len(existing_orders))
+
+            # Reset back-off after successful initialisation
+            reconnect_delay = _RECONNECT_BASE
+            with _lock:
+                if bot_id in _grid_loops:
+                    _grid_loops[bot_id]["error"] = None
+
+            # ── Monitoring loop ──────────────────────────────────────────────
+            total_profit = float(bot.get("profit") or 0.0)
+            while not stop_event.is_set():
                 try:
-                    resp = client._post("/api/v3/order", {
-                        "symbol": symbol,
-                        "side": "BUY",
-                        "type": "LIMIT",
-                        "price": str(level),
-                        "quantity": str(qty),
-                        "timeInForce": "GTC",
-                    })
-                    order_id = str(resp.get("orderId", ""))
-                    add_grid_order(bot_id, order_id, "BUY", level, qty)
-                    placed += 1
-                    log.info("[Grid %d] BUY @ %.8f qty=%.6f", bot_id, level, qty)
+                    orders = get_grid_orders(bot_id)
+                    open_orders = [o for o in orders if o["status"] == "open"]
+
+                    for order in open_orders:
+                        try:
+                            mexc_order  = client.get_order(symbol, order["order_id"])
+                            mexc_status = mexc_order.get("status", "")
+
+                            if mexc_status == "FILLED":
+                                filled_price = float(mexc_order.get("price", order["price"]))
+                                filled_qty   = float(mexc_order.get("executedQty", order["qty"]))
+                                side         = order["side"]
+
+                                if side == "BUY":
+                                    step            = (price_high - price_low) / grid_count
+                                    sell_price      = round(filled_price + step, 8)
+                                    sell_qty        = round(filled_qty * 0.999, qty_prec)
+                                    profit_per_grid = round((sell_price - filled_price) * sell_qty, 4)
+                                    try:
+                                        resp = client._post("/api/v3/order", {
+                                            "symbol": symbol,
+                                            "side": "SELL",
+                                            "type": "LIMIT",
+                                            "price": str(sell_price),
+                                            "quantity": str(sell_qty),
+                                            "timeInForce": "GTC",
+                                        })
+                                        new_id = str(resp.get("orderId", ""))
+                                        add_grid_order(bot_id, new_id, "SELL", sell_price, sell_qty)
+                                        log.info("[Grid %d] SELL placed @ %.8f (profit est. %.4f USDT)",
+                                                 bot_id, sell_price, profit_per_grid)
+                                    except Exception as e:
+                                        log.warning("[Grid %d] failed to place SELL: %s", bot_id, e)
+
+                                elif side == "SELL":
+                                    step            = (price_high - price_low) / grid_count
+                                    buy_price       = round(filled_price - step, 8)
+                                    buy_qty         = round(usdt_per_grid / buy_price, qty_prec)
+                                    profit_realised = round((filled_price - buy_price) * filled_qty, 4)
+                                    total_profit   += profit_realised
+                                    update_grid_bot_profit(bot_id, total_profit)
+                                    try:
+                                        resp = client._post("/api/v3/order", {
+                                            "symbol": symbol,
+                                            "side": "BUY",
+                                            "type": "LIMIT",
+                                            "price": str(buy_price),
+                                            "quantity": str(buy_qty),
+                                            "timeInForce": "GTC",
+                                        })
+                                        new_id = str(resp.get("orderId", ""))
+                                        add_grid_order(bot_id, new_id, "BUY", buy_price, buy_qty)
+                                        log.info("[Grid %d] BUY re-placed @ %.8f profit=%.4f",
+                                                 bot_id, buy_price, profit_realised)
+                                    except Exception as e:
+                                        log.warning("[Grid %d] failed to re-place BUY: %s", bot_id, e)
+
+                                update_grid_order(
+                                    order["order_id"], "filled",
+                                    profit_per_grid if side == "BUY" else profit_realised,
+                                )
+
+                            elif mexc_status in ("CANCELED", "EXPIRED", "REJECTED"):
+                                update_grid_order(order["order_id"], mexc_status.lower())
+
+                        except Exception as e:
+                            log.warning("[Grid %d] order check error: %s", bot_id, e)
+
                 except Exception as e:
-                    log.warning("[Grid %d] failed to place BUY @ %.8f: %s", bot_id, level, e)
+                    log.error("[Grid %d] monitoring cycle error: %s", bot_id, e)
+                    with _lock:
+                        if bot_id in _grid_loops:
+                            _grid_loops[bot_id]["error"] = str(e)
 
-        log.info("[Grid %d] placed %d initial BUY orders", bot_id, placed)
+                stop_event.wait(POLL_INTERVAL)
 
-        # Monitoring loop
-        total_profit = 0.0
-        while not stop_event.is_set():
-            try:
-                orders = get_grid_orders(bot_id)
-                open_orders = [o for o in orders if o["status"] == "open"]
+        except Exception as e:
+            # Fatal error in the initialisation phase (e.g. Railway DB/network
+            # outage).  Back off and retry so the bot self-heals on reconnect.
+            log.error(
+                "[Grid %d] fatal error — retrying in %ds: %s",
+                bot_id, reconnect_delay, e,
+            )
+            with _lock:
+                if bot_id in _grid_loops:
+                    _grid_loops[bot_id]["error"] = str(e)
+            stop_event.wait(reconnect_delay)
+            reconnect_delay = min(reconnect_delay * 2, _RECONNECT_MAX)
 
-                for order in open_orders:
-                    try:
-                        mexc_order = client.get_order(symbol, order["order_id"])
-                        mexc_status = mexc_order.get("status", "")
-
-                        if mexc_status == "FILLED":
-                            filled_price = float(mexc_order.get("price", order["price"]))
-                            filled_qty   = float(mexc_order.get("executedQty", order["qty"]))
-                            side         = order["side"]
-
-                            if side == "BUY":
-                                # Place a SELL one grid level above
-                                step = (price_high - price_low) / grid_count
-                                sell_price = round(filled_price + step, 8)
-                                sell_qty   = round(filled_qty * 0.999, qty_prec)  # 0.1% fee buffer
-                                profit_per_grid = round((sell_price - filled_price) * sell_qty, 4)
-                                try:
-                                    resp = client._post("/api/v3/order", {
-                                        "symbol": symbol,
-                                        "side": "SELL",
-                                        "type": "LIMIT",
-                                        "price": str(sell_price),
-                                        "quantity": str(sell_qty),
-                                        "timeInForce": "GTC",
-                                    })
-                                    new_id = str(resp.get("orderId", ""))
-                                    add_grid_order(bot_id, new_id, "SELL", sell_price, sell_qty)
-                                    log.info("[Grid %d] SELL placed @ %.8f (profit est. %.4f USDT)",
-                                             bot_id, sell_price, profit_per_grid)
-                                except Exception as e:
-                                    log.warning("[Grid %d] failed to place SELL: %s", bot_id, e)
-
-                            elif side == "SELL":
-                                # Realise profit and place new BUY one level below
-                                step = (price_high - price_low) / grid_count
-                                buy_price  = round(filled_price - step, 8)
-                                buy_qty    = round(usdt_per_grid / buy_price, qty_prec)
-                                profit_realised = round((filled_price - buy_price) * filled_qty, 4)
-                                total_profit += profit_realised
-                                update_grid_bot_profit(bot_id, total_profit)
-                                try:
-                                    resp = client._post("/api/v3/order", {
-                                        "symbol": symbol,
-                                        "side": "BUY",
-                                        "type": "LIMIT",
-                                        "price": str(buy_price),
-                                        "quantity": str(buy_qty),
-                                        "timeInForce": "GTC",
-                                    })
-                                    new_id = str(resp.get("orderId", ""))
-                                    add_grid_order(bot_id, new_id, "BUY", buy_price, buy_qty)
-                                    log.info("[Grid %d] BUY re-placed @ %.8f profit=%.4f",
-                                             bot_id, buy_price, profit_realised)
-                                except Exception as e:
-                                    log.warning("[Grid %d] failed to re-place BUY: %s", bot_id, e)
-
-                            update_grid_order(order["order_id"], "filled", profit_per_grid if side == "BUY" else profit_realised)
-
-                        elif mexc_status in ("CANCELED", "EXPIRED", "REJECTED"):
-                            update_grid_order(order["order_id"], mexc_status.lower())
-
-                    except Exception as e:
-                        log.warning("[Grid %d] order check error: %s", bot_id, e)
-
-            except Exception as e:
-                log.error("[Grid %d] monitoring error: %s", bot_id, e)
-                with _lock:
-                    if bot_id in _grid_loops:
-                        _grid_loops[bot_id]["error"] = str(e)
-
-            stop_event.wait(POLL_INTERVAL)
-
-    except Exception as e:
-        log.error("[Grid %d] fatal error: %s", bot_id, e)
-        with _lock:
-            if bot_id in _grid_loops:
-                _grid_loops[bot_id]["error"] = str(e)
-    finally:
-        update_grid_bot_status(bot_id, "stopped")
-        log.info("[Grid %d] loop stopped", bot_id)
+    update_grid_bot_status(bot_id, "stopped")
+    log.info("[Grid %d] loop stopped", bot_id)
 
 
 # ---------------------------------------------------------------------------
