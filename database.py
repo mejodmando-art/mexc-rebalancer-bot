@@ -193,7 +193,8 @@ def init_db() -> None:
                 ts_created  TEXT    NOT NULL,
                 name        TEXT    NOT NULL,
                 config_json TEXT    NOT NULL,
-                active      INTEGER NOT NULL DEFAULT 0
+                active      INTEGER NOT NULL DEFAULT 0,
+                bot_running INTEGER NOT NULL DEFAULT 0
             )
             """,
             """
@@ -227,6 +228,8 @@ def init_db() -> None:
         ]
         with _conn() as conn:
             cur = conn.cursor()
+            # Safe migration: drop the old user_id column if it exists,
+            # never drop the whole table (that would delete all portfolio data).
             cur.execute("""
                 DO $$
                 BEGIN
@@ -234,13 +237,14 @@ def init_db() -> None:
                         SELECT 1 FROM information_schema.columns
                         WHERE table_name='portfolios' AND column_name='user_id'
                     ) THEN
-                        DROP TABLE IF EXISTS portfolios CASCADE;
+                        ALTER TABLE portfolios DROP COLUMN IF EXISTS user_id;
                     END IF;
                 END$$;
             """)
             for stmt in stmts:
                 cur.execute(stmt)
             migrations = [
+                "ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS bot_running INTEGER NOT NULL DEFAULT 0",
                 "ALTER TABLE rebalance_history ADD COLUMN IF NOT EXISTS ts TEXT NOT NULL DEFAULT ''",
                 "ALTER TABLE rebalance_history ADD COLUMN IF NOT EXISTS mode TEXT NOT NULL DEFAULT ''",
                 "ALTER TABLE rebalance_history ADD COLUMN IF NOT EXISTS total_usdt REAL NOT NULL DEFAULT 0",
@@ -282,7 +286,8 @@ def init_db() -> None:
                     ts_created  TEXT    NOT NULL,
                     name        TEXT    NOT NULL,
                     config_json TEXT    NOT NULL,
-                    active      INTEGER NOT NULL DEFAULT 0
+                    active      INTEGER NOT NULL DEFAULT 0,
+                    bot_running INTEGER NOT NULL DEFAULT 0
                 );
                 CREATE TABLE IF NOT EXISTS grid_bots (
                     id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -316,13 +321,14 @@ def init_db() -> None:
 # Rebalance history
 # ---------------------------------------------------------------------------
 
-def record_rebalance(mode: str, total_usdt: float, details: list, paper: bool = False) -> None:
+def record_rebalance(mode: str, total_usdt: float, details: list, paper: bool = False, portfolio_id: int | None = None) -> None:
     try:
         with _conn() as conn:
             cur = conn.cursor()
+            pid = portfolio_id if portfolio_id is not None else 1
             cur.execute(
-                _q("INSERT INTO rebalance_history (ts, mode, total_usdt, details, paper) VALUES (?,?,?,?,?)"),
-                (datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"), mode, total_usdt, json.dumps(details), int(paper)),
+                _q("INSERT INTO rebalance_history (ts, mode, total_usdt, details, paper, portfolio_id) VALUES (?,?,?,?,?,?)"),
+                (datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"), mode, total_usdt, json.dumps(details), int(paper), pid),
             )
     except Exception as e:
         log.error("record_rebalance failed: %s", e)
@@ -350,13 +356,14 @@ def get_rebalance_history(limit: int = 10) -> list:
 # Portfolio snapshots
 # ---------------------------------------------------------------------------
 
-def record_snapshot(total_usdt: float, assets: list) -> None:
+def record_snapshot(total_usdt: float, assets: list, portfolio_id: int | None = None) -> None:
     try:
         with _conn() as conn:
             cur = conn.cursor()
+            pid = portfolio_id if portfolio_id is not None else 1
             cur.execute(
-                _q("INSERT INTO portfolio_snapshots (ts, total_usdt, assets_json) VALUES (?,?,?)"),
-                (datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"), total_usdt, json.dumps(assets)),
+                _q("INSERT INTO portfolio_snapshots (ts, total_usdt, assets_json, portfolio_id) VALUES (?,?,?,?)"),
+                (datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"), total_usdt, json.dumps(assets), pid),
             )
     except Exception as e:
         log.error("record_snapshot failed: %s", e)
@@ -470,6 +477,32 @@ def update_portfolio_config(portfolio_id: int, config: dict) -> None:
             )
     except Exception as e:
         log.error("update_portfolio_config failed: %s", e)
+
+
+def set_bot_running(portfolio_id: int, running: bool) -> None:
+    """Persist the running state of a portfolio loop so it can be resumed after restart."""
+    try:
+        with _conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                _q("UPDATE portfolios SET bot_running=? WHERE id=?"),
+                (1 if running else 0, portfolio_id),
+            )
+    except Exception as e:
+        log.error("set_bot_running failed: %s", e)
+
+
+def get_running_portfolios() -> list[int]:
+    """Return IDs of all portfolios that were running before the last restart."""
+    try:
+        with _conn() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT id FROM portfolios WHERE bot_running=1")
+            rows = cur.fetchall()
+        return [r[0] if not isinstance(r, dict) else r["id"] for r in rows]
+    except Exception as e:
+        log.error("get_running_portfolios failed: %s", e)
+        return []
 
 
 # ---------------------------------------------------------------------------

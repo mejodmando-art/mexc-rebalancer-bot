@@ -128,34 +128,42 @@ def _grid_loop(bot_id: int, stop_event: threading.Event) -> None:
         usdt_per_grid = investment / grid_count
         _, qty_prec = get_symbol_precision(client, symbol)
 
-        # Place initial BUY limit orders below current price
-        current_price = client.get_price(symbol)
-        placed = 0
-        for level in levels[:-1]:  # skip top level for buys
-            if level < current_price:
-                qty = round(usdt_per_grid / level, qty_prec)
-                if qty <= 0:
-                    continue
-                try:
-                    resp = client._post("/api/v3/order", {
-                        "symbol": symbol,
-                        "side": "BUY",
-                        "type": "LIMIT",
-                        "price": str(level),
-                        "quantity": str(qty),
-                        "timeInForce": "GTC",
-                    })
-                    order_id = str(resp.get("orderId", ""))
-                    add_grid_order(bot_id, order_id, "BUY", level, qty)
-                    placed += 1
-                    log.info("[Grid %d] BUY @ %.8f qty=%.6f", bot_id, level, qty)
-                except Exception as e:
-                    log.warning("[Grid %d] failed to place BUY @ %.8f: %s", bot_id, level, e)
+        # Only place initial BUY orders if no open orders exist yet.
+        # On resume, existing orders are still live on the exchange — placing
+        # new ones would double the exposure.
+        existing_orders = get_grid_orders(bot_id)
+        has_open = any(o["status"] == "open" for o in existing_orders)
 
-        log.info("[Grid %d] placed %d initial BUY orders", bot_id, placed)
+        if not has_open:
+            current_price = client.get_price(symbol)
+            placed = 0
+            for level in levels[:-1]:  # skip top level for buys
+                if level < current_price:
+                    qty = round(usdt_per_grid / level, qty_prec)
+                    if qty <= 0:
+                        continue
+                    try:
+                        resp = client._post("/api/v3/order", {
+                            "symbol": symbol,
+                            "side": "BUY",
+                            "type": "LIMIT",
+                            "price": str(level),
+                            "quantity": str(qty),
+                            "timeInForce": "GTC",
+                        })
+                        order_id = str(resp.get("orderId", ""))
+                        add_grid_order(bot_id, order_id, "BUY", level, qty)
+                        placed += 1
+                        log.info("[Grid %d] BUY @ %.8f qty=%.6f", bot_id, level, qty)
+                    except Exception as e:
+                        log.warning("[Grid %d] failed to place BUY @ %.8f: %s", bot_id, level, e)
+            log.info("[Grid %d] placed %d initial BUY orders", bot_id, placed)
+        else:
+            log.info("[Grid %d] resuming with %d existing open orders — skipping initial placement",
+                     bot_id, sum(1 for o in existing_orders if o["status"] == "open"))
 
-        # Monitoring loop
-        total_profit = 0.0
+        # Monitoring loop — restore cumulative profit from DB so resume doesn't reset it
+        total_profit = float(bot.get("profit", 0.0))
         while not stop_event.is_set():
             try:
                 orders = get_grid_orders(bot_id)

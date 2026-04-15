@@ -47,6 +47,7 @@ from database import (
     get_rebalance_history, get_snapshots, init_db, record_snapshot,
     save_portfolio, list_portfolios, get_portfolio,
     set_active_portfolio, delete_portfolio, update_portfolio_config,
+    set_bot_running, get_running_portfolios,
     list_grid_bots, get_grid_bot, delete_grid_bot, get_grid_orders,
 )
 from grid_bot import (
@@ -102,53 +103,51 @@ def _make_loop(portfolio_id: int, stop_event: threading.Event) -> None:
         mode = cfg["rebalance"]["mode"]
         log.info("Portfolio %d loop started | mode: %s", portfolio_id, mode)
 
-        if mode == "proportional":
-            interval = cfg["rebalance"]["proportional"]["check_interval_minutes"] * 60
-            while not stop_event.is_set():
-                try:
-                    cfg = db_get_portfolio(portfolio_id)
-                    if cfg:
-                        check_sl_tp(client, cfg)
-                        if needs_rebalance_proportional(client, cfg):
-                            execute_rebalance(client, cfg)
-                except Exception as e:
-                    log.error("Portfolio %d loop error: %s", portfolio_id, e)
-                stop_event.wait(interval)
+        # ── Unified loop: re-reads cfg (including mode) from DB every cycle ──
+        # This means mode changes, interval changes, and SL/TP config changes
+        # all take effect on the next cycle without restarting the bot.
+        timed_next_run = None  # initialised lazily on first timed cycle
 
-        elif mode == "timed":
-            timed_cfg = cfg["rebalance"]["timed"]
-            frequency = timed_cfg["frequency"]
-            target_hour = timed_cfg.get("hour", 0)
-            next_run = next_run_time(frequency, target_hour=target_hour)
-            # Short intervals poll every 30 s; long ones every 60 s
-            short_freq = frequency in TIMED_FREQUENCY_MINUTES and frequency not in ("daily", "weekly", "monthly")
-            poll_sec = 30 if short_freq else 60
-            while not stop_event.is_set():
-                try:
-                    cfg = db_get_portfolio(portfolio_id)
-                    if cfg:
-                        check_sl_tp(client, cfg)
-                        if datetime.utcnow() >= next_run:
-                            execute_rebalance(client, cfg)
-                            frequency = cfg["rebalance"]["timed"]["frequency"]
-                            target_hour = cfg["rebalance"]["timed"].get("hour", 0)
-                            next_run = next_run_time(frequency, target_hour=target_hour)
-                            short_freq = frequency in TIMED_FREQUENCY_MINUTES and frequency not in ("daily", "weekly", "monthly")
-                            poll_sec = 30 if short_freq else 60
-                except Exception as e:
-                    log.error("Portfolio %d loop error: %s", portfolio_id, e)
-                stop_event.wait(poll_sec)
+        while not stop_event.is_set():
+            try:
+                cfg = db_get_portfolio(portfolio_id)
+                if cfg is None:
+                    log.error("Portfolio %d disappeared from DB — stopping loop", portfolio_id)
+                    break
 
-        elif mode == "unbalanced":
-            # Still run SL/TP checks every minute even in manual mode
-            while not stop_event.is_set():
-                try:
-                    cfg = db_get_portfolio(portfolio_id)
-                    if cfg:
-                        check_sl_tp(client, cfg)
-                except Exception as e:
-                    log.error("Portfolio %d SL/TP check error: %s", portfolio_id, e)
-                stop_event.wait(60)
+                current_mode = cfg["rebalance"]["mode"]
+
+                # SL/TP guard runs on every cycle regardless of mode
+                check_sl_tp(client, cfg)
+
+                if current_mode == "proportional":
+                    interval = cfg["rebalance"]["proportional"]["check_interval_minutes"] * 60
+                    if needs_rebalance_proportional(client, cfg):
+                        execute_rebalance(client, cfg, portfolio_id=portfolio_id)
+                    stop_event.wait(interval)
+
+                elif current_mode == "timed":
+                    timed_cfg = cfg["rebalance"]["timed"]
+                    frequency = timed_cfg["frequency"]
+                    target_hour = timed_cfg.get("hour", 0)
+                    # Initialise next_run on first timed cycle or after mode switch
+                    if timed_next_run is None:
+                        timed_next_run = next_run_time(frequency, target_hour=target_hour)
+                        log.info("Portfolio %d: next timed rebalance at %s UTC", portfolio_id, timed_next_run.isoformat())
+                    if datetime.utcnow() >= timed_next_run:
+                        execute_rebalance(client, cfg, portfolio_id=portfolio_id)
+                        timed_next_run = next_run_time(frequency, target_hour=target_hour)
+                        log.info("Portfolio %d: next timed rebalance at %s UTC", portfolio_id, timed_next_run.isoformat())
+                    short_freq = frequency in TIMED_FREQUENCY_MINUTES and frequency not in ("daily", "weekly", "monthly")
+                    stop_event.wait(30 if short_freq else 60)
+
+                else:  # unbalanced — SL/TP only
+                    timed_next_run = None  # reset if mode switches back to timed later
+                    stop_event.wait(60)
+
+            except Exception as e:
+                log.error("Portfolio %d loop error: %s", portfolio_id, e)
+                stop_event.wait(30)  # back-off on error
 
     except Exception as e:
         with _loops_lock:
@@ -166,14 +165,20 @@ def _is_portfolio_running(portfolio_id: int) -> bool:
 
 
 def _start_portfolio_loop(portfolio_id: int) -> None:
-    stop_ev = threading.Event()
-    t = threading.Thread(target=_make_loop, args=(portfolio_id, stop_ev), daemon=True)
     with _loops_lock:
+        # Guard against double-start: if a live thread already exists, do nothing.
+        existing = _portfolio_loops.get(portfolio_id)
+        if existing is not None and existing["thread"].is_alive():
+            log.warning("Portfolio %d loop already running — ignoring duplicate start", portfolio_id)
+            return
+        stop_ev = threading.Event()
+        t = threading.Thread(target=_make_loop, args=(portfolio_id, stop_ev), daemon=True)
         _portfolio_loops[portfolio_id] = {
             "thread": t, "stop": stop_ev,
             "error": None, "started_at": None,
         }
     t.start()
+    set_bot_running(portfolio_id, True)
 
 
 def _stop_portfolio_loop(portfolio_id: int) -> None:
@@ -181,6 +186,14 @@ def _stop_portfolio_loop(portfolio_id: int) -> None:
         entry = _portfolio_loops.get(portfolio_id)
     if entry:
         entry["stop"].set()
+        # Wait up to 5 s for the thread to finish so we don't return before
+        # any in-progress rebalance order is complete.
+        entry["thread"].join(timeout=5)
+        # Clean up dead entry so the dict doesn't grow unboundedly.
+        with _loops_lock:
+            if portfolio_id in _portfolio_loops and not _portfolio_loops[portfolio_id]["thread"].is_alive():
+                del _portfolio_loops[portfolio_id]
+    set_bot_running(portfolio_id, False)
 
 
 # Legacy single-bot helpers kept for /api/bot/* endpoints (Dashboard tab)
@@ -208,7 +221,14 @@ def _run_rebalance_with_cancel(job_id: str, client: MEXCClient, cfg: dict) -> No
         log.info("Rebalance %s cancelled by user", job_id)
         return
     try:
-        result = execute_rebalance(client, cfg)
+        # Use active portfolio id for history isolation
+        try:
+            from database import list_portfolios as _lp
+            _active = next((p for p in _lp() if p.get("active")), None)
+            _pid = _active["id"] if _active else None
+        except Exception:
+            _pid = None
+        result = execute_rebalance(client, cfg, portfolio_id=_pid)
         entry["result"] = result
     except Exception as e:
         entry["result"] = [{"error": str(e)}]
@@ -242,7 +262,34 @@ def _send_discord(webhook_url: str, message: str) -> None:
 
 @asynccontextmanager
 async def lifespan(app):
+    # ── Startup: resume any portfolio loops that were running before restart ──
+    try:
+        running_ids = get_running_portfolios()
+        if running_ids:
+            log.info("Auto-resuming %d portfolio loop(s) after restart: %s", len(running_ids), running_ids)
+            for pid in running_ids:
+                try:
+                    cfg = get_portfolio(pid)
+                    if cfg is None:
+                        log.warning("Auto-resume: portfolio %d not found in DB — skipping", pid)
+                        set_bot_running(pid, False)
+                        continue
+                    _start_portfolio_loop(pid)
+                    log.info("Auto-resumed portfolio %d (%s)", pid, cfg.get("bot", {}).get("name", "?"))
+                except Exception as e:
+                    log.error("Auto-resume failed for portfolio %d: %s", pid, e)
+        else:
+            log.info("No portfolios flagged for auto-resume")
+    except Exception as e:
+        log.error("Lifespan startup error: %s", e)
     yield
+    # ── Shutdown: signal all loops to stop (Railway sends SIGTERM) ──
+    log.info("Shutting down — stopping all portfolio loops")
+    for pid in list(_portfolio_loops.keys()):
+        try:
+            _stop_portfolio_loop(pid)
+        except Exception:
+            pass
 
 
 app = FastAPI(title="MEXC Portfolio Rebalancer API", version="3.0.1", lifespan=lifespan)
@@ -891,11 +938,12 @@ def api_save_portfolio(body: PortfolioCreate):
 def db_status():
     """Diagnostic endpoint — returns DB backend and connection health."""
     import database as _db
+    backend = "postgresql" if _db._USE_POSTGRES else "sqlite"
     try:
         count = len(_db.list_portfolios())
-        return {"backend": _db._BACKEND, "ok": True, "portfolio_count": count}
+        return {"backend": backend, "ok": True, "portfolio_count": count}
     except Exception as e:
-        return {"backend": _db._BACKEND, "ok": False, "error": str(e)}
+        return {"backend": backend, "ok": False, "error": str(e)}
 
 
 @app.get("/api/mexc/status")
@@ -1086,7 +1134,7 @@ def api_rebalance_portfolio(portfolio_id: int, body: PortfolioRebalanceRequest):
             if body.rebalance_type == "equal":
                 result = execute_rebalance_equal(client, cfg)
             else:
-                result = execute_rebalance(client, cfg)
+                result = execute_rebalance(client, cfg, portfolio_id=portfolio_id)
             entry["result"] = result
         except Exception as exc:
             log.error("Portfolio rebalance failed (id=%s): %s", portfolio_id, exc)
