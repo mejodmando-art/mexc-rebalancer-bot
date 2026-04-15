@@ -20,7 +20,7 @@ from mexc_client import MEXCClient
 from database import (
     create_grid_bot, get_grid_bot, update_grid_bot_status,
     update_grid_bot_profit, add_grid_order, get_grid_orders,
-    update_grid_order, delete_grid_bot,
+    update_grid_order, delete_grid_bot, set_grid_bot_should_run,
 )
 
 log = logging.getLogger(__name__)
@@ -285,6 +285,7 @@ def start_grid_bot(symbol: str, investment: float,
     log.info("[Grid %d] created: %s inv=%.2f grids=%d range=[%.4f, %.4f]",
              bot_id, symbol, investment, grid_count, price_low, price_high)
 
+    set_grid_bot_should_run(bot_id, True)
     stop_event = threading.Event()
     t = threading.Thread(target=_grid_loop, args=(bot_id, stop_event),
                          daemon=True, name=f"grid-{bot_id}")
@@ -296,6 +297,9 @@ def start_grid_bot(symbol: str, investment: float,
 
 def stop_grid_bot(bot_id: int) -> None:
     """Signal the grid loop to stop and cancel all open orders."""
+    # Clear the auto-resume flag — user explicitly stopped this bot
+    set_grid_bot_should_run(bot_id, False)
+
     with _lock:
         entry = _grid_loops.get(bot_id)
     if entry:
@@ -328,6 +332,7 @@ def resume_grid_bot(bot_id: int) -> None:
     """Resume a stopped grid bot (re-starts the monitoring loop)."""
     if is_running(bot_id):
         return
+    set_grid_bot_should_run(bot_id, True)
     stop_event = threading.Event()
     t = threading.Thread(target=_grid_loop, args=(bot_id, stop_event),
                          daemon=True, name=f"grid-{bot_id}")
