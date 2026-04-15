@@ -49,6 +49,7 @@ from database import (
     set_active_portfolio, delete_portfolio, update_portfolio_config,
     set_bot_running, get_running_portfolios,
     list_grid_bots, get_grid_bot, delete_grid_bot, get_grid_orders,
+    get_should_run_grid_bots,
 )
 from grid_bot import (
     start_grid_bot, stop_grid_bot, resume_grid_bot,
@@ -262,7 +263,7 @@ def _send_discord(webhook_url: str, message: str) -> None:
 
 @asynccontextmanager
 async def lifespan(app):
-    # ── Startup: resume any portfolio loops that were running before restart ──
+    # ── Startup: resume portfolio loops that were running before restart ──
     try:
         running_ids = get_running_portfolios()
         if running_ids:
@@ -281,7 +282,24 @@ async def lifespan(app):
         else:
             log.info("No portfolios flagged for auto-resume")
     except Exception as e:
-        log.error("Lifespan startup error: %s", e)
+        log.error("Lifespan startup error (portfolios): %s", e)
+
+    # ── Startup: resume grid bots that were running before restart ──
+    try:
+        grid_ids = get_should_run_grid_bots()
+        if grid_ids:
+            log.info("Auto-resuming %d grid bot(s) after restart: %s", len(grid_ids), grid_ids)
+            for gid in grid_ids:
+                try:
+                    resume_grid_bot(gid)
+                    log.info("Auto-resumed grid bot %d", gid)
+                except Exception as e:
+                    log.error("Auto-resume failed for grid bot %d: %s", gid, e)
+        else:
+            log.info("No grid bots flagged for auto-resume")
+    except Exception as e:
+        log.error("Lifespan startup error (grid bots): %s", e)
+
     yield
     # ── Shutdown: signal all loops to stop (Railway sends SIGTERM) ──
     log.info("Shutting down — stopping all portfolio loops")
