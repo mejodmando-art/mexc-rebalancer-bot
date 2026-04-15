@@ -284,6 +284,7 @@ def init_db() -> None:
                 "ALTER TABLE portfolio_snapshots ADD COLUMN IF NOT EXISTS assets_json TEXT NOT NULL DEFAULT '[]'",
                 "ALTER TABLE portfolio_snapshots ADD COLUMN IF NOT EXISTS portfolio_id INTEGER NOT NULL DEFAULT 1",
                 "ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS bot_running INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE grid_bots ADD COLUMN IF NOT EXISTS should_run INTEGER NOT NULL DEFAULT 0",
             ]
             for m in migrations:
                 try:
@@ -346,6 +347,11 @@ def init_db() -> None:
         try:
             with _conn() as conn:
                 conn.execute("ALTER TABLE portfolios ADD COLUMN bot_running INTEGER NOT NULL DEFAULT 0")
+        except Exception:
+            pass  # column already exists
+        try:
+            with _conn() as conn:
+                conn.execute("ALTER TABLE grid_bots ADD COLUMN should_run INTEGER NOT NULL DEFAULT 0")
         except Exception:
             pass  # column already exists
         log.info("SQLite tables ready: %s", _SQLITE_PATH)
@@ -673,4 +679,32 @@ def get_running_portfolios() -> list[int]:
         return [row["id"] for row in rows]
     except Exception as e:
         log.error("get_running_portfolios failed: %s", e)
+        return []
+
+
+def set_grid_bot_should_run(bot_id: int, should_run: bool) -> None:
+    """Persist the user's intent to keep this grid bot running across restarts."""
+    try:
+        with _conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                _q("UPDATE grid_bots SET should_run=? WHERE id=?"),
+                (1 if should_run else 0, bot_id),
+            )
+    except Exception as e:
+        log.error("set_grid_bot_should_run failed: %s", e)
+
+
+def get_should_run_grid_bots() -> list[int]:
+    """Return IDs of grid bots that should be auto-resumed on startup."""
+    try:
+        with _conn() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT id FROM grid_bots WHERE should_run=1")
+            rows = cur.fetchall()
+        if _USE_POSTGRES:
+            return [row[0] for row in rows]
+        return [row["id"] for row in rows]
+    except Exception as e:
+        log.error("get_should_run_grid_bots failed: %s", e)
         return []
