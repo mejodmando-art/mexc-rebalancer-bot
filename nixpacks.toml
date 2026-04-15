@@ -1,12 +1,18 @@
 [phases.setup]
-nixPkgs = ["python311"]
+nixPkgs = ["python311", "nodejs_20", "nodePackages.npm"]
 
 [phases.install]
 cmds = [
-  "pip install -r requirements.txt"
+  "pip install -r requirements.txt",
+  "cd web && npm ci --prefer-offline"
 ]
 
-# Frontend is pre-built and committed to api/static/ — no Node.js build needed.
+[phases.build]
+cmds = [
+  "cd web && npm run build",
+  "cp -r web/out/. static/",
+  "cp -r web/out/. api/static/"
+]
 
 [start]
 cmd = "python main.py"
