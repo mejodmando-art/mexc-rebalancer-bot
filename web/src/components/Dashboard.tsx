@@ -362,73 +362,100 @@ export default function Dashboard({ lang }: Props) {
           )}
         </div>
 
-        {/* Portfolio value + P&L row */}
+        {/* ── Balance breakdown list ─────────────────────────────────────── */}
         {(() => {
-          const current  = status?.total_usdt ?? null;
-          const invested = investedUsdt;
-          const pnl      = current !== null && invested !== null && invested > 0 ? current - invested : null;
-          const pnlPct   = pnl !== null && invested && invested > 0 ? (pnl / invested) * 100 : null;
-          const isProfit = pnl !== null && pnl >= 0;
-          const pnlColor = isProfit ? '#00D4AA' : '#FF7B72';
+          const portfolioVal = status?.total_usdt ?? null;
+          const invested     = investedUsdt;
+          const free         = accountTotal !== null && portfolioVal !== null
+            ? accountTotal - portfolioVal
+            : accountTotal !== null ? accountTotal : null;
+          const activePort   = portfolios.find(p => p.active);
+          const portName     = activePort?.name ?? (lang === 'ar' ? 'المحفظة النشطة' : 'Active Portfolio');
+
+          const rows: { label: string; sub: string; value: number | null; color: string; glow: string; icon: string }[] = [
+            {
+              label: lang === 'ar' ? 'الرصيد المستثمر' : 'Invested Balance',
+              sub:   portName,
+              value: invested,
+              color: '#A78BFA',
+              glow:  'rgba(167,139,250,0.4)',
+              icon:  '📊',
+            },
+            {
+              label: lang === 'ar' ? 'قيمة المحفظة' : 'Portfolio Value',
+              sub:   `${status?.assets?.length ?? 0} ${lang === 'ar' ? 'عملة' : 'coins'} · ${status?.mode ?? ''}`,
+              value: portfolioVal,
+              color: '#00D4AA',
+              glow:  'rgba(0,212,170,0.4)',
+              icon:  '💼',
+            },
+            {
+              label: lang === 'ar' ? 'الرصيد الحر' : 'Free Balance',
+              sub:   lang === 'ar' ? 'قابل للتداول' : 'Available to trade',
+              value: free,
+              color: '#60A5FA',
+              glow:  'rgba(96,165,250,0.4)',
+              icon:  '💧',
+            },
+          ];
 
           return (
-            <div className="grid grid-cols-2 gap-3 mt-3 mb-4">
-              {/* Portfolio value */}
-              <div>
-                <p className="text-[10px] font-semibold mb-0.5" style={{ color: 'var(--text-muted)' }}>
-                  {lang === 'ar' ? 'قيمة المحفظة' : 'Portfolio Value'}
-                </p>
-                {loading ? (
-                  <div className="skeleton h-6 w-20 rounded-lg" />
-                ) : (
-                  <span className="num font-bold text-lg" style={{
-                    background: 'linear-gradient(135deg, #00D4AA, #00A88F)',
-                    WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text',
-                  }}>
-                    {current !== null ? fmtUsd(current) : '—'}
-                  </span>
-                )}
-                <p className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                  {status?.assets?.length ?? 0} {lang === 'ar' ? 'عملة مخصصة' : 'tracked coins'}
-                </p>
-              </div>
+            <div className="mt-4 mb-4 space-y-2">
+              {rows.map((row, idx) => (
+                <div
+                  key={idx}
+                  className="flex items-center gap-3 px-3 py-2.5 rounded-2xl"
+                  style={{
+                    background: `linear-gradient(135deg, ${row.color}10, rgba(15,10,40,0.6))`,
+                    border: `1px solid ${row.color}25`,
+                    boxShadow: `0 2px 12px ${row.color}10, inset 0 1px 0 rgba(255,255,255,0.05)`,
+                  }}
+                >
+                  {/* Icon */}
+                  <div
+                    className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 text-base"
+                    style={{
+                      background: `linear-gradient(145deg, ${row.color}28, ${row.color}10)`,
+                      border: `1px solid ${row.color}35`,
+                      boxShadow: `0 4px 12px ${row.glow}, inset 0 1px 0 rgba(255,255,255,0.15)`,
+                    }}
+                  >
+                    {row.icon}
+                  </div>
 
-              {/* P&L */}
-              <div>
-                <p className="text-[10px] font-semibold mb-0.5" style={{ color: 'var(--text-muted)' }}>
-                  {lang === 'ar' ? 'الخسارة / الربح' : 'P&L'}
-                </p>
-                {loading ? (
-                  <div className="skeleton h-6 w-24 rounded-lg" />
-                ) : pnl !== null ? (
-                  <>
-                    <span className="num font-bold text-lg" style={{
-                      background: isProfit
-                        ? 'linear-gradient(135deg, #00D4AA, #00A88F)'
-                        : 'linear-gradient(135deg, #FF7B72, #FF4444)',
-                      WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text',
-                    }}>
-                      {isProfit ? '+' : ''}{fmtUsd(pnl)}
-                    </span>
-                    {pnlPct !== null && (
-                      <div className="mt-0.5">
-                        <span
-                          className="num text-[10px] font-bold px-1.5 py-0.5 rounded-full"
-                          style={{
-                            background: isProfit ? 'rgba(0,212,170,0.15)' : 'rgba(255,123,114,0.15)',
-                            color: pnlColor,
-                            border: `1px solid ${pnlColor}30`,
-                          }}
-                        >
-                          {isProfit ? '↗' : '↘'} {isProfit ? '+' : ''}{pnlPct.toFixed(2)}%
-                        </span>
-                      </div>
+                  {/* Label */}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-bold leading-tight" style={{ color: 'var(--text-main)' }}>
+                      {row.label}
+                    </p>
+                    <p className="text-[10px] truncate mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                      {row.sub}
+                    </p>
+                  </div>
+
+                  {/* Value — big 3D number */}
+                  <div className="shrink-0 text-end">
+                    {loading && row.value === null ? (
+                      <div className="skeleton h-6 w-20 rounded-lg" />
+                    ) : (
+                      <p
+                        className="num font-black leading-none"
+                        style={{
+                          fontSize: '1.25rem',
+                          letterSpacing: '-0.03em',
+                          background: `linear-gradient(135deg, #fff 0%, ${row.color} 100%)`,
+                          WebkitBackgroundClip: 'text',
+                          WebkitTextFillColor: 'transparent',
+                          backgroundClip: 'text',
+                          filter: `drop-shadow(0 0 8px ${row.glow})`,
+                        }}
+                      >
+                        {row.value !== null ? fmtUsd(row.value) : '—'}
+                      </p>
                     )}
-                  </>
-                ) : (
-                  <span className="text-sm" style={{ color: 'var(--text-muted)' }}>—</span>
-                )}
-              </div>
+                  </div>
+                </div>
+              ))}
             </div>
           );
         })()}
