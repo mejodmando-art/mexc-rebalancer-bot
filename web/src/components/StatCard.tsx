@@ -32,34 +32,50 @@ export default function StatCard({ title, value, change, changePositive, icon: I
   const isPositive = changePositive === true;
   const isNegative = changePositive === false;
   const TrendIcon = isPositive ? TrendingUp : isNegative ? TrendingDown : Minus;
-  const color = iconColor ?? 'var(--accent)';
+  const color = iconColor ?? '#7B5CF5';
 
   return (
     <div
-      className="card card-hover p-4 cursor-default animate-fade-up relative overflow-hidden"
-      style={{ animationDelay: `${delay}s` }}
+      className="card card-hover p-4 cursor-default animate-fade-up"
+      style={{
+        animationDelay: `${delay}s`,
+        background: `linear-gradient(135deg, rgba(15,10,40,0.9) 0%, rgba(20,14,55,0.7) 100%)`,
+      }}
     >
       {/* Top accent line */}
       <div
-        className="absolute top-0 left-0 right-0 h-px"
-        style={{ background: `linear-gradient(90deg, transparent, ${color}55, transparent)` }}
+        className="absolute top-0 left-0 right-0 h-px rounded-t-2xl"
+        style={{ background: `linear-gradient(90deg, transparent, ${color}60, transparent)` }}
+      />
+
+      {/* Subtle corner glow */}
+      <div
+        className="absolute top-0 right-0 w-20 h-20 pointer-events-none"
+        style={{ background: `radial-gradient(circle at top right, ${color}15, transparent 70%)` }}
       />
 
       {/* Icon + title */}
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between mb-3 relative">
         <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--text-muted)' }}>
           {title}
         </span>
         <div
           className="w-9 h-9 rounded-2xl flex items-center justify-center shrink-0"
-          style={{ background: `${color}18`, border: `1px solid ${color}28`, boxShadow: `0 0 14px ${color}18` }}
+          style={{
+            background: `linear-gradient(145deg, ${color}28, ${color}10)`,
+            border: `1px solid ${color}30`,
+            boxShadow: `0 4px 14px ${color}25, inset 0 1px 0 rgba(255,255,255,0.1)`,
+          }}
         >
-          <Icon size={16} style={{ color }} />
+          <Icon size={16} style={{ color, filter: `drop-shadow(0 0 4px ${color}80)` }} />
         </div>
       </div>
 
       {/* Value */}
-      <div className="stat-value mb-2.5" style={{ color: 'var(--text-main)', letterSpacing: '-0.03em' }}>
+      <div
+        className="stat-value mb-2.5 relative"
+        style={{ color: 'var(--text-main)', letterSpacing: '-0.03em' }}
+      >
         {value}
       </div>
 
@@ -72,7 +88,7 @@ export default function StatCard({ title, value, change, changePositive, icon: I
               ? { color: '#00D4AA', background: 'rgba(0,212,170,0.1)', border: '1px solid rgba(0,212,170,0.2)' }
               : isNegative
               ? { color: '#FF7B72', background: 'rgba(255,123,114,0.1)', border: '1px solid rgba(255,123,114,0.2)' }
-              : { color: 'var(--text-muted)', background: 'var(--bg-input)', border: '1px solid var(--border)' }
+              : { color: 'var(--text-muted)', background: 'rgba(123,92,245,0.08)', border: '1px solid rgba(123,92,245,0.15)' }
           }
         >
           <TrendIcon size={10} />
