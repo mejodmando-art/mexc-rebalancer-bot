@@ -4,11 +4,12 @@
   },
   "portfolio": {
     "assets": [
-      { "symbol": "BTC", "allocation_pct": 50.0 },
-      { "symbol": "ETH", "allocation_pct": 50.0 }
+      { "symbol": "BTC", "allocation_pct": 50.0, "entry_price_usdt": null },
+      { "symbol": "ETH", "allocation_pct": 50.0, "entry_price_usdt": null }
     ],
     "total_usdt": 19,
-    "initial_value_usdt": 19
+    "initial_value_usdt": 19,
+    "allocation_mode": "ai_balance"
   },
   "rebalance": {
     "mode": "proportional",
@@ -22,6 +23,10 @@
       "hour": 10
     },
     "unbalanced": {}
+  },
+  "risk": {
+    "stop_loss_pct": null,
+    "take_profit_pct": null
   },
   "termination": {
     "sell_at_termination": false

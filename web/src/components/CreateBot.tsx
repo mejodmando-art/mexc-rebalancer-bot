@@ -4,44 +4,82 @@ import { useState } from 'react';
 import { startBot, savePortfolio, activatePortfolio } from '../lib/api';
 import { Lang, tr } from '../lib/i18n';
 
-interface Asset { symbol: string; allocation_pct: number; }
-type RebalanceMode = 'proportional' | 'timed' | 'unbalanced';
+interface Asset {
+  symbol: string;
+  allocation_pct: number;
+  entry_price_usdt: number | null;
+}
+
+type RebalanceMode   = 'proportional' | 'timed' | 'unbalanced';
+type AllocationMode  = 'ai_balance' | 'equal' | 'market_cap';
+type TimedFrequency  = '30min' | '1h' | '4h' | '8h' | '12h' | 'daily' | 'weekly' | 'monthly';
 
 interface Props { lang: Lang; onCreated: () => void; }
 
+const TIMED_OPTIONS: { value: TimedFrequency; labelKey: string }[] = [
+  { value: '30min',   labelKey: 'interval30m' },
+  { value: '1h',      labelKey: 'interval1h'  },
+  { value: '4h',      labelKey: 'interval4h'  },
+  { value: '8h',      labelKey: 'interval8h'  },
+  { value: '12h',     labelKey: 'interval12h' },
+  { value: 'daily',   labelKey: 'interval1d'  },
+  { value: 'weekly',  labelKey: 'weekly'      },
+  { value: 'monthly', labelKey: 'monthly'     },
+];
+
+const ALLOC_MODES: { value: AllocationMode; labelKey: string; descKey: string }[] = [
+  { value: 'ai_balance',  labelKey: 'allocAiBalance',  descKey: 'allocAiDesc'     },
+  { value: 'equal',       labelKey: 'allocEqual',      descKey: 'allocEqualDesc'  },
+  { value: 'market_cap',  labelKey: 'allocMarketCap',  descKey: 'allocMktCapDesc' },
+];
+
 export default function CreateBot({ lang, onCreated }: Props) {
-  const [assets, setAssets]       = useState<Asset[]>([
-    { symbol: 'BTC', allocation_pct: 50 },
-    { symbol: 'ETH', allocation_pct: 50 },
+  const [assets, setAssets]             = useState<Asset[]>([
+    { symbol: 'BTC', allocation_pct: 70, entry_price_usdt: null },
+    { symbol: 'ETH', allocation_pct: 30, entry_price_usdt: null },
   ]);
-  const [botName, setBotName]     = useState('My MEXC Portfolio');
-  const [totalUsdt, setTotalUsdt] = useState(1000);
-  const [rebalMode, setRebalMode] = useState<RebalanceMode>('proportional');
-  const [threshold, setThreshold] = useState(5);
-  const [frequency, setFrequency] = useState('daily');
-  const [timedHour, setTimedHour] = useState(10);
-  const [paperTrading, setPaperTrading]   = useState(false);
-  const [saving, setSaving]       = useState(false);
-  const [error, setError]         = useState('');
-  const [success, setSuccess]     = useState('');
+  const [botName, setBotName]           = useState('My MEXC Portfolio');
+  const [totalUsdt, setTotalUsdt]       = useState(1000);
+  const [allocMode, setAllocMode]       = useState<AllocationMode>('ai_balance');
+  const [rebalMode, setRebalMode]       = useState<RebalanceMode>('proportional');
+  const [threshold, setThreshold]       = useState(5);
+  const [timedFreq, setTimedFreq]       = useState<TimedFrequency>('daily');
+  const [timedHour, setTimedHour]       = useState(10);
+  const [stopLoss, setStopLoss]         = useState<number | ''>('');
+  const [takeProfit, setTakeProfit]     = useState<number | ''>('');
+  const [paperTrading, setPaperTrading] = useState(false);
+  const [saving, setSaving]             = useState(false);
+  const [error, setError]               = useState('');
+  const [success, setSuccess]           = useState('');
 
   const totalPct = assets.reduce((s, a) => s + a.allocation_pct, 0);
 
-  const allocateEqually = () => {
-    const n = assets.length;
+  // ── Allocation helpers ──────────────────────────────────────────────────
+
+  const applyEqualAlloc = (list: Asset[]) => {
+    const n = list.length;
     const base = Math.floor((100 / n) * 100) / 100;
     const rem  = parseFloat((100 - base * (n - 1)).toFixed(2));
-    setAssets(assets.map((a, i) => ({ ...a, allocation_pct: i === n - 1 ? rem : base })));
+    return list.map((a, i) => ({ ...a, allocation_pct: i === n - 1 ? rem : base }));
   };
 
+  const handleAllocModeChange = (mode: AllocationMode) => {
+    setAllocMode(mode);
+    if (mode === 'equal') setAssets(prev => applyEqualAlloc(prev));
+  };
+
+  // ── Asset CRUD ──────────────────────────────────────────────────────────
+
   const addAsset = () => {
-    if (assets.length >= 10) return;
-    setAssets([...assets, { symbol: '', allocation_pct: 0 }]);
+    if (assets.length >= 12) return;
+    const next = [...assets, { symbol: '', allocation_pct: 0, entry_price_usdt: null }];
+    setAssets(allocMode === 'equal' ? applyEqualAlloc(next) : next);
   };
 
   const removeAsset = (i: number) => {
-    if (assets.length <= 2) return;
-    setAssets(assets.filter((_, idx) => idx !== i));
+    if (assets.length <= 1) return;
+    const next = assets.filter((_, idx) => idx !== i);
+    setAssets(allocMode === 'equal' ? applyEqualAlloc(next) : next);
   };
 
   const updateSymbol = (i: number, val: string) => {
@@ -57,16 +95,30 @@ export default function CreateBot({ lang, onCreated }: Props) {
     setAssets(up);
   };
 
+  const updateEntryPrice = (i: number, val: string) => {
+    const up = [...assets];
+    up[i] = { ...up[i], entry_price_usdt: val === '' ? null : parseFloat(val) };
+    setAssets(up);
+  };
+
+  // ── Validation ──────────────────────────────────────────────────────────
+
   const validate = (): string | null => {
     if (!botName.trim()) return tr('errBotName', lang);
-    if (assets.length < 2 || assets.length > 10) return tr('errAssetCount', lang);
+    if (assets.length < 1 || assets.length > 12) return tr('errAssetCount', lang);
     const symbols = assets.map(a => a.symbol.trim().toUpperCase());
     if (symbols.some(s => !s)) return tr('errSymbol', lang);
     if (new Set(symbols).size !== symbols.length) return tr('errDuplicate', lang);
     if (Math.abs(totalPct - 100) > 0.1) return tr('errSum', lang);
     if (totalUsdt <= 0) return tr('errAmount', lang);
+    if (stopLoss !== '' && (stopLoss < 1 || stopLoss > 100))
+      return lang === 'ar' ? 'نسبة وقف الخسارة يجب أن تكون بين 1% و 100%' : 'Stop loss must be between 1% and 100%';
+    if (takeProfit !== '' && (takeProfit < 1 || takeProfit > 500))
+      return lang === 'ar' ? 'نسبة جني الربح يجب أن تكون بين 1% و 500%' : 'Take profit must be between 1% and 500%';
     return null;
   };
+
+  // ── Save ────────────────────────────────────────────────────────────────
 
   const handleSave = async () => {
     const err = validate();
@@ -76,26 +128,33 @@ export default function CreateBot({ lang, onCreated }: Props) {
       const fullConfig = {
         bot: { name: botName.trim() },
         portfolio: {
-          assets: assets.map(a => ({ symbol: a.symbol.trim().toUpperCase(), allocation_pct: a.allocation_pct })),
+          assets: assets.map(a => ({
+            symbol: a.symbol.trim().toUpperCase(),
+            allocation_pct: a.allocation_pct,
+            entry_price_usdt: a.entry_price_usdt ?? null,
+          })),
           total_usdt: totalUsdt,
           initial_value_usdt: totalUsdt,
+          allocation_mode: allocMode,
         },
         rebalance: {
           mode: rebalMode,
           proportional: { threshold_pct: threshold, check_interval_minutes: 5, min_deviation_to_execute_pct: 3 },
-          timed: { frequency, hour: timedHour },
+          timed: { frequency: timedFreq, hour: timedHour },
           unbalanced: {},
+        },
+        risk: {
+          stop_loss_pct:   stopLoss   === '' ? null : stopLoss,
+          take_profit_pct: takeProfit === '' ? null : takeProfit,
         },
         termination: { sell_at_termination: false },
         asset_transfer: { enable_asset_transfer: false },
         paper_trading: paperTrading,
         last_rebalance: null,
       };
-      // Save portfolio first — this is the only source of truth
       const saved = await savePortfolio(fullConfig);
-      // Activate it immediately so config.json is updated and bot starts
       await activatePortfolio(saved.id);
-      await startBot().catch(() => {}); // ignore "already running" error
+      await startBot().catch(() => {});
       setSuccess('✅ ' + tr('successCreated', lang));
       setTimeout(onCreated, 1500);
     } catch (e: any) {
@@ -105,74 +164,191 @@ export default function CreateBot({ lang, onCreated }: Props) {
     }
   };
 
+  // ── Render ──────────────────────────────────────────────────────────────
+
   return (
     <div className="max-w-2xl mx-auto space-y-6">
       <div>
-        <h1 className="text-2xl font-bold" style={{ color: 'var(--text-main)' }}>{tr('createBotTitle', lang)}</h1>
-        <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>{tr('createBotSubtitle', lang)}</p>
+        <h1 className="text-2xl font-bold" style={{ color: 'var(--text-main)' }}>
+          {tr('createBotTitle', lang)}
+        </h1>
+        <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>
+          {tr('createBotSubtitle', lang)}
+        </p>
       </div>
 
-      {/* Bot name */}
+      {/* ── Bot name ── */}
       <div className="card">
         <label className="label">{tr('botName', lang)}</label>
-        <input className="input" value={botName} onChange={e => setBotName(e.target.value)} placeholder="My MEXC Portfolio" />
+        <input
+          className="input"
+          value={botName}
+          onChange={e => setBotName(e.target.value)}
+          placeholder="My MEXC Portfolio"
+        />
       </div>
 
-      {/* Assets */}
+      {/* ── Token allocation ── */}
       <div className="card">
         <div className="flex items-center justify-between mb-3">
-          <div className="label mb-0">{tr('assetsAndAlloc', lang)} ({assets.length}/10)</div>
-          <div className="flex gap-2">
-            <button onClick={allocateEqually} className="btn-secondary text-xs px-3 py-1">{tr('equalAlloc', lang)}</button>
-            <button onClick={addAsset} disabled={assets.length >= 10} className="btn-primary text-xs px-3 py-1">{tr('addAsset', lang)}</button>
-          </div>
+          <div className="label mb-0">{tr('assetsAndAlloc', lang)} ({assets.length}/12)</div>
+          <button
+            onClick={addAsset}
+            disabled={assets.length >= 12}
+            className="btn-primary text-xs px-3 py-1"
+          >
+            + {tr('addAsset', lang)}
+          </button>
         </div>
 
-        <div className="space-y-2">
+        {/* Allocation mode selector */}
+        <div className="flex gap-2 mb-4">
+          {ALLOC_MODES.map(m => (
+            <button
+              key={m.value}
+              onClick={() => handleAllocModeChange(m.value)}
+              title={tr(m.descKey, lang)}
+              className={`flex-1 py-2 rounded-xl border-2 text-xs font-semibold transition-colors ${
+                allocMode === m.value
+                  ? 'border-brand bg-brand/10 text-brand'
+                  : 'border-gray-700 text-gray-400 hover:border-gray-600'
+              }`}
+            >
+              {tr(m.labelKey, lang)}
+            </button>
+          ))}
+        </div>
+
+        {/* Allocation mode description */}
+        <p className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>
+          {tr(ALLOC_MODES.find(m => m.value === allocMode)!.descKey, lang)}
+        </p>
+
+        {/* Asset rows */}
+        <div className="space-y-3">
           {assets.map((a, i) => {
-            const syms = assets.map(x => x.symbol.trim().toUpperCase());
+            const syms  = assets.map(x => x.symbol.trim().toUpperCase());
             const isDup = a.symbol.trim() !== '' && syms.filter(s => s === a.symbol.trim().toUpperCase()).length > 1;
             return (
-              <div key={i} className="flex items-center gap-2">
-                <div className="flex flex-col">
-                  <input
-                    className={`input w-28 font-mono uppercase ${isDup ? 'border-red-500' : ''}`}
-                    value={a.symbol}
-                    onChange={e => updateSymbol(i, e.target.value)}
-                    placeholder="BTC"
-                    maxLength={10}
-                  />
-                  {isDup && <span className="text-red-400 text-xs mt-0.5">⚠️ {tr('errDuplicate', lang)}</span>}
+              <div key={i} className="rounded-xl border border-gray-700 p-3 space-y-2">
+                {/* Symbol + allocation row */}
+                <div className="flex items-center gap-2">
+                  <div className="flex flex-col">
+                    <input
+                      className={`input w-24 font-mono uppercase ${isDup ? 'border-red-500' : ''}`}
+                      value={a.symbol}
+                      onChange={e => updateSymbol(i, e.target.value)}
+                      placeholder="BTC"
+                      maxLength={10}
+                    />
+                    {isDup && (
+                      <span className="text-red-400 text-xs mt-0.5">
+                        ⚠️ {tr('errDuplicate', lang)}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex-1 relative">
+                    <span
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-sm pointer-events-none"
+                      style={{ color: 'var(--text-muted)' }}
+                    >
+                      %
+                    </span>
+                    <input
+                      type="number" min={0} max={100} step={0.1}
+                      className="input pr-8"
+                      value={a.allocation_pct}
+                      onChange={e => updatePct(i, parseFloat(e.target.value) || 0)}
+                      disabled={allocMode === 'equal'}
+                    />
+                  </div>
+
+                  <button
+                    onClick={() => removeAsset(i)}
+                    disabled={assets.length <= 1}
+                    className="text-red-500 hover:text-red-400 disabled:opacity-30 p-1 text-xl leading-none"
+                  >
+                    ×
+                  </button>
                 </div>
-                <div className="flex-1 relative">
-                  <input
-                    type="number" min={0} max={100} step={0.1}
-                    className="input"
-                    value={a.allocation_pct}
-                    onChange={e => updatePct(i, parseFloat(e.target.value) || 0)}
-                  />
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm" style={{ color: 'var(--text-muted)' }}>%</span>
+
+                {/* Entry price (optional) */}
+                <div className="flex items-center gap-2">
+                  <span className="text-xs w-28 shrink-0" style={{ color: 'var(--text-muted)' }}>
+                    {tr('entryPrice', lang)}
+                  </span>
+                  <div className="flex-1 relative">
+                    <span
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-xs pointer-events-none"
+                      style={{ color: 'var(--text-muted)' }}
+                    >
+                      USDT
+                    </span>
+                    <input
+                      type="number" min={0} step="any"
+                      className="input pr-14 text-sm"
+                      placeholder={tr('entryPriceOpt', lang)}
+                      value={a.entry_price_usdt ?? ''}
+                      onChange={e => updateEntryPrice(i, e.target.value)}
+                    />
+                  </div>
                 </div>
-                <button onClick={() => removeAsset(i)} disabled={assets.length <= 2}
-                  className="text-red-500 hover:text-red-400 disabled:opacity-30 p-1">🗑️</button>
               </div>
             );
           })}
         </div>
 
-        <div className={`mt-3 text-sm font-semibold ${Math.abs(totalPct - 100) < 0.1 ? 'text-green-400' : 'text-red-400'}`}>
-          {tr('totalSum', lang)}: {totalPct.toFixed(1)}% {Math.abs(totalPct - 100) < 0.1 ? '✅' : tr('mustBe100', lang)}
+        {/* Allocation total */}
+        <div
+          className={`mt-3 text-sm font-semibold ${
+            Math.abs(totalPct - 100) < 0.1 ? 'text-green-400' : 'text-red-400'
+          }`}
+        >
+          {tr('totalSum', lang)}: {totalPct.toFixed(1)}%{' '}
+          {Math.abs(totalPct - 100) < 0.1 ? '✅' : tr('mustBe100', lang)}
         </div>
       </div>
 
-      {/* Rebalance mode */}
+      {/* ── Investment amount ── */}
+      <div className="card">
+        <label className="label">{tr('investedUsdt', lang)}</label>
+        <div className="relative">
+          <span
+            className="absolute left-3 top-1/2 -translate-y-1/2 text-sm pointer-events-none"
+            style={{ color: 'var(--text-muted)' }}
+          >
+            USDT
+          </span>
+          <input
+            type="number" min={1}
+            className="input pl-16"
+            value={totalUsdt}
+            onChange={e => setTotalUsdt(parseFloat(e.target.value) || 0)}
+          />
+        </div>
+        <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+          {tr('minRecommended', lang)}: {(assets.length * 10).toFixed(0)} USDT
+        </p>
+      </div>
+
+      {/* ── Rebalance mode ── */}
       <div className="card">
         <div className="label mb-3">{tr('rebalanceMode', lang)}</div>
         <div className="grid grid-cols-3 gap-2 mb-4">
           {(['proportional', 'timed', 'unbalanced'] as RebalanceMode[]).map(m => (
-            <button key={m} onClick={() => setRebalMode(m)}
-              className={`p-3 rounded-xl border-2 text-center transition-colors ${rebalMode === m ? 'border-brand bg-brand/10' : 'border-gray-700 hover:border-gray-600'}`}>
-              <div className="text-lg">{m === 'proportional' ? '📊' : m === 'timed' ? '⏰' : '🔓'}</div>
+            <button
+              key={m}
+              onClick={() => setRebalMode(m)}
+              className={`p-3 rounded-xl border-2 text-center transition-colors ${
+                rebalMode === m
+                  ? 'border-brand bg-brand/10'
+                  : 'border-gray-700 hover:border-gray-600'
+              }`}
+            >
+              <div className="text-lg">
+                {m === 'proportional' ? '📊' : m === 'timed' ? '⏰' : '🔓'}
+              </div>
               <div className="text-xs font-semibold mt-1" style={{ color: 'var(--text-main)' }}>
                 {tr(m === 'proportional' ? 'proportional' : m === 'timed' ? 'timed' : 'manual', lang)}
               </div>
@@ -180,78 +356,175 @@ export default function CreateBot({ lang, onCreated }: Props) {
           ))}
         </div>
 
+        {/* Proportional settings */}
         {rebalMode === 'proportional' && (
-          <div>
-            <div className="label">{tr('deviationThresh', lang)}</div>
-            <div className="flex gap-2">
-              {[1, 3, 5].map(t => (
-                <button key={t} onClick={() => setThreshold(t)}
-                  className={`flex-1 py-2 rounded-xl border-2 text-sm font-bold transition-colors ${threshold === t ? 'border-brand bg-brand/10 text-brand' : 'border-gray-700 text-gray-400 hover:border-gray-600'}`}>
-                  {t}%
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {rebalMode === 'timed' && (
           <div className="space-y-3">
+            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+              {tr('proportionalModeDesc', lang)}
+            </p>
             <div>
-              <div className="label">{tr('frequency', lang)}</div>
+              <div className="label">{tr('deviationThresh', lang)}</div>
               <div className="flex gap-2">
-                {['daily', 'weekly', 'monthly'].map(f => (
-                  <button key={f} onClick={() => setFrequency(f)}
-                    className={`flex-1 py-2 rounded-xl border-2 text-sm font-semibold transition-colors ${frequency === f ? 'border-brand bg-brand/10 text-brand' : 'border-gray-700 text-gray-400 hover:border-gray-600'}`}>
-                    {tr(f, lang)}
+                {[1, 3, 5].map(t => (
+                  <button
+                    key={t}
+                    onClick={() => setThreshold(t)}
+                    className={`flex-1 py-2 rounded-xl border-2 text-sm font-bold transition-colors ${
+                      threshold === t
+                        ? 'border-brand bg-brand/10 text-brand'
+                        : 'border-gray-700 text-gray-400 hover:border-gray-600'
+                    }`}
+                  >
+                    {t}%
                   </button>
                 ))}
               </div>
             </div>
+          </div>
+        )}
+
+        {/* Timed settings */}
+        {rebalMode === 'timed' && (
+          <div className="space-y-3">
+            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+              {tr('timedModeDesc', lang)}
+            </p>
             <div>
-              <div className="label">{tr('hourUtc', lang)}</div>
-              <input type="number" min={0} max={23} className="input w-24" value={timedHour}
-                onChange={e => setTimedHour(parseInt(e.target.value) || 0)} />
+              <div className="label">{tr('frequency', lang)}</div>
+              <div className="grid grid-cols-4 gap-2">
+                {TIMED_OPTIONS.map(opt => (
+                  <button
+                    key={opt.value}
+                    onClick={() => setTimedFreq(opt.value)}
+                    className={`py-2 rounded-xl border-2 text-xs font-semibold transition-colors ${
+                      timedFreq === opt.value
+                        ? 'border-brand bg-brand/10 text-brand'
+                        : 'border-gray-700 text-gray-400 hover:border-gray-600'
+                    }`}
+                  >
+                    {tr(opt.labelKey, lang)}
+                  </button>
+                ))}
+              </div>
             </div>
+            {['daily', 'weekly', 'monthly'].includes(timedFreq) && (
+              <div>
+                <div className="label">{tr('hourUtc', lang)}</div>
+                <input
+                  type="number" min={0} max={23}
+                  className="input w-24"
+                  value={timedHour}
+                  onChange={e => setTimedHour(parseInt(e.target.value) || 0)}
+                />
+              </div>
+            )}
           </div>
         )}
       </div>
 
-      {/* Investment amount */}
+      {/* ── Risk management (SL / TP) ── */}
       <div className="card">
-        <label className="label">{tr('investedUsdt', lang)}</label>
-        <div className="relative">
-          <input type="number" min={1} className="input pl-16" value={totalUsdt}
-            onChange={e => setTotalUsdt(parseFloat(e.target.value) || 0)} />
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm" style={{ color: 'var(--text-muted)' }}>USDT</span>
-        </div>
-        <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
-          {tr('minRecommended', lang)}: {(assets.length * 10).toFixed(0)} USDT
+        <div className="label mb-1">{tr('riskSettings', lang)}</div>
+        <p className="text-xs mb-4" style={{ color: 'var(--text-muted)' }}>
+          {lang === 'ar'
+            ? 'يتطلب تعيين سعر الدخول لكل توكن لكي يعمل وقف الخسارة وجني الربح.'
+            : 'Requires entry price per token for stop-loss and take-profit to activate.'}
         </p>
+
+        <div className="grid grid-cols-2 gap-4">
+          {/* Stop Loss */}
+          <div>
+            <div className="label" style={{ color: '#f87171' }}>{tr('stopLoss', lang)}</div>
+            <p className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>
+              {tr('stopLossDesc', lang)}
+            </p>
+            <div className="relative">
+              <span
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-sm pointer-events-none"
+                style={{ color: 'var(--text-muted)' }}
+              >
+                %
+              </span>
+              <input
+                type="number" min={1} max={100} step={0.5}
+                className="input pr-8"
+                placeholder={tr('disabled', lang)}
+                value={stopLoss}
+                onChange={e => setStopLoss(e.target.value === '' ? '' : parseFloat(e.target.value))}
+              />
+            </div>
+            {stopLoss !== '' && (
+              <p className="text-xs mt-1" style={{ color: '#f87171' }}>
+                {lang === 'ar' ? `بيع عند انخفاض ${stopLoss}%` : `Sell at −${stopLoss}% from entry`}
+              </p>
+            )}
+          </div>
+
+          {/* Take Profit */}
+          <div>
+            <div className="label" style={{ color: '#4ade80' }}>{tr('takeProfit', lang)}</div>
+            <p className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>
+              {tr('takeProfitDesc', lang)}
+            </p>
+            <div className="relative">
+              <span
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-sm pointer-events-none"
+                style={{ color: 'var(--text-muted)' }}
+              >
+                %
+              </span>
+              <input
+                type="number" min={1} max={500} step={1}
+                className="input pr-8"
+                placeholder={tr('disabled', lang)}
+                value={takeProfit}
+                onChange={e => setTakeProfit(e.target.value === '' ? '' : parseFloat(e.target.value))}
+              />
+            </div>
+            {takeProfit !== '' && (
+              <p className="text-xs mt-1" style={{ color: '#4ade80' }}>
+                {lang === 'ar' ? `بيع عند ارتفاع ${takeProfit}%` : `Sell at +${takeProfit}% from entry`}
+              </p>
+            )}
+          </div>
+        </div>
       </div>
 
-      {/* Toggles */}
+      {/* ── Extra options ── */}
       <div className="card space-y-4">
         <div className="label mb-0">{tr('extraOptions', lang)}</div>
-        {[
-          { key: 'paper', label: '🧪 ' + tr('paperMode', lang), desc: tr('paperModeDesc', lang), val: paperTrading, set: setPaperTrading, color: 'bg-yellow-500' },
-        ].map(({ key, label, desc, val, set, color }) => (
-          <label key={key} className="flex items-center justify-between cursor-pointer">
-            <div>
-              <div className="text-sm font-medium" style={{ color: 'var(--text-main)' }}>{label}</div>
-              <div className="text-xs" style={{ color: 'var(--text-muted)' }}>{desc}</div>
+        <label className="flex items-center justify-between cursor-pointer">
+          <div>
+            <div className="text-sm font-medium" style={{ color: 'var(--text-main)' }}>
+              🧪 {tr('paperMode', lang)}
             </div>
-            <div className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer ${val ? color : 'bg-gray-700'}`}
-              onClick={() => set(!val)}>
-              <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${val ? 'translate-x-5' : 'translate-x-0.5'}`} />
+            <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
+              {tr('paperModeDesc', lang)}
             </div>
-          </label>
-        ))}
+          </div>
+          <div
+            className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer ${
+              paperTrading ? 'bg-yellow-500' : 'bg-gray-700'
+            }`}
+            onClick={() => setPaperTrading(!paperTrading)}
+          >
+            <div
+              className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
+                paperTrading ? 'translate-x-5' : 'translate-x-0.5'
+              }`}
+            />
+          </div>
+        </label>
       </div>
 
       {error   && <div className="card border-red-700 text-red-400 text-sm">{error}</div>}
       {success && <div className="card border-green-700 text-green-400 text-sm">{success}</div>}
 
-      <button onClick={handleSave} disabled={saving} className="btn-primary w-full py-3 text-base">
+      <button
+        onClick={handleSave}
+        disabled={saving}
+        className="btn-primary w-full py-3 text-base"
+      >
         {saving ? '⏳ ' + tr('saving', lang) : '🚀 ' + tr('createBotBtn', lang)}
       </button>
     </div>
