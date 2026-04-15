@@ -11,6 +11,7 @@ cmds = [
 cmds = [
   "npm run build --prefix web",
   "mkdir -p static api/static",
+  "rm -rf static/_next api/static/_next",
   "cp -r web/out/. static/",
   "cp -r web/out/. api/static/"
 ]
