@@ -283,6 +283,7 @@ def init_db() -> None:
                 "ALTER TABLE portfolio_snapshots ADD COLUMN IF NOT EXISTS total_usdt REAL NOT NULL DEFAULT 0",
                 "ALTER TABLE portfolio_snapshots ADD COLUMN IF NOT EXISTS assets_json TEXT NOT NULL DEFAULT '[]'",
                 "ALTER TABLE portfolio_snapshots ADD COLUMN IF NOT EXISTS portfolio_id INTEGER NOT NULL DEFAULT 1",
+                "ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS bot_running INTEGER NOT NULL DEFAULT 0",
             ]
             for m in migrations:
                 try:
@@ -341,6 +342,12 @@ def init_db() -> None:
                     profit       REAL    NOT NULL DEFAULT 0
                 );
             """)
+        # SQLite doesn't support IF NOT EXISTS in ALTER TABLE, so we try/except
+        try:
+            with _conn() as conn:
+                conn.execute("ALTER TABLE portfolios ADD COLUMN bot_running INTEGER NOT NULL DEFAULT 0")
+        except Exception:
+            pass  # column already exists
         log.info("SQLite tables ready: %s", _SQLITE_PATH)
 
 
@@ -635,3 +642,35 @@ def update_grid_order(order_id: str, status: str, profit: float = 0) -> None:
             )
     except Exception as e:
         log.error("update_grid_order failed: %s", e)
+
+
+# ---------------------------------------------------------------------------
+# Bot running state (persisted across restarts)
+# ---------------------------------------------------------------------------
+
+def set_bot_running(portfolio_id: int, running: bool) -> None:
+    """Mark a portfolio's bot loop as running or stopped in the database."""
+    try:
+        with _conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                _q("UPDATE portfolios SET bot_running=? WHERE id=?"),
+                (1 if running else 0, portfolio_id),
+            )
+    except Exception as e:
+        log.error("set_bot_running failed: %s", e)
+
+
+def get_running_portfolios() -> list[int]:
+    """Return the IDs of all portfolios whose bot_running flag is set."""
+    try:
+        with _conn() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT id FROM portfolios WHERE bot_running=1")
+            rows = cur.fetchall()
+        if _USE_POSTGRES:
+            return [row[0] for row in rows]
+        return [row["id"] for row in rows]
+    except Exception as e:
+        log.error("get_running_portfolios failed: %s", e)
+        return []
