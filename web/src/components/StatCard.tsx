@@ -1,5 +1,6 @@
 'use client';
 
+import { useRef } from 'react';
 import { TrendingUp, TrendingDown, Minus } from 'lucide-react';
 
 interface StatCardProps {
@@ -26,48 +27,114 @@ export function StatCardSkeleton() {
   );
 }
 
-export default function StatCard({ title, value, change, changePositive, icon: Icon, iconColor, loading, delay = 0 }: StatCardProps) {
+export default function StatCard({
+  title,
+  value,
+  change,
+  changePositive,
+  icon: Icon,
+  iconColor,
+  loading,
+  delay = 0,
+}: StatCardProps) {
   if (loading) return <StatCardSkeleton />;
+
+  const cardRef = useRef<HTMLDivElement>(null);
+  const rafRef  = useRef<number | null>(null);
 
   const isPositive = changePositive === true;
   const isNegative = changePositive === false;
-  const TrendIcon = isPositive ? TrendingUp : isNegative ? TrendingDown : Minus;
-  const color = iconColor ?? '#7B5CF5';
+  const TrendIcon  = isPositive ? TrendingUp : isNegative ? TrendingDown : Minus;
+  const color      = iconColor ?? '#7B5CF5';
+
+  // Perspective tilt — runs in rAF to avoid layout thrashing
+  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = requestAnimationFrame(() => {
+      const el = cardRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const x = (e.clientX - rect.left)  / rect.width  - 0.5; // -0.5 → 0.5
+      const y = (e.clientY - rect.top)   / rect.height - 0.5;
+      el.style.transform = `perspective(700px) rotateX(${-y * 7}deg) rotateY(${x * 7}deg) translateY(-4px)`;
+    });
+  };
+
+  const handleMouseLeave = () => {
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    const el = cardRef.current;
+    if (!el) return;
+    el.style.transition = 'transform 0.45s cubic-bezier(0.34,1.56,0.64,1), box-shadow 0.3s ease, border-color 0.25s ease';
+    el.style.transform  = '';
+    setTimeout(() => { if (el) el.style.transition = ''; }, 450);
+  };
+
+  const handleMouseEnter = () => {
+    const el = cardRef.current;
+    if (!el) return;
+    el.style.transition = 'transform 0.08s ease-out, box-shadow 0.3s ease, border-color 0.25s ease';
+  };
 
   return (
     <div
+      ref={cardRef}
       className="card card-hover p-4 cursor-default animate-fade-up"
       style={{
         animationDelay: `${delay}s`,
         background: `linear-gradient(135deg, rgba(15,10,40,0.9) 0%, rgba(20,14,55,0.7) 100%)`,
       }}
+      onMouseMove={handleMouseMove}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
     >
-      {/* Top accent line */}
+      {/* Per-card accent line keyed to icon color */}
       <div
         className="absolute top-0 left-0 right-0 h-px rounded-t-2xl"
-        style={{ background: `linear-gradient(90deg, transparent, ${color}60, transparent)` }}
+        style={{ background: `linear-gradient(90deg, transparent, ${color}70, transparent)` }}
       />
 
-      {/* Subtle corner glow */}
+      {/* Corner ambient glow */}
       <div
-        className="absolute top-0 right-0 w-20 h-20 pointer-events-none"
-        style={{ background: `radial-gradient(circle at top right, ${color}15, transparent 70%)` }}
+        className="absolute top-0 right-0 w-24 h-24 pointer-events-none"
+        style={{ background: `radial-gradient(circle at top right, ${color}18, transparent 70%)` }}
       />
 
-      {/* Icon + title */}
+      {/* Icon + title row */}
       <div className="flex items-center justify-between mb-3 relative">
-        <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--text-muted)' }}>
+        <span
+          className="text-[10px] font-bold uppercase tracking-widest"
+          style={{ color: 'var(--text-muted)' }}
+        >
           {title}
         </span>
+
+        {/* 3-layer icon badge: gradient fill + specular highlight + drop shadow */}
         <div
-          className="w-9 h-9 rounded-2xl flex items-center justify-center shrink-0"
+          className="flex items-center justify-center shrink-0 relative"
           style={{
-            background: `linear-gradient(145deg, ${color}28, ${color}10)`,
-            border: `1px solid ${color}30`,
-            boxShadow: `0 4px 14px ${color}25, inset 0 1px 0 rgba(255,255,255,0.1)`,
+            width: 38,
+            height: 38,
+            borderRadius: 13,
+            background: `linear-gradient(145deg, ${color}32, ${color}12)`,
+            border: `1px solid ${color}38`,
+            boxShadow: `0 6px 20px ${color}2e, 0 2px 6px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.16), inset 0 -1px 0 rgba(0,0,0,0.2)`,
           }}
         >
-          <Icon size={16} style={{ color, filter: `drop-shadow(0 0 4px ${color}80)` }} />
+          {/* Specular highlight arc */}
+          <div
+            style={{
+              position: 'absolute',
+              top: 2, left: 5, right: 5,
+              height: '38%',
+              background: 'linear-gradient(180deg, rgba(255,255,255,0.2) 0%, transparent 100%)',
+              borderRadius: '8px 8px 50% 50%',
+              pointerEvents: 'none',
+            }}
+          />
+          <Icon
+            size={16}
+            style={{ color, filter: `drop-shadow(0 2px 5px ${color}88)`, position: 'relative' }}
+          />
         </div>
       </div>
 
@@ -79,15 +146,15 @@ export default function StatCard({ title, value, change, changePositive, icon: I
         {value}
       </div>
 
-      {/* Badge */}
+      {/* Trend badge */}
       {change && (
         <div
           className="trend-badge"
           style={
             isPositive
-              ? { color: '#00D4AA', background: 'rgba(0,212,170,0.1)', border: '1px solid rgba(0,212,170,0.2)' }
+              ? { color: '#00D4AA', background: 'rgba(0,212,170,0.1)', border: '1px solid rgba(0,212,170,0.22)' }
               : isNegative
-              ? { color: '#FF7B72', background: 'rgba(255,123,114,0.1)', border: '1px solid rgba(255,123,114,0.2)' }
+              ? { color: '#FF7B72', background: 'rgba(255,123,114,0.1)', border: '1px solid rgba(255,123,114,0.22)' }
               : { color: 'var(--text-muted)', background: 'rgba(123,92,245,0.08)', border: '1px solid rgba(123,92,245,0.15)' }
           }
         >
