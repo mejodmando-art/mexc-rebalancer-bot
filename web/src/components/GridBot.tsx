@@ -35,6 +35,8 @@ function WaveChart({ low, high, current }: { low: number; high: number; current:
 function CreateForm({ lang, onCreated }: { lang: Lang; onCreated: () => void }) {
   const ar = lang === 'ar';
   const [symbol, setSymbol]               = useState('BTC');
+  const [symbolSearch, setSymbolSearch]   = useState('');
+  const [showSymbolPicker, setShowSymbolPicker] = useState(false);
   const [investment, setInvestment]       = useState('');
   const [mode, setMode]                   = useState<'normal' | 'infinity'>('normal');
   const [useBaseBalance, setUseBaseBalance] = useState(false);
@@ -71,25 +73,79 @@ function CreateForm({ lang, onCreated }: { lang: Lang; onCreated: () => void }) 
     finally { setCreating(false); }
   };
 
-  const POPULAR = ['BTC','ETH','SOL','BNB','XRP','ADA'];
+  const POPULAR = ['BTC','ETH','SOL','BNB','XRP','ADA','DOGE','AVAX','DOT','LINK','UNI','MATIC','LTC','ATOM','NEAR','APT','ARB','TAO','FET','AIA'];
+  const filteredSymbols = symbolSearch.trim() ? POPULAR.filter(s => s.includes(symbolSearch.toUpperCase())) : POPULAR;
 
   return (
     <div className="space-y-4">
+      {/* اختيار العملة */}
       <div className="card p-4 space-y-3">
-        <div className="label">{ar ? 'الزوج (اختياري)' : 'Trading Pair (optional)'}</div>
-        <div className="flex flex-wrap gap-2">
-          {POPULAR.map(s => (
-            <button key={s} onClick={() => setSymbol(s)}
-              className="px-3 py-1.5 rounded-xl text-xs font-bold transition-all"
-              style={{ background: symbol===s ? 'rgba(240,185,11,0.15)' : 'var(--bg-input)', color: symbol===s ? '#F0B90B' : 'var(--text-muted)', border: `1px solid ${symbol===s ? 'rgba(240,185,11,0.4)' : 'var(--border)'}`, boxShadow: symbol===s ? '0 2px 8px rgba(240,185,11,0.2)' : 'none' }}>
-              {s}
-            </button>
-          ))}
-        </div>
-        <input className="input font-mono uppercase" value={symbol}
-          onChange={e => setSymbol(e.target.value.toUpperCase().replace('USDT',''))}
-          placeholder="BTC" maxLength={10} />
-        <div className="text-xs" style={{ color: 'var(--text-muted)' }}>{ar ? 'سيتم إضافة USDT تلقائياً' : 'USDT appended automatically'}</div>
+        <div className="label">{ar ? 'العملة' : 'Symbol'}</div>
+
+        {/* زر العملة الحالية */}
+        <button
+          onClick={() => setShowSymbolPicker(v => !v)}
+          className="w-full flex items-center justify-between px-4 py-3 rounded-2xl transition-all"
+          style={{ background: 'rgba(240,185,11,0.08)', border: '1px solid rgba(240,185,11,0.35)' }}
+        >
+          <div className="flex items-center gap-3">
+            <img
+              src={`https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons/32/color/${symbol.toLowerCase()}.png`}
+              alt={symbol} className="w-7 h-7 rounded-full"
+              onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+            />
+            <span className="font-black text-lg" style={{ color: '#F0B90B' }}>{symbol}</span>
+            <span className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>/USDT</span>
+          </div>
+          <span style={{ color: 'var(--text-muted)', fontSize: 16 }}>{showSymbolPicker ? '▲' : '▼'}</span>
+        </button>
+
+        {showSymbolPicker && (
+          <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid var(--border)', background: 'var(--bg-input)' }}>
+            <div className="p-2 border-b" style={{ borderColor: 'var(--border)' }}>
+              <input
+                autoFocus
+                value={symbolSearch}
+                onChange={e => setSymbolSearch(e.target.value.toUpperCase())}
+                placeholder={ar ? 'ابحث عن عملة...' : 'Search coin...'}
+                className="input text-sm"
+              />
+            </div>
+            <div className="grid grid-cols-5 gap-1 p-2 max-h-44 overflow-y-auto">
+              {filteredSymbols.map(s => (
+                <button key={s}
+                  onClick={() => { setSymbol(s); setShowSymbolPicker(false); setSymbolSearch(''); }}
+                  className="flex flex-col items-center gap-1 py-2 px-1 rounded-xl transition-all"
+                  style={{
+                    background: symbol === s ? 'rgba(240,185,11,0.15)' : 'rgba(255,255,255,0.03)',
+                    border: `1px solid ${symbol === s ? 'rgba(240,185,11,0.4)' : 'var(--border)'}`,
+                  }}>
+                  <img
+                    src={`https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons/32/color/${s.toLowerCase()}.png`}
+                    alt={s} className="w-5 h-5 rounded-full"
+                    onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                  />
+                  <span className="text-[9px] font-bold" style={{ color: symbol === s ? '#F0B90B' : 'var(--text-muted)' }}>{s}</span>
+                </button>
+              ))}
+            </div>
+            <div className="p-2 border-t" style={{ borderColor: 'var(--border)' }}>
+              <input
+                value={symbolSearch}
+                onChange={e => setSymbolSearch(e.target.value.toUpperCase().replace('USDT', ''))}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && symbolSearch.trim()) {
+                    setSymbol(symbolSearch.trim());
+                    setShowSymbolPicker(false);
+                    setSymbolSearch('');
+                  }
+                }}
+                placeholder={ar ? 'أو اكتب رمز العملة واضغط Enter' : 'Or type symbol + Enter'}
+                className="input text-xs uppercase"
+              />
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="card p-4 space-y-3">
@@ -146,19 +202,37 @@ function CreateForm({ lang, onCreated }: { lang: Lang; onCreated: () => void }) 
             {ar ? 'تلقائي' : 'Auto'}
           </button>
         </div>
-        <div className="flex items-center gap-3">
-          <input type="range" min={2} max={50} step={1}
-            value={gridCountManual ?? (preview?.grid_count ?? 10)}
-            onChange={e => setGridCountManual(Number(e.target.value))}
-            className="flex-1 accent-yellow-400"
-            style={{ accentColor: '#F0B90B' }} />
-          <div className="num font-bold text-lg w-10 text-center" style={{ color: '#60A5FA' }}>
-            {gridCountManual ?? (preview?.grid_count ?? '—')}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setGridCountManual(v => Math.max(2, (v ?? preview?.grid_count ?? 10) - 1))}
+            className="w-10 h-10 rounded-xl text-lg font-bold flex items-center justify-center shrink-0 transition-all"
+            style={{ background: 'rgba(255,82,82,0.12)', color: '#FF5252', border: '1px solid rgba(255,82,82,0.3)' }}>
+            −
+          </button>
+          <input
+            type="number" min={2} max={50}
+            value={gridCountManual ?? (preview?.grid_count ?? '')}
+            placeholder={gridCountManual === null ? (preview?.grid_count ? String(preview.grid_count) : ar ? 'تلقائي' : 'Auto') : ''}
+            onChange={e => {
+              const v = parseInt(e.target.value);
+              if (!e.target.value) { setGridCountManual(null); return; }
+              if (!isNaN(v)) setGridCountManual(Math.min(50, Math.max(2, v)));
+            }}
+            className="input flex-1 text-center font-black text-2xl num"
+            style={{ color: '#60A5FA' }}
+          />
+          <button
+            onClick={() => setGridCountManual(v => Math.min(50, (v ?? preview?.grid_count ?? 10) + 1))}
+            className="w-10 h-10 rounded-xl text-lg font-bold flex items-center justify-center shrink-0 transition-all"
+            style={{ background: 'rgba(0,230,118,0.12)', color: '#00E676', border: '1px solid rgba(0,230,118,0.3)' }}>
+            +
+          </button>
+        </div>
+        {gridCountManual === null && (
+          <div className="text-[10px] text-center" style={{ color: 'var(--text-muted)' }}>
+            {ar ? 'سيتم الحساب تلقائياً حسب المبلغ' : 'Auto-calculated from investment amount'}
           </div>
-        </div>
-        <div className="flex justify-between text-[10px]" style={{ color: 'var(--text-muted)' }}>
-          <span>2</span><span>50</span>
-        </div>
+        )}
       </div>
 
       {/* Mode selector */}

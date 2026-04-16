@@ -195,6 +195,8 @@ function CreateGridBotModal({ ar, onClose, onCreated }: {
   ar: boolean; onClose: () => void; onCreated: () => void;
 }) {
   const [symbol,           setSymbol]           = useState('BTC');
+  const [symbolSearch,     setSymbolSearch]     = useState('');
+  const [showSymbolPicker, setShowSymbolPicker] = useState(false);
   const [investment,       setInvestment]       = useState('');
   const [mode,             setMode]             = useState<'normal' | 'infinity'>('normal');
   const [gridCountManual,  setGridCountManual]  = useState<number | null>(null); // null = auto
@@ -228,7 +230,11 @@ function CreateGridBotModal({ ar, onClose, onCreated }: {
     finally { setCreating(false); }
   };
 
-  const POPULAR = ['BTC','ETH','SOL','BNB','XRP','TAO','AIA','FET'];
+  const POPULAR = ['BTC','ETH','SOL','BNB','XRP','TAO','AIA','FET','DOGE','ADA','AVAX','DOT','LINK','UNI','MATIC','LTC','ATOM','NEAR','APT','ARB'];
+
+  const filteredSymbols = symbolSearch.trim()
+    ? POPULAR.filter(s => s.includes(symbolSearch.toUpperCase()))
+    : POPULAR;
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center" style={{ background: 'rgba(0,0,0,0.8)' }} onClick={onClose}>
@@ -248,23 +254,86 @@ function CreateGridBotModal({ ar, onClose, onCreated }: {
           <div className="text-xs font-semibold" style={{ color: 'rgba(255,255,255,0.5)' }}>
             {ar ? 'العملة' : 'Symbol'}
           </div>
-          <div className="flex flex-wrap gap-2">
-            {POPULAR.map(s => (
-              <button key={s} onClick={() => setSymbol(s)}
-                className="px-3 py-1.5 rounded-xl text-xs font-bold"
-                style={{
-                  background: symbol === s ? 'rgba(240,185,11,0.15)' : 'rgba(255,255,255,0.06)',
-                  color: symbol === s ? '#F0B90B' : 'rgba(255,255,255,0.5)',
-                  border: `1px solid ${symbol === s ? 'rgba(240,185,11,0.4)' : 'rgba(255,255,255,0.1)'}`,
-                }}>
-                {s}
-              </button>
-            ))}
-          </div>
-          <input value={symbol} onChange={e => setSymbol(e.target.value.toUpperCase().replace('USDT', ''))}
-            placeholder="BTC" maxLength={10}
-            className="w-full rounded-xl px-3 py-2 text-sm font-bold outline-none uppercase"
-            style={{ background: 'rgba(255,255,255,0.06)', color: '#fff', border: '1px solid rgba(0,245,212,0.2)' }} />
+
+          {/* زر اختيار العملة الحالية */}
+          <button
+            onClick={() => setShowSymbolPicker(v => !v)}
+            className="w-full flex items-center justify-between px-4 py-3 rounded-2xl"
+            style={{
+              background: 'rgba(240,185,11,0.08)',
+              border: '1px solid rgba(240,185,11,0.35)',
+            }}
+          >
+            <div className="flex items-center gap-3">
+              <img
+                src={`https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons/32/color/${symbol.toLowerCase()}.png`}
+                alt={symbol}
+                className="w-7 h-7 rounded-full"
+                onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+              />
+              <span className="font-black text-lg" style={{ color: '#F0B90B' }}>{symbol}</span>
+              <span className="text-xs font-semibold" style={{ color: 'rgba(255,255,255,0.35)' }}>/USDT</span>
+            </div>
+            <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: 18 }}>
+              {showSymbolPicker ? '▲' : '▼'}
+            </span>
+          </button>
+
+          {/* قائمة الاختيار */}
+          {showSymbolPicker && (
+            <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid rgba(0,245,212,0.2)', background: '#0a1018' }}>
+              {/* بحث */}
+              <div className="p-2 border-b" style={{ borderColor: 'rgba(255,255,255,0.08)' }}>
+                <input
+                  autoFocus
+                  value={symbolSearch}
+                  onChange={e => setSymbolSearch(e.target.value.toUpperCase())}
+                  placeholder={ar ? 'ابحث عن عملة...' : 'Search coin...'}
+                  className="w-full rounded-xl px-3 py-2 text-sm outline-none"
+                  style={{ background: 'rgba(255,255,255,0.06)', color: '#fff', border: '1px solid rgba(0,245,212,0.15)' }}
+                />
+              </div>
+              {/* مقترحات */}
+              <div className="grid grid-cols-4 gap-1 p-2 max-h-48 overflow-y-auto">
+                {filteredSymbols.map(s => (
+                  <button
+                    key={s}
+                    onClick={() => { setSymbol(s); setShowSymbolPicker(false); setSymbolSearch(''); }}
+                    className="flex flex-col items-center gap-1 py-2 px-1 rounded-xl"
+                    style={{
+                      background: symbol === s ? 'rgba(240,185,11,0.15)' : 'rgba(255,255,255,0.04)',
+                      border: `1px solid ${symbol === s ? 'rgba(240,185,11,0.4)' : 'rgba(255,255,255,0.08)'}`,
+                    }}
+                  >
+                    <img
+                      src={`https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons/32/color/${s.toLowerCase()}.png`}
+                      alt={s}
+                      className="w-6 h-6 rounded-full"
+                      onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                    />
+                    <span className="text-[10px] font-bold" style={{ color: symbol === s ? '#F0B90B' : 'rgba(255,255,255,0.6)' }}>{s}</span>
+                  </button>
+                ))}
+              </div>
+              {/* إدخال يدوي */}
+              <div className="p-2 border-t" style={{ borderColor: 'rgba(255,255,255,0.08)' }}>
+                <input
+                  value={symbolSearch}
+                  onChange={e => setSymbolSearch(e.target.value.toUpperCase().replace('USDT', ''))}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && symbolSearch.trim()) {
+                      setSymbol(symbolSearch.trim());
+                      setShowSymbolPicker(false);
+                      setSymbolSearch('');
+                    }
+                  }}
+                  placeholder={ar ? 'أو اكتب رمز العملة واضغط Enter' : 'Or type symbol + Enter'}
+                  className="w-full rounded-xl px-3 py-2 text-xs outline-none uppercase"
+                  style={{ background: 'rgba(255,255,255,0.06)', color: '#fff', border: '1px solid rgba(0,245,212,0.15)' }}
+                />
+              </div>
+            </div>
+          )}
         </div>
 
         {/* المبلغ */}
@@ -331,19 +400,37 @@ function CreateGridBotModal({ ar, onClose, onCreated }: {
               {ar ? 'تلقائي' : 'Auto'}
             </button>
           </div>
-          <div className="flex items-center gap-3">
-            <input type="range" min={2} max={50} step={1}
-              value={gridCountManual ?? (preview?.grid_count ?? 10)}
-              onChange={e => setGridCountManual(Number(e.target.value))}
-              className="flex-1"
-              style={{ accentColor: '#60A5FA' }} />
-            <span className="font-bold text-base w-8 text-center" style={{ color: '#60A5FA' }}>
-              {gridCountManual ?? (preview?.grid_count ?? '—')}
-            </span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setGridCountManual(v => Math.max(2, (v ?? preview?.grid_count ?? 10) - 1))}
+              className="w-10 h-10 rounded-xl text-lg font-bold flex items-center justify-center shrink-0"
+              style={{ background: 'rgba(255,82,82,0.15)', color: '#FF5252', border: '1px solid rgba(255,82,82,0.3)' }}>
+              −
+            </button>
+            <input
+              type="number" min={2} max={50}
+              value={gridCountManual ?? (preview?.grid_count ?? '')}
+              placeholder={gridCountManual === null ? (preview?.grid_count ? String(preview.grid_count) : ar ? 'تلقائي' : 'Auto') : ''}
+              onChange={e => {
+                const v = parseInt(e.target.value);
+                if (!e.target.value) { setGridCountManual(null); return; }
+                if (!isNaN(v)) setGridCountManual(Math.min(50, Math.max(2, v)));
+              }}
+              className="flex-1 text-center font-black text-2xl rounded-xl px-3 py-2 outline-none"
+              style={{ background: 'rgba(255,255,255,0.06)', color: '#60A5FA', border: '1px solid rgba(96,165,250,0.3)' }}
+            />
+            <button
+              onClick={() => setGridCountManual(v => Math.min(50, (v ?? preview?.grid_count ?? 10) + 1))}
+              className="w-10 h-10 rounded-xl text-lg font-bold flex items-center justify-center shrink-0"
+              style={{ background: 'rgba(0,230,118,0.15)', color: '#00E676', border: '1px solid rgba(0,230,118,0.3)' }}>
+              +
+            </button>
           </div>
-          <div className="flex justify-between text-[10px]" style={{ color: 'rgba(255,255,255,0.3)' }}>
-            <span>2</span><span>50</span>
-          </div>
+          {gridCountManual === null && (
+            <div className="text-[10px] text-center" style={{ color: 'rgba(255,255,255,0.3)' }}>
+              {ar ? 'سيتم الحساب تلقائياً حسب المبلغ' : 'Auto-calculated from investment amount'}
+            </div>
+          )}
         </div>
 
         {/* النوع */}
