@@ -1528,8 +1528,9 @@ def api_create_grid_bot(body: GridBotCreate):
 
 
 @app.get("/api/grid-bots/preview")
-def api_grid_preview(symbol: str, investment: float, mode: str = "normal"):
-    """Return auto-calculated range and grid count without creating a bot."""
+def api_grid_preview(symbol: str, investment: float, mode: str = "normal", grid_count: int | None = None):
+    """Return auto-calculated (or user-specified) range and grid count without creating a bot.
+    Also returns free_usdt so the UI can warn when investment exceeds available balance."""
     try:
         client = MEXCClient()
         sym = symbol.upper()
@@ -1537,12 +1538,19 @@ def api_grid_preview(symbol: str, investment: float, mode: str = "normal"):
             sym += "USDT"
         price = client.get_price(sym)
         low, high = calculate_grid_range(client, sym)
-        count = calculate_grid_count(investment, low, high)
+        count = grid_count if (grid_count and grid_count >= 2) else calculate_grid_count(investment, low, high)
         step  = round((high - low) / count, 8)
         profit_per_grid_pct = round(step / low * 100, 4)
-        # Grid profit formula from spec:
-        # grid_profit = spread_per_grid * (investment / price_per_grid) * filled_grids
         usdt_per_grid = round(investment / count, 2)
+        # Fetch free USDT balance so the UI can show an insufficient-funds warning
+        try:
+            balances = client.get_spot_assets()
+            free_usdt = next(
+                (float(b.get("free", 0)) for b in balances if b.get("asset", "").upper() == "USDT"),
+                0.0,
+            )
+        except Exception:
+            free_usdt = None
         return {
             "symbol":               sym,
             "current_price":        price,
@@ -1553,8 +1561,8 @@ def api_grid_preview(symbol: str, investment: float, mode: str = "normal"):
             "step":                 step,
             "profit_per_grid_pct":  profit_per_grid_pct,
             "mode":                 mode,
-            # estimated grid profit per completed round-trip
             "est_profit_per_grid":  round(step / price * usdt_per_grid, 4),
+            "free_usdt":            round(free_usdt, 2) if free_usdt is not None else None,
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

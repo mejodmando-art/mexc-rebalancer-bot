@@ -194,31 +194,36 @@ function OrdersTable({ orders, ar }: { orders: any[]; ar: boolean }) {
 function CreateGridBotModal({ ar, onClose, onCreated }: {
   ar: boolean; onClose: () => void; onCreated: () => void;
 }) {
-  const [symbol,     setSymbol]     = useState('BTC');
-  const [investment, setInvestment] = useState('');
-  const [mode,       setMode]       = useState<'normal' | 'infinity'>('normal');
-  const [preview,    setPreview]    = useState<any>(null);
-  const [loading,    setLoading]    = useState(false);
-  const [creating,   setCreating]   = useState(false);
-  const [error,      setError]      = useState('');
+  const [symbol,           setSymbol]           = useState('BTC');
+  const [investment,       setInvestment]       = useState('');
+  const [mode,             setMode]             = useState<'normal' | 'infinity'>('normal');
+  const [gridCountManual,  setGridCountManual]  = useState<number | null>(null); // null = auto
+  const [preview,          setPreview]          = useState<any>(null);
+  const [loading,          setLoading]          = useState(false);
+  const [creating,         setCreating]         = useState(false);
+  const [error,            setError]            = useState('');
 
   useEffect(() => {
     const inv = parseFloat(investment);
     if (!symbol || inv < 1) { setPreview(null); return; }
     const t = setTimeout(async () => {
       setLoading(true);
-      try { setPreview(await previewGridBot(symbol, inv)); setError(''); }
+      try { setPreview(await previewGridBot(symbol, inv, gridCountManual ?? undefined)); setError(''); }
       catch (e: any) { setError(e.message); setPreview(null); }
       finally { setLoading(false); }
     }, 700);
     return () => clearTimeout(t);
-  }, [symbol, investment]);
+  }, [symbol, investment, gridCountManual]);
+
+  const inv = parseFloat(investment) || 0;
+  const freeUsdt: number | null = preview?.free_usdt ?? null;
+  const insufficient = freeUsdt !== null && inv > freeUsdt;
 
   const handleCreate = async () => {
-    const inv = parseFloat(investment);
-    if (!symbol || inv < 1) { setError(ar ? 'أدخل الزوج والمبلغ' : 'Enter symbol and amount'); return; }
+    const invNum = parseFloat(investment);
+    if (!symbol || invNum < 1) { setError(ar ? 'أدخل الزوج والمبلغ' : 'Enter symbol and amount'); return; }
     setCreating(true); setError('');
-    try { await createGridBot({ symbol, investment: inv, mode }); onCreated(); }
+    try { await createGridBot({ symbol, investment: invNum, mode, grid_count: gridCountManual ?? undefined }); onCreated(); }
     catch (e: any) { setError(e.message); }
     finally { setCreating(false); }
   };
@@ -264,13 +269,37 @@ function CreateGridBotModal({ ar, onClose, onCreated }: {
 
         {/* المبلغ */}
         <div className="space-y-2">
-          <div className="text-xs font-semibold" style={{ color: 'rgba(255,255,255,0.5)' }}>
-            {ar ? 'مبلغ الاستثمار (USDT)' : 'Investment (USDT)'}
+          <div className="flex items-center justify-between">
+            <div className="text-xs font-semibold" style={{ color: 'rgba(255,255,255,0.5)' }}>
+              {ar ? 'مبلغ الاستثمار (USDT)' : 'Investment (USDT)'}
+            </div>
+            {/* Free balance badge */}
+            {freeUsdt !== null && (
+              <div className="flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-lg"
+                style={{
+                  background: insufficient ? 'rgba(239,68,68,0.12)' : 'rgba(0,212,170,0.1)',
+                  color: insufficient ? '#EF4444' : '#00D4AA',
+                  border: `1px solid ${insufficient ? 'rgba(239,68,68,0.35)' : 'rgba(0,212,170,0.25)'}`,
+                }}>
+                <span>{ar ? 'الحر:' : 'Free:'}</span>
+                <span>${freeUsdt.toFixed(2)}</span>
+              </div>
+            )}
           </div>
           <input type="number" min={10} value={investment} onChange={e => setInvestment(e.target.value)}
             placeholder="100"
             className="w-full rounded-xl px-3 py-2 text-lg font-bold outline-none"
-            style={{ background: 'rgba(255,255,255,0.06)', color: '#fff', border: '1px solid rgba(0,245,212,0.2)' }} />
+            style={{
+              background: 'rgba(255,255,255,0.06)', color: '#fff',
+              border: `1px solid ${insufficient ? 'rgba(239,68,68,0.5)' : 'rgba(0,245,212,0.2)'}`,
+            }} />
+          {insufficient && (
+            <div className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-xl"
+              style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', color: '#EF4444' }}>
+              <span>⚠</span>
+              <span>{ar ? `رصيد غير كافٍ — المتاح ${freeUsdt!.toFixed(2)} USDT` : `Insufficient — available $${freeUsdt!.toFixed(2)}`}</span>
+            </div>
+          )}
           <div className="flex gap-2">
             {[30, 50, 100, 200].map(v => (
               <button key={v} onClick={() => setInvestment(String(v))}
@@ -283,6 +312,37 @@ function CreateGridBotModal({ ar, onClose, onCreated }: {
                 ${v}
               </button>
             ))}
+          </div>
+        </div>
+
+        {/* عدد الشبكات */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <div className="text-xs font-semibold" style={{ color: 'rgba(255,255,255,0.5)' }}>
+              {ar ? 'عدد الشبكات' : 'Grid Count'}
+            </div>
+            <button onClick={() => setGridCountManual(null)}
+              className="text-xs px-2 py-0.5 rounded-lg font-bold"
+              style={{
+                background: gridCountManual === null ? 'rgba(96,165,250,0.15)' : 'rgba(255,255,255,0.06)',
+                color: gridCountManual === null ? '#60A5FA' : 'rgba(255,255,255,0.4)',
+                border: `1px solid ${gridCountManual === null ? 'rgba(96,165,250,0.4)' : 'rgba(255,255,255,0.1)'}`,
+              }}>
+              {ar ? 'تلقائي' : 'Auto'}
+            </button>
+          </div>
+          <div className="flex items-center gap-3">
+            <input type="range" min={2} max={50} step={1}
+              value={gridCountManual ?? (preview?.grid_count ?? 10)}
+              onChange={e => setGridCountManual(Number(e.target.value))}
+              className="flex-1"
+              style={{ accentColor: '#60A5FA' }} />
+            <span className="font-bold text-base w-8 text-center" style={{ color: '#60A5FA' }}>
+              {gridCountManual ?? (preview?.grid_count ?? '—')}
+            </span>
+          </div>
+          <div className="flex justify-between text-[10px]" style={{ color: 'rgba(255,255,255,0.3)' }}>
+            <span>2</span><span>50</span>
           </div>
         </div>
 
@@ -328,14 +388,14 @@ function CreateGridBotModal({ ar, onClose, onCreated }: {
             style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.5)', border: '1px solid rgba(255,255,255,0.1)' }}>
             {ar ? 'إلغاء' : 'Cancel'}
           </button>
-          <button onClick={handleCreate} disabled={creating || !investment}
+          <button onClick={handleCreate} disabled={creating || !investment || insufficient}
             className="flex-1 py-3 rounded-2xl text-sm font-bold"
             style={{
-              background: creating || !investment ? 'rgba(255,255,255,0.06)' : 'rgba(0,245,212,0.15)',
-              color: creating || !investment ? 'rgba(255,255,255,0.3)' : '#00F5D4',
-              border: `1px solid ${creating || !investment ? 'rgba(255,255,255,0.1)' : 'rgba(0,245,212,0.35)'}`,
+              background: insufficient ? 'rgba(239,68,68,0.12)' : (creating || !investment ? 'rgba(255,255,255,0.06)' : 'rgba(0,245,212,0.15)'),
+              color: insufficient ? '#EF4444' : (creating || !investment ? 'rgba(255,255,255,0.3)' : '#00F5D4'),
+              border: `1px solid ${insufficient ? 'rgba(239,68,68,0.35)' : (creating || !investment ? 'rgba(255,255,255,0.1)' : 'rgba(0,245,212,0.35)')}`,
             }}>
-            {creating ? '...' : (ar ? 'إنشاء' : 'Create')}
+            {creating ? '...' : insufficient ? (ar ? '⚠ رصيد غير كافٍ' : '⚠ Insufficient') : (ar ? 'إنشاء' : 'Create')}
           </button>
         </div>
       </div>

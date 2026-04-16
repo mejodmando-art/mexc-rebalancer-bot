@@ -38,6 +38,7 @@ function CreateForm({ lang, onCreated }: { lang: Lang; onCreated: () => void }) 
   const [investment, setInvestment]       = useState('');
   const [mode, setMode]                   = useState<'normal' | 'infinity'>('normal');
   const [useBaseBalance, setUseBaseBalance] = useState(false);
+  const [gridCountManual, setGridCountManual] = useState<number | null>(null); // null = auto
   const [preview, setPreview]             = useState<any>(null);
   const [loading, setLoading]             = useState(false);
   const [creating, setCreating]           = useState(false);
@@ -47,19 +48,23 @@ function CreateForm({ lang, onCreated }: { lang: Lang; onCreated: () => void }) 
     const inv = parseFloat(investment);
     if (!symbol || inv < 1) { setPreview(null); return; }
     setLoading(true);
-    try { setPreview(await previewGridBot(symbol, inv)); setError(''); }
+    try { setPreview(await previewGridBot(symbol, inv, gridCountManual ?? undefined)); setError(''); }
     catch (e: any) { setError(e.message); setPreview(null); }
     finally { setLoading(false); }
-  }, [symbol, investment]);
+  }, [symbol, investment, gridCountManual]);
 
   useEffect(() => { const t = setTimeout(fetchPreview, 700); return () => clearTimeout(t); }, [fetchPreview]);
 
+  const inv = parseFloat(investment) || 0;
+  const freeUsdt: number | null = preview?.free_usdt ?? null;
+  const insufficient = freeUsdt !== null && inv > freeUsdt;
+
   const handleCreate = async () => {
-    const inv = parseFloat(investment);
-    if (!symbol || inv < 1) { setError(ar ? 'أدخل الزوج والمبلغ' : 'Enter symbol and amount'); return; }
+    const invNum = parseFloat(investment);
+    if (!symbol || invNum < 1) { setError(ar ? 'أدخل الزوج والمبلغ' : 'Enter symbol and amount'); return; }
     setCreating(true); setError('');
     try {
-      await createGridBot({ symbol, investment: inv, mode, use_base_balance: useBaseBalance });
+      await createGridBot({ symbol, investment: invNum, mode, use_base_balance: useBaseBalance, grid_count: gridCountManual ?? undefined });
       onCreated();
     }
     catch (e: any) { setError(e.message); }
@@ -88,12 +93,34 @@ function CreateForm({ lang, onCreated }: { lang: Lang; onCreated: () => void }) 
       </div>
 
       <div className="card p-4 space-y-3">
-        <div className="label">{ar ? 'مبلغ الاستثمار (USDT)' : 'Investment Amount (USDT)'}</div>
+        <div className="flex items-center justify-between">
+          <div className="label mb-0">{ar ? 'مبلغ الاستثمار (USDT)' : 'Investment Amount (USDT)'}</div>
+          {/* Free balance badge — only shown when preview has loaded */}
+          {freeUsdt !== null && (
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-bold"
+              style={{
+                background: insufficient ? 'rgba(239,68,68,0.12)' : 'rgba(0,212,170,0.1)',
+                border: `1px solid ${insufficient ? 'rgba(239,68,68,0.4)' : 'rgba(0,212,170,0.3)'}`,
+                color: insufficient ? '#EF4444' : '#00D4AA',
+              }}>
+              <span>{ar ? 'الحر:' : 'Free:'}</span>
+              <span className="num">${freeUsdt.toFixed(2)}</span>
+            </div>
+          )}
+        </div>
         <div className="relative">
           <input type="number" min={10} className="input ps-16 text-lg font-bold num"
-            value={investment} onChange={e => setInvestment(e.target.value)} placeholder="100" />
+            value={investment} onChange={e => setInvestment(e.target.value)} placeholder="100"
+            style={{ borderColor: insufficient ? 'rgba(239,68,68,0.5)' : undefined }} />
           <span className="absolute start-3 top-1/2 -translate-y-1/2 text-sm font-bold" style={{ color: 'var(--text-muted)' }}>USDT</span>
         </div>
+        {insufficient && (
+          <div className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold"
+            style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', color: '#EF4444' }}>
+            <span>⚠</span>
+            <span>{ar ? `رصيد غير كافٍ — المتاح ${freeUsdt!.toFixed(2)} USDT` : `Insufficient balance — available $${freeUsdt!.toFixed(2)} USDT`}</span>
+          </div>
+        )}
         <div className="flex gap-2">
           {[50,100,200,500].map(v => (
             <button key={v} onClick={() => setInvestment(String(v))}
@@ -102,6 +129,35 @@ function CreateForm({ lang, onCreated }: { lang: Lang; onCreated: () => void }) 
               ${v}
             </button>
           ))}
+        </div>
+      </div>
+
+      {/* Grid count selector */}
+      <div className="card p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="label mb-0">{ar ? 'عدد الشبكات' : 'Grid Count'}</div>
+          <button onClick={() => setGridCountManual(null)}
+            className="text-xs px-2.5 py-1 rounded-lg font-bold transition-all"
+            style={{
+              background: gridCountManual === null ? 'rgba(96,165,250,0.15)' : 'var(--bg-input)',
+              color: gridCountManual === null ? '#60A5FA' : 'var(--text-muted)',
+              border: `1px solid ${gridCountManual === null ? 'rgba(96,165,250,0.4)' : 'var(--border)'}`,
+            }}>
+            {ar ? 'تلقائي' : 'Auto'}
+          </button>
+        </div>
+        <div className="flex items-center gap-3">
+          <input type="range" min={2} max={50} step={1}
+            value={gridCountManual ?? (preview?.grid_count ?? 10)}
+            onChange={e => setGridCountManual(Number(e.target.value))}
+            className="flex-1 accent-yellow-400"
+            style={{ accentColor: '#F0B90B' }} />
+          <div className="num font-bold text-lg w-10 text-center" style={{ color: '#60A5FA' }}>
+            {gridCountManual ?? (preview?.grid_count ?? '—')}
+          </div>
+        </div>
+        <div className="flex justify-between text-[10px]" style={{ color: 'var(--text-muted)' }}>
+          <span>2</span><span>50</span>
         </div>
       </div>
 
@@ -170,9 +226,19 @@ function CreateForm({ lang, onCreated }: { lang: Lang; onCreated: () => void }) 
 
       {error && <div className="card p-3 text-sm text-red-400 border-red-800">{error}</div>}
 
-      <button onClick={handleCreate} disabled={creating || !investment} className="btn-accent w-full py-4 text-base"
-        style={{ background: 'linear-gradient(135deg,#F0B90B,#D4A017)', color: '#000', boxShadow: '0 4px 20px rgba(240,185,11,0.35)' }}>
-        {creating ? (ar ? '⏳ جاري الإنشاء...' : '⏳ Creating...') : (ar ? '⚡ إنشاء بوت الشبكات' : '⚡ Create Grid Bot')}
+      <button onClick={handleCreate} disabled={creating || !investment || insufficient} className="btn-accent w-full py-4 text-base"
+        style={{
+          background: insufficient ? 'rgba(239,68,68,0.15)' : 'linear-gradient(135deg,#F0B90B,#D4A017)',
+          color: insufficient ? '#EF4444' : '#000',
+          boxShadow: insufficient ? 'none' : '0 4px 20px rgba(240,185,11,0.35)',
+          border: insufficient ? '1px solid rgba(239,68,68,0.4)' : undefined,
+          opacity: creating ? 0.7 : 1,
+        }}>
+        {creating
+          ? (ar ? '⏳ جاري الإنشاء...' : '⏳ Creating...')
+          : insufficient
+            ? (ar ? '⚠ رصيد غير كافٍ' : '⚠ Insufficient Balance')
+            : (ar ? '⚡ إنشاء بوت الشبكات' : '⚡ Create Grid Bot')}
       </button>
     </div>
   );
