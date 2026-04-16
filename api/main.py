@@ -434,16 +434,23 @@ def _ensure_frontend_built() -> None:
     if not os.path.isdir(web_dir):
         log.warning("web/ directory not found — skipping frontend build")
         return
+    import shutil
     import subprocess
+    npm = shutil.which("npm")
+    if npm is None:
+        log.warning(
+            "static/index.html missing and npm is not available — "
+            "the frontend was not built. Deploy via nixpacks to include the UI."
+        )
+        return
     log.info("static/index.html missing — building Next.js frontend…")
     try:
-        subprocess.run(["npm", "install"], cwd=web_dir, check=True,
+        subprocess.run([npm, "install"], cwd=web_dir, check=True,
                        capture_output=True)
-        subprocess.run(["npm", "run", "build"], cwd=web_dir, check=True,
+        subprocess.run([npm, "run", "build"], cwd=web_dir, check=True,
                        capture_output=True)
         out_dir = os.path.join(web_dir, "out")
         if os.path.isdir(out_dir):
-            import shutil
             os.makedirs(_static_dir, exist_ok=True)
             shutil.copytree(out_dir, _static_dir, dirs_exist_ok=True)
             log.info("Frontend built and copied to static/")
