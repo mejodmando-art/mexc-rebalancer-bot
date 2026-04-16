@@ -320,15 +320,18 @@ def get_portfolio_value(
     result = []
     invalid_symbols = []
 
+    # Fetch all balances in one API call to avoid N+1 requests.
+    try:
+        all_balances = client.get_all_balances()
+    except Exception as e:
+        log.warning("get_all_balances failed: %s — falling back to per-asset calls", e)
+        all_balances = {}
+
     for a in assets:
         sym = a["symbol"]
         try:
-            if sym == "USDT":
-                balance = client.get_asset_balance("USDT")
-                price = 1.0
-            else:
-                balance = client.get_asset_balance(sym)
-                price = client.get_price(f"{sym}USDT")
+            balance = all_balances.get(sym.upper(), client.get_asset_balance(sym))
+            price = 1.0 if sym == "USDT" else client.get_price(f"{sym}USDT")
         except Exception as e:
             log.warning("Cannot fetch price for %s: %s – skipping", sym, e)
             invalid_symbols.append(sym)
@@ -365,11 +368,8 @@ def get_portfolio_value(
         total = sum(r["value_usdt"] for r in result)
         asset_symbols = {a["symbol"].upper() for a in assets}
         if "USDT" not in asset_symbols:
-            try:
-                usdt_free = client.get_asset_balance("USDT")
-                total += usdt_free
-            except Exception as e:
-                log.warning("Could not fetch free USDT balance: %s", e)
+            usdt_free = all_balances.get("USDT", 0.0)
+            total += usdt_free
         log.info("Portfolio total (live): %.2f USDT", total)
 
     for r in result:
@@ -382,7 +382,9 @@ def get_portfolio_value(
 # Rebalance execution
 # ---------------------------------------------------------------------------
 
-def execute_rebalance(client: MEXCClient, cfg: dict) -> list:
+def execute_rebalance(client: MEXCClient, cfg: dict,
+                      exclude_symbols: set[str] | None = None,
+                      portfolio_id: int = 1) -> list:
     """
     Rebalance logic:
     1. Compute the effective portfolio total = sum(asset values) + free USDT
@@ -393,23 +395,38 @@ def execute_rebalance(client: MEXCClient, cfg: dict) -> list:
 
     The effective total is recalculated after sells so that the USDT freed by
     selling is available for buys.
+
+    exclude_symbols: assets to skip entirely this cycle (e.g. already sold by
+    SL/TP — prevents the rebalancer from buying them back immediately).
     """
     paper = is_paper_trading(cfg)
+    exclude_symbols = {s.upper() for s in (exclude_symbols or set())}
 
     assets_cfg = cfg["portfolio"]["assets"]
     budget_usdt = cfg["portfolio"].get("total_usdt", 0)
     details = []
 
     log.info("Rebalance start | budget=%.2f USDT%s", budget_usdt, " [PAPER]" if paper else "")
+    if exclude_symbols:
+        log.info("Skipping SL/TP-triggered symbols this cycle: %s", exclude_symbols)
 
-    # ── Fetch current prices and balances ───────────────────────────────
+    # ── Fetch all balances in one API call, then prices per asset ────────
+    try:
+        all_balances = client.get_all_balances()
+    except Exception as e:
+        log.warning("get_all_balances failed: %s — falling back to per-asset calls", e)
+        all_balances = {}
+
     actuals = {}
+    lot_prec: dict[str, int] = {}   # sym → decimal places for base qty
     for a in assets_cfg:
         sym = a["symbol"]
         try:
-            balance = client.get_asset_balance(sym) if sym != "USDT" else client.get_asset_balance("USDT")
+            balance = all_balances.get(sym.upper(), client.get_asset_balance(sym))
             price   = client.get_price(f"{sym}USDT") if sym != "USDT" else 1.0
             actuals[sym] = {"balance": balance, "price": price, "value_usdt": balance * price}
+            if sym != "USDT":
+                lot_prec[sym] = client.get_lot_size_precision(f"{sym}USDT")
         except Exception as e:
             log.warning("Cannot fetch %s: %s", sym, e)
             actuals[sym] = {"balance": 0.0, "price": 0.0, "value_usdt": 0.0}
@@ -419,11 +436,8 @@ def execute_rebalance(client: MEXCClient, cfg: dict) -> list:
     # then cap at the user-defined budget so we never over-spend.
     asset_symbols = {a["symbol"].upper() for a in assets_cfg}
     assets_value = sum(actuals[sym]["value_usdt"] for sym in asset_symbols if sym != "USDT")
-    try:
-        free_usdt = client.get_asset_balance("USDT")
-    except Exception as e:
-        log.warning("Could not fetch free USDT: %s", e)
-        free_usdt = 0.0
+    # USDT balance already fetched in all_balances — no extra API call needed.
+    free_usdt = all_balances.get("USDT", 0.0)
 
     # Effective total = what we actually have, but never more than the budget.
     effective_total = min(assets_value + free_usdt, budget_usdt)
@@ -437,6 +451,21 @@ def execute_rebalance(client: MEXCClient, cfg: dict) -> list:
 
     for a in assets_cfg:
         sym        = a["symbol"]
+
+        # Skip assets already handled by SL/TP this cycle to avoid buying back
+        # immediately after a stop-loss or take-profit sell.
+        if sym.upper() in exclude_symbols:
+            log.info("%s skipped (SL/TP triggered this cycle)", sym)
+            details.append({
+                "symbol":     sym,
+                "target_pct": a["allocation_pct"],
+                "actual_pct": round(actuals[sym]["value_usdt"] / effective_total * 100, 2) if effective_total else 0,
+                "deviation":  0.0,
+                "diff_usdt":  0.0,
+                "action":     "SKIP_SL_TP",
+            })
+            continue
+
         target_val = round(effective_total * a["allocation_pct"] / 100, 2)
         actual_val = actuals[sym]["value_usdt"]
         diff       = round(actual_val - target_val, 2)   # + = زيادة → بيع، - = ناقص → شراء
@@ -465,12 +494,14 @@ def execute_rebalance(client: MEXCClient, cfg: dict) -> list:
         if sym == "USDT":
             details.append(entry)
             continue
-        qty = round(s["diff"] / s["price"], 8)
+        prec = lot_prec.get(sym, 8)
+        qty = round(s["diff"] / s["price"], prec)
         log.info("%sSELL %.8f %s (~%.2f$)", "[PAPER] " if paper else "", qty, sym, s["diff"])
         entry["action"] = "PAPER_SELL" if paper else "SELL"
         if not paper:
             try:
-                resp = client.place_market_sell(f"{sym}USDT", qty)
+                resp = client.place_market_sell(f"{sym}USDT", qty,
+                                                qty_precision=lot_prec.get(sym, 8))
                 log.info("Sell OK: %s", resp)
             except Exception as e:
                 log.error("Sell failed %s: %s", sym, e)
@@ -530,11 +561,11 @@ def execute_rebalance(client: MEXCClient, cfg: dict) -> list:
 
     # Persist to DB and config
     mode = cfg["rebalance"]["mode"]
-    record_rebalance(mode, effective_total, details, paper=paper)
+    record_rebalance(mode, effective_total, details, paper=paper, portfolio_id=portfolio_id)
     record_snapshot(effective_total, [
         {"symbol": a["symbol"], "value_usdt": round(effective_total * a["allocation_pct"] / 100, 2), "actual_pct": a["allocation_pct"]}
         for a in assets_cfg
-    ])
+    ], portfolio_id=portfolio_id)
 
     cfg["last_rebalance"] = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
     save_config(cfg)
@@ -542,7 +573,8 @@ def execute_rebalance(client: MEXCClient, cfg: dict) -> list:
     return details
 
 
-def execute_rebalance_equal(client: MEXCClient, cfg: dict) -> list:
+def execute_rebalance_equal(client: MEXCClient, cfg: dict,
+                            portfolio_id: int = 1) -> list:
     """
     Rebalance by redistributing equally across all assets regardless of
     their configured allocation_pct.  Temporarily overrides targets to
@@ -556,7 +588,7 @@ def execute_rebalance_equal(client: MEXCClient, cfg: dict) -> list:
     remainder = round(100.0 - base * (n - 1), 4)
     for i, a in enumerate(assets):
         a["allocation_pct"] = remainder if i == n - 1 else base
-    return execute_rebalance(client, cfg_eq)
+    return execute_rebalance(client, cfg_eq, portfolio_id=portfolio_id)
 
 
 def get_pnl(cfg: dict, current_usdt: float | None = None) -> dict:
@@ -586,24 +618,36 @@ def get_pnl(cfg: dict, current_usdt: float | None = None) -> dict:
 # Deviation check (proportional mode)
 # ---------------------------------------------------------------------------
 
-def needs_rebalance_proportional(client: MEXCClient, cfg: dict) -> bool:
+def needs_rebalance_proportional(client: MEXCClient, cfg: dict,
+                                  exclude_symbols: set[str] | None = None) -> bool:
     """Return True if any asset deviates >= min_deviation_to_execute_pct.
 
     Uses the same effective_total calculation as execute_rebalance:
     min(assets_value + free_usdt, budget_usdt).  This ensures the deviation
     check and the rebalance execution always agree on what the total is.
+
+    exclude_symbols: assets to ignore in the deviation check (e.g. already
+    handled by SL/TP this cycle).
     """
+    exclude_symbols = {s.upper() for s in (exclude_symbols or set())}
     assets_cfg = cfg["portfolio"]["assets"]
     min_dev = cfg["rebalance"]["proportional"]["min_deviation_to_execute_pct"]
     budget_usdt = cfg["portfolio"].get("total_usdt", 0)
 
     # Compute effective total the same way execute_rebalance does.
+    # Fetch all balances in one API call to avoid N+1 requests.
+    try:
+        all_balances = client.get_all_balances()
+    except Exception as e:
+        log.warning("get_all_balances failed: %s — falling back to per-asset calls", e)
+        all_balances = {}
+
     assets_value = 0.0
     actuals = {}
     for a in assets_cfg:
         sym = a["symbol"]
         try:
-            balance = client.get_asset_balance(sym) if sym != "USDT" else client.get_asset_balance("USDT")
+            balance = all_balances.get(sym.upper(), client.get_asset_balance(sym))
             price   = client.get_price(f"{sym}USDT") if sym != "USDT" else 1.0
             val = balance * price
         except Exception as e:
@@ -613,11 +657,7 @@ def needs_rebalance_proportional(client: MEXCClient, cfg: dict) -> bool:
         if sym != "USDT":
             assets_value += val
 
-    try:
-        free_usdt = client.get_asset_balance("USDT")
-    except Exception as e:
-        log.warning("Could not fetch free USDT for deviation check: %s", e)
-        free_usdt = 0.0
+    free_usdt = all_balances.get("USDT", 0.0)
 
     effective_total = min(assets_value + free_usdt, budget_usdt)
 
@@ -629,6 +669,9 @@ def needs_rebalance_proportional(client: MEXCClient, cfg: dict) -> bool:
 
     for a in assets_cfg:
         sym = a["symbol"]
+        if sym.upper() in exclude_symbols:
+            log.info("%s skipped (SL/TP triggered this cycle)", sym)
+            continue
         actual_pct = actuals[sym] / effective_total * 100
         deviation = abs(actual_pct - targets[sym])
         log.info(
@@ -802,12 +845,15 @@ def run(cfg: dict) -> None:
         try:
             while True:
                 log.info("--- Proportional check ---")
-                # SL/TP guard runs before rebalance
+                # SL/TP guard runs before rebalance.
+                # Symbols sold by SL/TP are excluded from rebalance this cycle
+                # to prevent the rebalancer from immediately buying them back.
                 triggered = check_sl_tp(client, cfg)
+                sl_tp_symbols = {t["symbol"] for t in triggered}
                 if triggered:
-                    log.info("SL/TP triggered for: %s", [t["symbol"] for t in triggered])
-                if needs_rebalance_proportional(client, cfg):
-                    execute_rebalance(client, cfg)
+                    log.info("SL/TP triggered for: %s", list(sl_tp_symbols))
+                if needs_rebalance_proportional(client, cfg, exclude_symbols=sl_tp_symbols):
+                    execute_rebalance(client, cfg, exclude_symbols=sl_tp_symbols)
                 else:
                     log.info("No rebalance needed.")
                 time.sleep(interval_sec)
@@ -826,13 +872,15 @@ def run(cfg: dict) -> None:
         try:
             while True:
                 now = datetime.utcnow()
-                # SL/TP guard runs every poll cycle regardless of schedule
+                # SL/TP guard runs every poll cycle regardless of schedule.
+                # Triggered symbols are excluded from the timed rebalance this cycle.
                 triggered = check_sl_tp(client, cfg)
+                sl_tp_symbols = {t["symbol"] for t in triggered}
                 if triggered:
-                    log.info("SL/TP triggered for: %s", [t["symbol"] for t in triggered])
+                    log.info("SL/TP triggered for: %s", list(sl_tp_symbols))
                 if now >= next_run:
                     log.info("--- Timed rebalance (%s) ---", frequency)
-                    execute_rebalance(client, cfg)
+                    execute_rebalance(client, cfg, exclude_symbols=sl_tp_symbols)
                     cfg = load_config()
                     frequency = cfg["rebalance"]["timed"]["frequency"]
                     target_hour = cfg["rebalance"]["timed"].get("hour", 0)

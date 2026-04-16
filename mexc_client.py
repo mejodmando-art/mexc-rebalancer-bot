@@ -93,10 +93,26 @@ class MEXCClient:
         data = self.get_account()
         return data.get("balances", [])
 
+    def get_all_balances(self) -> dict[str, float]:
+        """Return a symbol→free-balance map built from a single get_account() call.
+
+        Use this instead of calling get_asset_balance() per asset to avoid
+        making one API request per asset (N+1 pattern).
+        """
+        return {
+            a["asset"].upper(): float(a.get("free", 0))
+            for a in self.get_spot_assets()
+        }
+
     def get_asset_balance(self, symbol: str) -> float:
-        """Return free (available) balance for a single asset (e.g. 'BTC')."""
+        """Return free (available) balance for a single asset (e.g. 'BTC').
+
+        Makes one full get_account() call. When fetching multiple assets,
+        prefer get_all_balances() to avoid N+1 API calls.
+        """
+        sym = symbol.upper()
         for a in self.get_spot_assets():
-            if a.get("asset", "").upper() == symbol.upper():
+            if a.get("asset", "").upper() == sym:
                 return float(a.get("free", 0))
         return 0.0
 
@@ -129,6 +145,26 @@ class MEXCClient:
             return symbols[0]
         raise ValueError(f"Symbol info not found for {symbol}")
 
+    def get_lot_size_precision(self, symbol: str) -> int:
+        """Return the number of decimal places allowed for base-asset quantity.
+
+        Reads LOT_SIZE.stepSize from exchangeInfo. Falls back to 8 if the
+        filter is missing (safe default that MEXC will round server-side).
+        """
+        try:
+            info = self.get_symbol_info(symbol)
+            for f in info.get("filters", []):
+                if f.get("filterType") == "LOT_SIZE":
+                    step = f.get("stepSize", "0.00000001")
+                    # stepSize like "0.01" → 2 decimal places
+                    step_str = step.rstrip("0") or "1"
+                    if "." in step_str:
+                        return len(step_str.split(".")[1])
+                    return 0
+        except Exception as e:
+            log.warning("get_lot_size_precision(%s) failed: %s — defaulting to 8", symbol, e)
+        return 8
+
     # ------------------------------------------------------------------
     # Orders
     # ------------------------------------------------------------------
@@ -147,16 +183,21 @@ class MEXCClient:
         }
         return self._post("/api/v3/order", params)
 
-    def place_market_sell(self, symbol: str, base_size: float) -> dict:
+    def place_market_sell(self, symbol: str, base_size: float,
+                          qty_precision: int | None = None) -> dict:
         """
         Market sell using base currency amount.
         base_size: amount of the base asset to sell.
+        qty_precision: decimal places for quantity (from LOT_SIZE.stepSize).
+                       If None, reads it from exchangeInfo automatically.
         """
+        if qty_precision is None:
+            qty_precision = self.get_lot_size_precision(symbol)
         params = {
             "symbol": symbol,
             "side": "SELL",
             "type": "MARKET",
-            "quantity": str(round(base_size, 8)),
+            "quantity": str(round(base_size, qty_precision)),
         }
         return self._post("/api/v3/order", params)
 
