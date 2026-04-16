@@ -9,14 +9,12 @@ import {
 import {
   getStatus, getBotStatus,
   startBot, stopBot, triggerRebalance, cancelRebalance,
-  getRebalanceJobStatus, getAccountTotal, getConfig,
+  getRebalanceJobStatus, getAccountTotal,
   listPortfolios, activatePortfolio, rebalancePortfolio, startPortfolio,
   stopPortfolio, getPortfolioAssets, stopAndSellPortfolio, getHistory,
 } from '../lib/api';
 import { Lang, tr } from '../lib/i18n';
 import { useToast } from './Toast';
-import StatCard from './StatCard';
-import AssetsTable from './AssetsTable';
 
 interface Asset {
   symbol: string; target_pct: number; current_pct: number;
@@ -48,8 +46,7 @@ export default function Dashboard({ lang }: Props) {
   const [botRunning,   setBotRunning]   = useState(false);
   const [loading,      setLoading]      = useState(true);
   const [accountTotal, setAccountTotal] = useState<number | null>(null);
-  const [freeUsdt,     setFreeUsdt]     = useState<number | null>(null);
-  const [lockedUsdt,   setLockedUsdt]   = useState<number | null>(null);
+
   const [refreshing,   setRefreshing]   = useState(false);
   const autoRefreshRef = useRef(true);
 
@@ -60,7 +57,7 @@ export default function Dashboard({ lang }: Props) {
   const cancelIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [botLoading,      setBotLoading]      = useState(false);
   const [buyActivating,   setBuyActivating]   = useState(false);
-  const [investedUsdt,    setInvestedUsdt]    = useState<number | null>(null);
+
   const [portfolios,      setPortfolios]      = useState<any[]>([]);
   const [showBuyModal,    setShowBuyModal]    = useState(false);
   const [selectedPortId,  setSelectedPortId]  = useState<number | null>(null);
@@ -106,13 +103,9 @@ export default function Dashboard({ lang }: Props) {
       setBotRunning(bot?.running ?? false);
       getAccountTotal().then(r => {
         setAccountTotal(r.total_usdt);
-        setFreeUsdt(r.free_usdt   ?? null);
-        setLockedUsdt(r.locked_usdt ?? null);
+
       }).catch(() => {});
-      getConfig().then(cfg => {
-        const v = cfg?.portfolio?.total_usdt ?? cfg?.total_usdt ?? null;
-        setInvestedUsdt(typeof v === 'number' ? v : null);
-      }).catch(() => {});
+
       listPortfolios().then(list => {
         setPortfolios(list);
         if (selectedPortId === null && list.length > 0) {
@@ -417,120 +410,7 @@ export default function Dashboard({ lang }: Props) {
           )}
         </div>
 
-        {/* ── Balance breakdown 2×2 grid ────────────────────────────────── */}
-        {(() => {
-          const portfolioVal = status?.total_usdt ?? null;
-          const invested     = investedUsdt;
-          const activePort   = portfolios.find(p => p.active);
-          const portName     = activePort?.name ?? (lang === 'ar' ? 'المحفظة' : 'Portfolio');
 
-          const cells: { label: string; sub: string; value: number | null; color: string; glow: string }[] = [
-            {
-              label: lang === 'ar' ? 'المستثمر' : 'Invested',
-              sub:   portName,
-              value: invested,
-              color: '#A78BFA',
-              glow:  'rgba(167,139,250,0.35)',
-            },
-            {
-              label: lang === 'ar' ? 'قيمة المحفظة' : 'Portfolio',
-              sub:   `${status?.assets?.length ?? 0} ${lang === 'ar' ? 'عملة' : 'coins'}`,
-              value: portfolioVal,
-              color: '#00D4AA',
-              glow:  'rgba(0,212,170,0.35)',
-            },
-            {
-              label: lang === 'ar' ? 'الرصيد الحر' : 'Free',
-              sub:   lang === 'ar' ? 'متاح للتداول' : 'Available',
-              value: freeUsdt,
-              color: '#60A5FA',
-              glow:  'rgba(96,165,250,0.35)',
-            },
-            {
-              label: lang === 'ar' ? 'المحجوز' : 'Reserved',
-              sub:   lang === 'ar' ? 'أوردرات مفتوحة' : 'Open orders',
-              value: lockedUsdt,
-              color: '#F59E0B',
-              glow:  'rgba(245,158,11,0.35)',
-            },
-          ];
-
-          return (
-            <div className="grid grid-cols-2 gap-2 mt-3 mb-4">
-              {cells.map((cell, idx) => (
-                <div
-                  key={idx}
-                  className="rounded-2xl px-3 py-2.5 relative overflow-hidden"
-                  style={{
-                    background: `linear-gradient(135deg, ${cell.color}12 0%, rgba(15,10,40,0.7) 100%)`,
-                    border: `1px solid ${cell.color}22`,
-                    boxShadow: `inset 0 1px 0 rgba(255,255,255,0.06)`,
-                  }}
-                >
-                  {/* Corner glow */}
-                  <div className="absolute top-0 right-0 w-12 h-12 pointer-events-none"
-                    style={{ background: `radial-gradient(circle at top right, ${cell.color}20, transparent 70%)` }} />
-
-                  {/* Label */}
-                  <p className="text-[10px] font-semibold mb-1 truncate" style={{ color: cell.color, opacity: 0.9 }}>
-                    {cell.label}
-                  </p>
-
-                  {/* Value */}
-                  {loading && cell.value === null ? (
-                    <div className="skeleton h-5 w-16 rounded-md mb-1" />
-                  ) : (
-                    <p
-                      className="num font-black leading-none mb-1"
-                      style={{
-                        fontSize: '1.05rem',
-                        letterSpacing: '-0.03em',
-                        background: `linear-gradient(135deg, #ffffff 30%, ${cell.color} 100%)`,
-                        WebkitBackgroundClip: 'text',
-                        WebkitTextFillColor: 'transparent',
-                        backgroundClip: 'text',
-                        filter: `drop-shadow(0 0 6px ${cell.glow})`,
-                      }}
-                    >
-                      {cell.value !== null ? fmtUsd(cell.value) : '—'}
-                    </p>
-                  )}
-
-                  {/* Sub */}
-                  <p className="text-[9px] truncate" style={{ color: 'var(--text-muted)' }}>
-                    {cell.sub}
-                  </p>
-
-                  {/* Bottom accent line */}
-                  <div className="absolute bottom-0 left-0 right-0 h-px"
-                    style={{ background: `linear-gradient(90deg, ${cell.color}40, transparent)` }} />
-                </div>
-              ))}
-            </div>
-          );
-        })()}
-
-        {/* Progress bar */}
-        {investedUsdt !== null && accountTotal !== null && accountTotal > 0 && (
-          <div className="mb-4">
-            <div className="h-1.5 rounded-full w-full" style={{ background: 'rgba(123,92,245,0.15)' }}>
-              <div
-                className="h-full rounded-full transition-all duration-1000"
-                style={{
-                  width: `${Math.min((investedUsdt / accountTotal) * 100, 100)}%`,
-                  background: 'linear-gradient(90deg, #00D4AA, #7B5CF5)',
-                  boxShadow: '0 0 8px rgba(0,212,170,0.5)',
-                }}
-              />
-            </div>
-            <div className="flex justify-between mt-1">
-              <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>0%</span>
-              <span className="text-[10px] font-semibold" style={{ color: '#00D4AA' }}>
-                {accountTotal > 0 ? ((investedUsdt / accountTotal) * 100).toFixed(1) : 0}% {lang === 'ar' ? 'مستثمر' : 'invested'}
-              </span>
-            </div>
-          </div>
-        )}
 
       </div>
 
@@ -555,294 +435,6 @@ export default function Dashboard({ lang }: Props) {
         </div>
       )}
 
-      {/* ── Coin list section removed ── */}
-      {false && <div className="animate-fade-up space-y-3" style={{ animationDelay: '0.15s' }}>
-        <div className="flex items-center justify-between">
-          <h2 className="font-bold text-base" style={{ color: 'var(--text-main)' }}>
-            {lang === 'ar' ? 'توزيع العملات' : 'Coin Allocation'}
-          </h2>
-          <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
-            {lang === 'ar' ? 'اضغط لعرض الشارت' : 'Tap to view chart'}
-          </span>
-        </div>
-
-        {/* Selector bar */}
-        {portfolios.length > 0 && (
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
-              {lang === 'ar' ? 'عرض:' : 'View:'}
-            </span>
-
-            {/* All button */}
-            <button
-              onClick={() => { setViewPortId('all'); setShowPortPicker(false); }}
-              className="px-3 py-1.5 rounded-xl text-xs font-bold transition-all"
-              style={{
-                background: viewPortId === 'all' ? 'rgba(123,92,245,0.25)' : 'rgba(123,92,245,0.08)',
-                color: viewPortId === 'all' ? '#A78BFA' : 'var(--text-muted)',
-                border: `1px solid ${viewPortId === 'all' ? 'rgba(123,92,245,0.5)' : 'rgba(123,92,245,0.15)'}`,
-                boxShadow: viewPortId === 'all' ? '0 0 12px rgba(123,92,245,0.2)' : 'none',
-              }}
-            >
-              {lang === 'ar' ? '📂 الجميع' : '📂 All'}
-            </button>
-
-            {/* Individual portfolio buttons */}
-            {portfolios.map(p => (
-              <button
-                key={p.id}
-                onClick={() => { setViewPortId(p.id); setShowPortPicker(false); }}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all"
-                style={{
-                  background: viewPortId === p.id ? 'rgba(123,92,245,0.25)' : 'rgba(123,92,245,0.08)',
-                  color: viewPortId === p.id ? '#A78BFA' : 'var(--text-muted)',
-                  border: `1px solid ${viewPortId === p.id ? 'rgba(123,92,245,0.5)' : 'rgba(123,92,245,0.15)'}`,
-                  boxShadow: viewPortId === p.id ? '0 0 12px rgba(123,92,245,0.2)' : 'none',
-                  maxWidth: 140,
-                }}
-              >
-                <span
-                  className="w-1.5 h-1.5 rounded-full shrink-0"
-                  style={{ background: p.running ? '#00D4AA' : 'var(--text-muted)' }}
-                />
-                <span className="truncate">{p.name}</span>
-              </button>
-            ))}
-          </div>
-        )}
-
-        {/* ── Single portfolio view ── */}
-        {viewPortId !== 'all' && (
-          <div className="card p-4">
-            {(() => {
-              const portData = allPortAssets[viewPortId as number];
-              const port = portfolios.find(p => p.id === viewPortId);
-              const isRunning = portData?.running ?? port?.running ?? false;
-              const hasBalance = (freeUsdt ?? 0) > 1;
-              return (
-                <>
-                  <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-                    <div className="flex items-center gap-2">
-                      <h2 className="section-title mb-0">{port?.name ?? tr('assetTable', lang)}</h2>
-                      {isRunning && (
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full animate-pulse"
-                          style={{ background: 'rgba(34,197,94,0.15)', color: '#22c55e' }}>
-                          ▶ {lang === 'ar' ? 'شغّالة' : 'Running'}
-                        </span>
-                      )}
-                      {portData?.mode && (
-                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
-                          style={{ background: 'var(--bg-input)', color: 'var(--accent)' }}>
-                          {portData.mode}
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {portData?.total_usdt != null && (
-                        <span className="num text-sm font-bold" style={{ color: 'var(--accent)' }}>
-                          ${portData.total_usdt.toLocaleString('en-US', { maximumFractionDigits: 2 })}
-                        </span>
-                      )}
-                      <span className="badge" style={{ background: 'var(--bg-input)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}>
-                        {portData?.assets?.length ?? 0} {lang === 'ar' ? 'عملة' : 'coins'}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* ── Action bar ── */}
-                  {port && (
-                    <div className="flex gap-1.5 mb-3 flex-wrap">
-                      <button
-                        onClick={() => { setSelectedPortId(port.id); setShowBuyModal(true); }}
-                        disabled={!hasBalance || buyActivating}
-                        className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-bold transition-all flex-1"
-                        style={{
-                          background: hasBalance ? 'rgba(0,212,170,0.15)' : 'rgba(255,255,255,0.04)',
-                          color: hasBalance ? '#00D4AA' : 'var(--text-muted)',
-                          border: `1px solid ${hasBalance ? 'rgba(0,212,170,0.35)' : 'rgba(255,255,255,0.08)'}`,
-                          opacity: hasBalance ? 1 : 0.45,
-                        }}
-                      >
-                        <ShoppingCart size={11} />
-                        {lang === 'ar' ? 'شراء وتفعيل' : 'Buy & Activate'}
-                      </button>
-                      <button
-                        onClick={() => handleStopAndSell(port)}
-                        disabled={!isRunning || sellingPort === port.id}
-                        className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-bold transition-all flex-1"
-                        style={{
-                          background: isRunning ? 'rgba(255,123,114,0.15)' : 'rgba(255,255,255,0.04)',
-                          color: isRunning ? '#FF7B72' : 'var(--text-muted)',
-                          border: `1px solid ${isRunning ? 'rgba(255,123,114,0.35)' : 'rgba(255,255,255,0.08)'}`,
-                          opacity: isRunning ? 1 : 0.45,
-                        }}
-                      >
-                        {sellingPort === port.id ? <RefreshCw size={11} className="spin" /> : <Square size={11} />}
-                        {lang === 'ar' ? 'إيقاف وبيع' : 'Stop & Sell'}
-                      </button>
-                      <button
-                        onClick={() => handlePortfolioRebalance(port)}
-                        disabled={rebalancingPort === port.id}
-                        className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-bold transition-all flex-1"
-                        style={{
-                          background: 'rgba(123,92,245,0.15)',
-                          color: '#A78BFA',
-                          border: '1px solid rgba(123,92,245,0.35)',
-                        }}
-                      >
-                        {rebalancingPort === port.id ? <RefreshCw size={11} className="spin" /> : <Zap size={11} />}
-                        {lang === 'ar' ? 'موازنة' : 'Rebalance'}
-                      </button>
-                      <button
-                        onClick={() => handleShowHistory(port)}
-                        className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-bold transition-all flex-1"
-                        style={{
-                          background: 'rgba(96,165,250,0.12)',
-                          color: '#60A5FA',
-                          border: '1px solid rgba(96,165,250,0.25)',
-                        }}
-                      >
-                        <History size={11} />
-                        {lang === 'ar' ? 'السجل' : 'History'}
-                      </button>
-                    </div>
-                  )}
-
-                  <AssetsTable
-                    assets={portData?.assets ?? []}
-                    loading={loadingPortAssets && !portData}
-                    lang={lang}
-                    onRefresh={() => fetchAll(true)}
-                  />
-                </>
-              );
-            })()}
-          </div>
-        )}
-
-        {/* ── All portfolios view ── */}
-        {viewPortId === 'all' && (
-          <div className="space-y-4">
-            {portfolios.length === 0 ? (
-              <div className="card p-4">
-                <AssetsTable assets={status?.assets ?? []} loading={loading} lang={lang} onRefresh={() => fetchAll(true)} />
-              </div>
-            ) : (
-              portfolios.map(p => {
-                const portData = allPortAssets[p.id];
-                const hasBalance = (freeUsdt ?? 0) > 1;
-                const isRunning = p.running;
-                return (
-                  <div key={p.id} className="card p-4"
-                    style={isRunning ? { border: '1px solid rgba(0,212,170,0.3)', boxShadow: '0 0 20px rgba(0,212,170,0.08)' } : {}}>
-                    {/* Portfolio header */}
-                    <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <h2 className="section-title mb-0">{p.name}</h2>
-                        {isRunning && (
-                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full animate-pulse"
-                            style={{ background: 'rgba(34,197,94,0.15)', color: '#22c55e' }}>
-                            ▶ {lang === 'ar' ? 'شغّالة' : 'Running'}
-                          </span>
-                        )}
-                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
-                          style={{ background: 'var(--bg-input)', color: 'var(--accent)' }}>
-                          {p.mode}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {portData?.total_usdt != null && (
-                          <span className="num text-sm font-bold" style={{ color: 'var(--accent)' }}>
-                            ${portData.total_usdt.toLocaleString('en-US', { maximumFractionDigits: 2 })}
-                          </span>
-                        )}
-                        <span className="badge" style={{ background: 'var(--bg-input)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}>
-                          {portData?.assets?.length ?? p.assets?.length ?? 0} {lang === 'ar' ? 'عملة' : 'coins'}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* ── Action bar ── */}
-                    <div className="flex gap-1.5 mb-3 flex-wrap">
-                      {/* شراء وتفعيل */}
-                      <button
-                        onClick={() => { setSelectedPortId(p.id); setShowBuyModal(true); }}
-                        disabled={!hasBalance || buyActivating}
-                        className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-bold transition-all flex-1"
-                        style={{
-                          background: hasBalance ? 'rgba(0,212,170,0.15)' : 'rgba(255,255,255,0.04)',
-                          color: hasBalance ? '#00D4AA' : 'var(--text-muted)',
-                          border: `1px solid ${hasBalance ? 'rgba(0,212,170,0.35)' : 'rgba(255,255,255,0.08)'}`,
-                          opacity: hasBalance ? 1 : 0.45,
-                        }}
-                      >
-                        <ShoppingCart size={11} />
-                        {lang === 'ar' ? 'شراء وتفعيل' : 'Buy & Activate'}
-                      </button>
-
-                      {/* إيقاف وبيع */}
-                      <button
-                        onClick={() => handleStopAndSell(p)}
-                        disabled={!isRunning || sellingPort === p.id}
-                        className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-bold transition-all flex-1"
-                        style={{
-                          background: isRunning ? 'rgba(255,123,114,0.15)' : 'rgba(255,255,255,0.04)',
-                          color: isRunning ? '#FF7B72' : 'var(--text-muted)',
-                          border: `1px solid ${isRunning ? 'rgba(255,123,114,0.35)' : 'rgba(255,255,255,0.08)'}`,
-                          opacity: isRunning ? 1 : 0.45,
-                        }}
-                      >
-                        {sellingPort === p.id
-                          ? <RefreshCw size={11} className="spin" />
-                          : <Square size={11} />}
-                        {lang === 'ar' ? 'إيقاف وبيع' : 'Stop & Sell'}
-                      </button>
-
-                      {/* إعادة موازنة */}
-                      <button
-                        onClick={() => handlePortfolioRebalance(p)}
-                        disabled={rebalancingPort === p.id}
-                        className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-bold transition-all flex-1"
-                        style={{
-                          background: 'rgba(123,92,245,0.15)',
-                          color: '#A78BFA',
-                          border: '1px solid rgba(123,92,245,0.35)',
-                        }}
-                      >
-                        {rebalancingPort === p.id
-                          ? <RefreshCw size={11} className="spin" />
-                          : <Zap size={11} />}
-                        {lang === 'ar' ? 'موازنة' : 'Rebalance'}
-                      </button>
-
-                      {/* سجل العمليات */}
-                      <button
-                        onClick={() => handleShowHistory(p)}
-                        className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-bold transition-all flex-1"
-                        style={{
-                          background: 'rgba(96,165,250,0.12)',
-                          color: '#60A5FA',
-                          border: '1px solid rgba(96,165,250,0.25)',
-                        }}
-                      >
-                        <History size={11} />
-                        {lang === 'ar' ? 'السجل' : 'History'}
-                      </button>
-                    </div>
-
-                    <AssetsTable
-                      assets={portData?.assets ?? []}
-                      loading={loadingPortAssets && !portData}
-                      lang={lang}
-                      onRefresh={() => fetchAll(true)}
-                    />
-                  </div>
-                );
-              })
-            )}
-          </div>
-        )}
-      </div>}
 
       {/* History modal */}
       {historyPort && (
