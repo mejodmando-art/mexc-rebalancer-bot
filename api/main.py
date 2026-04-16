@@ -412,9 +412,10 @@ class ApiKeyAuthMiddleware(BaseHTTPMiddleware):
         "/docs",
         "/openapi.json",
         "/redoc",
-        # NOTE: /api/status, /api/history, /api/snapshots, /api/config are
-        # intentionally NOT public — they expose balances and trade history.
-        # They require API_AUTH_KEY when that env var is set.
+        # /api/status is public so dashboards and health checks work without auth.
+        # /api/history, /api/snapshots, /api/config are intentionally NOT listed
+        # here — they expose trade history and config and require API_AUTH_KEY.
+        "/api/status",
         "/api/rebalance/status/",
         "/api/mexc/status",
         "/api/db/status",
