@@ -565,7 +565,8 @@ def execute_rebalance(client: MEXCClient, cfg: dict, _portfolio_id: int | None =
 
     # Persist to DB and config
     mode = cfg["rebalance"]["mode"]
-    record_rebalance(mode, effective_total, details, paper=paper)
+    _pid_for_db = _portfolio_id if _portfolio_id is not None else 1
+    record_rebalance(mode, effective_total, details, paper=paper, portfolio_id=_pid_for_db)
 
     # Snapshot uses actual post-rebalance balances, not theoretical targets.
     # Re-fetch balances so failed orders don't corrupt the P&L chart.
@@ -583,10 +584,13 @@ def execute_rebalance(client: MEXCClient, cfg: dict, _portfolio_id: int | None =
             "value_usdt": val,
             "actual_pct": round(val / effective_total * 100, 2) if effective_total else 0,
         })
-    record_snapshot(effective_total, snapshot_assets)
+    record_snapshot(effective_total, snapshot_assets, portfolio_id=_pid_for_db)
 
     cfg["last_rebalance"] = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
-    save_config(cfg, portfolio_id=_portfolio_id)
+    # _skip_save is set by execute_rebalance_equal to prevent overwriting the
+    # user's original allocation_pct values; it handles the save itself.
+    if not cfg.get("_skip_save"):
+        save_config(cfg, portfolio_id=_portfolio_id)
 
     return details
 
@@ -594,24 +598,27 @@ def execute_rebalance(client: MEXCClient, cfg: dict, _portfolio_id: int | None =
 def execute_rebalance_equal(client: MEXCClient, cfg: dict, _portfolio_id: int | None = None) -> list:
     """
     Rebalance by redistributing equally across all assets regardless of
-    their configured allocation_pct.  Uses a deep copy so the user's
-    original allocation percentages are never overwritten in the DB.
+    their configured allocation_pct.
+
+    Uses a deep copy for execution so the user's original allocation_pct
+    values are never written to the DB.  execute_rebalance internally calls
+    save_config(cfg_eq) which would overwrite user allocations — we prevent
+    this by passing a sentinel flag and doing the save ourselves with the
+    original cfg after execution completes.
     """
     import copy
     cfg_eq = copy.deepcopy(cfg)
+    # Mark the copy so execute_rebalance skips its own save_config call.
+    cfg_eq["_skip_save"] = True
     assets = cfg_eq["portfolio"]["assets"]
     n = len(assets)
     base = round(100.0 / n, 4)
     remainder = round(100.0 - base * (n - 1), 4)
     for i, a in enumerate(assets):
         a["allocation_pct"] = remainder if i == n - 1 else base
-    # Pass _portfolio_id so save_config targets the right portfolio.
-    # The deep-copied cfg_eq carries equal allocations only for execution;
-    # the original cfg (with user allocations) is untouched in the DB because
-    # save_config inside execute_rebalance will write cfg_eq — but we restore
-    # the original allocations before saving to avoid overwriting user config.
     result = execute_rebalance(client, cfg_eq, _portfolio_id=_portfolio_id)
-    # Restore original allocations in DB so user config is preserved.
+    # Save original config (with user allocations) back to DB, only updating
+    # last_rebalance timestamp from the execution.
     cfg["last_rebalance"] = cfg_eq.get("last_rebalance", cfg.get("last_rebalance"))
     save_config(cfg, portfolio_id=_portfolio_id)
     return result
@@ -644,8 +651,15 @@ def get_pnl(cfg: dict, current_usdt: float | None = None) -> dict:
 # Deviation check (proportional mode)
 # ---------------------------------------------------------------------------
 
-def needs_rebalance_proportional(client: MEXCClient, cfg: dict) -> bool:
+def needs_rebalance_proportional(
+    client: MEXCClient,
+    cfg: dict,
+    skip_symbols: set[str] | None = None,
+) -> bool:
     """Return True if any asset deviates >= min_deviation_to_execute_pct.
+
+    skip_symbols: assets to exclude from the check (e.g. ones just sold by
+    SL/TP this cycle) so the rebalancer doesn't immediately buy them back.
 
     Uses the same effective_total calculation as execute_rebalance:
     min(assets_value + free_usdt, budget_usdt).  This ensures the deviation
@@ -654,6 +668,7 @@ def needs_rebalance_proportional(client: MEXCClient, cfg: dict) -> bool:
     assets_cfg = cfg["portfolio"]["assets"]
     min_dev = cfg["rebalance"]["proportional"]["min_deviation_to_execute_pct"]
     budget_usdt = cfg["portfolio"].get("total_usdt", 0)
+    skip_symbols = skip_symbols or set()
 
     # Compute effective total the same way execute_rebalance does.
     assets_value = 0.0
@@ -687,6 +702,9 @@ def needs_rebalance_proportional(client: MEXCClient, cfg: dict) -> bool:
 
     for a in assets_cfg:
         sym = a["symbol"]
+        if sym in skip_symbols:
+            log.info("%s skipped in deviation check (SL/TP triggered this cycle)", sym)
+            continue
         actual_pct = actuals[sym] / effective_total * 100
         deviation = abs(actual_pct - targets[sym])
         log.info(
@@ -793,14 +811,28 @@ def check_sl_tp(client: MEXCClient, cfg: dict) -> list[dict]:
                 "%s %s triggered | entry=%.4f current=%.4f change=%.2f%%",
                 sym, action, entry_price, current_price, change_pct,
             )
+            sold = False
             if not paper:
                 try:
                     balance = client.get_asset_balance(sym)
                     if balance > 0:
                         resp = client.place_market_sell(f"{sym}USDT", balance)
                         log.info("%s sell OK: %s", action, resp)
+                        sold = True
                 except Exception as e:
                     log.error("%s sell failed for %s: %s", action, sym, e)
+            else:
+                sold = True  # paper mode: treat as sold
+
+            # Clear entry_price_usdt so this trigger doesn't re-fire every
+            # cycle after the asset has been sold.
+            if sold:
+                a["entry_price_usdt"] = None
+                try:
+                    save_config(cfg)
+                except Exception as e:
+                    log.warning("Could not clear entry_price after %s for %s: %s", action, sym, e)
+
             triggered.append({
                 "symbol": sym,
                 "action": action,

@@ -401,13 +401,13 @@ def init_db() -> None:
 # Rebalance history
 # ---------------------------------------------------------------------------
 
-def record_rebalance(mode: str, total_usdt: float, details: list, paper: bool = False) -> None:
+def record_rebalance(mode: str, total_usdt: float, details: list, paper: bool = False, portfolio_id: int = 1) -> None:
     try:
         with _conn() as conn:
             cur = conn.cursor()
             cur.execute(
-                _q("INSERT INTO rebalance_history (ts, mode, total_usdt, details, paper) VALUES (?,?,?,?,?)"),
-                (datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"), mode, total_usdt, json.dumps(details), int(paper)),
+                _q("INSERT INTO rebalance_history (ts, mode, total_usdt, details, paper, portfolio_id) VALUES (?,?,?,?,?,?)"),
+                (datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"), mode, total_usdt, json.dumps(details), int(paper), portfolio_id),
             )
     except Exception as e:
         log.error("record_rebalance failed: %s", e)
@@ -435,13 +435,13 @@ def get_rebalance_history(limit: int = 10) -> list:
 # Portfolio snapshots
 # ---------------------------------------------------------------------------
 
-def record_snapshot(total_usdt: float, assets: list) -> None:
+def record_snapshot(total_usdt: float, assets: list, portfolio_id: int = 1) -> None:
     try:
         with _conn() as conn:
             cur = conn.cursor()
             cur.execute(
-                _q("INSERT INTO portfolio_snapshots (ts, total_usdt, assets_json) VALUES (?,?,?)"),
-                (datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"), total_usdt, json.dumps(assets)),
+                _q("INSERT INTO portfolio_snapshots (ts, total_usdt, assets_json, portfolio_id) VALUES (?,?,?,?)"),
+                (datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"), total_usdt, json.dumps(assets), portfolio_id),
             )
     except Exception as e:
         log.error("record_snapshot failed: %s", e)

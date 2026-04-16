@@ -143,7 +143,7 @@ def _make_loop(portfolio_id: int, stop_event: threading.Event) -> None:
 
                 if current_mode == "proportional":
                     interval = cfg["rebalance"]["proportional"]["check_interval_minutes"] * 60
-                    if needs_rebalance_proportional(client, cfg):
+                    if needs_rebalance_proportional(client, cfg, skip_symbols=sl_tp_triggered_syms):
                         with rebalance_lock:
                             # Re-read cfg inside the lock so we have the latest state.
                             cfg = db_get_portfolio(portfolio_id) or cfg
@@ -207,7 +207,10 @@ def _start_portfolio_loop(portfolio_id: int) -> None:
             "thread": t, "stop": stop_ev,
             "error": None, "started_at": None,
         }
-    t.start()
+        # Start inside the lock so no concurrent caller can see is_alive()==False
+        # between the dict write and the actual thread start, which would cause
+        # a second thread to be created for the same portfolio.
+        t.start()
     set_bot_running(portfolio_id, True)
 
 
@@ -260,7 +263,7 @@ def _run_rebalance_with_cancel(job_id: str, client: MEXCClient, cfg: dict, portf
     rebalance_lock = _get_rebalance_lock(portfolio_id) if portfolio_id is not None else threading.Lock()
     try:
         with rebalance_lock:
-            result = execute_rebalance(client, cfg, _portfolio_id=portfolio_id)
+            result = execute_rebalance(client, cfg, _portfolio_id=portfolio_id)  # portfolio_id passed for correct DB targeting
         entry["result"] = result
     except Exception as e:
         entry["result"] = [{"error": str(e)}]
