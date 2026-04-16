@@ -1,9 +1,9 @@
 'use client';
 
-import { Moon, Sun, BarChart2, Wallet, Settings, Bot } from 'lucide-react';
+import { Moon, Sun, BarChart2, Wallet, Bot } from 'lucide-react';
 import { Lang, tr } from '../lib/i18n';
 
-type Tab = 'dashboard' | 'portfolios' | 'create' | 'settings' | 'copy' | 'grid' | 'portfolio-settings';
+type Tab = 'dashboard' | 'portfolios' | 'create' | 'copy' | 'grid';
 
 interface NavbarProps {
   active: Tab;
@@ -15,9 +15,7 @@ interface NavbarProps {
   onThemeToggle: () => void;
 }
 
-// Unified accent: purple/violet palette for all tabs, with per-tab tint
 const TABS: { key: Tab; icon: React.ElementType; labelKey: string; color: string; glow: string }[] = [
-  { key: 'settings',   icon: Settings,  labelKey: 'settings',     color: '#A78BFA', glow: 'rgba(167,139,250,0.45)' },
   { key: 'grid',       icon: Bot,       labelKey: 'gridBot',      color: '#818CF8', glow: 'rgba(129,140,248,0.45)' },
   { key: 'portfolios', icon: Wallet,    labelKey: 'myPortfolios', color: '#60A5FA', glow: 'rgba(96,165,250,0.45)' },
   { key: 'dashboard',  icon: BarChart2, labelKey: 'dashboard',    color: '#34D399', glow: 'rgba(52,211,153,0.45)' },
