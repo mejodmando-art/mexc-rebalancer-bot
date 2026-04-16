@@ -4,14 +4,14 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import {
   DollarSign, Wallet, TrendingUp, TrendingDown,
   Play, Square, RefreshCw, Zap,
-  CheckCircle2, XCircle,
+  CheckCircle2, XCircle, ShoppingCart, History,
 } from 'lucide-react';
 import {
   getStatus, getBotStatus,
   startBot, stopBot, triggerRebalance, cancelRebalance,
   getRebalanceJobStatus, getAccountTotal, getConfig,
   listPortfolios, activatePortfolio, rebalancePortfolio, startPortfolio,
-  stopPortfolio, getPortfolioAssets,
+  stopPortfolio, getPortfolioAssets, stopAndSellPortfolio, getHistory,
 } from '../lib/api';
 import { Lang, tr } from '../lib/i18n';
 import { useToast } from './Toast';
@@ -73,6 +73,12 @@ export default function Dashboard({ lang }: Props) {
   const [loadingPortAssets, setLoadingPortAssets] = useState(false);
   // Per-portfolio loop toggle state
   const [togglingLoop,    setTogglingLoop]    = useState<number | null>(null);
+  // Per-portfolio rebalance in progress
+  const [rebalancingPort, setRebalancingPort] = useState<number | null>(null);
+  // Stop-and-sell in progress
+  const [sellingPort,     setSellingPort]     = useState<number | null>(null);
+  // History modal
+  const [historyPort,     setHistoryPort]     = useState<{ name: string; rows: any[] } | null>(null);
 
 
   const fetchPortfolioAssets = useCallback(async (list: any[]) => {
@@ -231,6 +237,49 @@ export default function Dashboard({ lang }: Props) {
       toast.error(lang === 'ar' ? 'فشل تغيير الحالة' : 'Toggle failed', err?.message);
     } finally {
       setTogglingLoop(null);
+    }
+  };
+
+  const handlePortfolioRebalance = async (p: any) => {
+    setRebalancingPort(p.id);
+    try {
+      const job = await rebalancePortfolio(p.id, 'market_value');
+      let attempts = 0;
+      while (attempts < 20) {
+        await new Promise(r => setTimeout(r, 2000));
+        const s = await getRebalanceJobStatus(job.job_id);
+        if (s.done || s.cancelled) break;
+        attempts++;
+      }
+      toast.success(lang === 'ar' ? 'تمت إعادة الموازنة' : 'Rebalance done');
+      fetchAll(true);
+    } catch (err: any) {
+      toast.error(lang === 'ar' ? 'فشلت إعادة الموازنة' : 'Rebalance failed', err?.message);
+    } finally {
+      setRebalancingPort(null);
+    }
+  };
+
+  const handleStopAndSell = async (p: any) => {
+    setSellingPort(p.id);
+    try {
+      await stopAndSellPortfolio(p.id);
+      toast.info(lang === 'ar' ? 'تم الإيقاف والبيع' : 'Stopped & sold');
+      fetchAll(true);
+    } catch (err: any) {
+      toast.error(lang === 'ar' ? 'فشل الإيقاف والبيع' : 'Stop & sell failed', err?.message);
+    } finally {
+      setSellingPort(null);
+    }
+  };
+
+  const handleShowHistory = async (p: any) => {
+    try {
+      const rows = await getHistory(50);
+      const filtered = rows.filter((r: any) => r.portfolio_id === p.id || !r.portfolio_id);
+      setHistoryPort({ name: p.name, rows: filtered });
+    } catch (err: any) {
+      toast.error(lang === 'ar' ? 'فشل تحميل السجل' : 'Failed to load history', err?.message);
     }
   };
 
@@ -483,55 +532,6 @@ export default function Dashboard({ lang }: Props) {
           </div>
         )}
 
-        {/* Action buttons */}
-        <div className="flex gap-2">
-          {/* Rebalance — primary */}
-          {rebalancing && cancelTimer > 0 ? (
-            <button
-              onClick={handleCancel}
-              className="btn-danger flex-1 !text-xs !min-h-[42px] relative overflow-hidden"
-            >
-              <XCircle size={13} /> {tr('cancelRebalance', lang)} ({cancelTimer}s)
-            </button>
-          ) : rebalancing ? (
-            <button disabled className="btn-accent flex-1 !text-xs !min-h-[42px]">
-              <RefreshCw size={13} className="spin" /> {lang === 'ar' ? 'جاري...' : 'Running...'}
-            </button>
-          ) : (
-            <button
-              onClick={handleRebalance}
-              className="btn-accent flex-1 !text-xs !min-h-[42px] relative overflow-hidden"
-            >
-              <Zap size={13} /> {lang === 'ar' ? 'Rebalance يدوي' : 'Rebalance'}
-            </button>
-          )}
-
-          {/* Start/Stop */}
-          <button
-            onClick={handleBotToggle}
-            disabled={botLoading}
-            className="btn-secondary !px-4 !min-h-[42px] !text-xs"
-          >
-            {botLoading
-              ? <RefreshCw size={13} className="spin" />
-              : botRunning
-                ? <><Square size={13} /> {tr('pause', lang)}</>
-                : <><Play size={13} /> {lang === 'ar' ? 'تشغيل' : 'Start'}</>
-            }
-          </button>
-
-          {/* Buy */}
-          <button
-            onClick={() => setShowBuyModal(true)}
-            disabled={buyActivating || portfolios.length === 0}
-            className="btn-secondary !px-4 !min-h-[42px] !text-xs"
-          >
-            {buyActivating
-              ? <RefreshCw size={13} className="spin" />
-              : <>{lang === 'ar' ? '🛒 شراء' : '🛒 Buy'}</>
-            }
-          </button>
-        </div>
       </div>
 
       {/* No active portfolio banner */}
@@ -617,12 +617,14 @@ export default function Dashboard({ lang }: Props) {
             {(() => {
               const portData = allPortAssets[viewPortId as number];
               const port = portfolios.find(p => p.id === viewPortId);
+              const isRunning = portData?.running ?? port?.running ?? false;
+              const hasBalance = (freeUsdt ?? 0) > 1;
               return (
                 <>
-                  <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                  <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
                     <div className="flex items-center gap-2">
                       <h2 className="section-title mb-0">{port?.name ?? tr('assetTable', lang)}</h2>
-                      {portData?.running && (
+                      {isRunning && (
                         <span className="text-[10px] font-bold px-2 py-0.5 rounded-full animate-pulse"
                           style={{ background: 'rgba(34,197,94,0.15)', color: '#22c55e' }}>
                           ▶ {lang === 'ar' ? 'شغّالة' : 'Running'}
@@ -641,28 +643,71 @@ export default function Dashboard({ lang }: Props) {
                           ${portData.total_usdt.toLocaleString('en-US', { maximumFractionDigits: 2 })}
                         </span>
                       )}
-                      {/* Start / Stop toggle */}
-                      {port && (
-                        <button
-                          onClick={() => handlePortfolioToggle(portData ?? port)}
-                          disabled={togglingLoop === (viewPortId as number)}
-                          className={`flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                            portData?.running ? 'btn-danger' : 'btn-primary'
-                          }`}
-                        >
-                          {togglingLoop === viewPortId
-                            ? <RefreshCw size={11} className="spin" />
-                            : portData?.running
-                              ? <><Square size={11} /> {lang === 'ar' ? 'إيقاف' : 'Stop'}</>
-                              : <><Play size={11} /> {lang === 'ar' ? 'تشغيل' : 'Start'}</>
-                          }
-                        </button>
-                      )}
                       <span className="badge" style={{ background: 'var(--bg-input)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}>
                         {portData?.assets?.length ?? 0} {lang === 'ar' ? 'عملة' : 'coins'}
                       </span>
                     </div>
                   </div>
+
+                  {/* ── Action bar ── */}
+                  {port && (
+                    <div className="flex gap-1.5 mb-3 flex-wrap">
+                      <button
+                        onClick={() => { setSelectedPortId(port.id); setShowBuyModal(true); }}
+                        disabled={!hasBalance || buyActivating}
+                        className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-bold transition-all flex-1"
+                        style={{
+                          background: hasBalance ? 'rgba(0,212,170,0.15)' : 'rgba(255,255,255,0.04)',
+                          color: hasBalance ? '#00D4AA' : 'var(--text-muted)',
+                          border: `1px solid ${hasBalance ? 'rgba(0,212,170,0.35)' : 'rgba(255,255,255,0.08)'}`,
+                          opacity: hasBalance ? 1 : 0.45,
+                        }}
+                      >
+                        <ShoppingCart size={11} />
+                        {lang === 'ar' ? 'شراء وتفعيل' : 'Buy & Activate'}
+                      </button>
+                      <button
+                        onClick={() => handleStopAndSell(port)}
+                        disabled={!isRunning || sellingPort === port.id}
+                        className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-bold transition-all flex-1"
+                        style={{
+                          background: isRunning ? 'rgba(255,123,114,0.15)' : 'rgba(255,255,255,0.04)',
+                          color: isRunning ? '#FF7B72' : 'var(--text-muted)',
+                          border: `1px solid ${isRunning ? 'rgba(255,123,114,0.35)' : 'rgba(255,255,255,0.08)'}`,
+                          opacity: isRunning ? 1 : 0.45,
+                        }}
+                      >
+                        {sellingPort === port.id ? <RefreshCw size={11} className="spin" /> : <Square size={11} />}
+                        {lang === 'ar' ? 'إيقاف وبيع' : 'Stop & Sell'}
+                      </button>
+                      <button
+                        onClick={() => handlePortfolioRebalance(port)}
+                        disabled={rebalancingPort === port.id}
+                        className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-bold transition-all flex-1"
+                        style={{
+                          background: 'rgba(123,92,245,0.15)',
+                          color: '#A78BFA',
+                          border: '1px solid rgba(123,92,245,0.35)',
+                        }}
+                      >
+                        {rebalancingPort === port.id ? <RefreshCw size={11} className="spin" /> : <Zap size={11} />}
+                        {lang === 'ar' ? 'موازنة' : 'Rebalance'}
+                      </button>
+                      <button
+                        onClick={() => handleShowHistory(port)}
+                        className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-bold transition-all flex-1"
+                        style={{
+                          background: 'rgba(96,165,250,0.12)',
+                          color: '#60A5FA',
+                          border: '1px solid rgba(96,165,250,0.25)',
+                        }}
+                      >
+                        <History size={11} />
+                        {lang === 'ar' ? 'السجل' : 'History'}
+                      </button>
+                    </div>
+                  )}
+
                   <AssetsTable
                     assets={portData?.assets ?? []}
                     loading={loadingPortAssets && !portData}
@@ -685,14 +730,16 @@ export default function Dashboard({ lang }: Props) {
             ) : (
               portfolios.map(p => {
                 const portData = allPortAssets[p.id];
+                const hasBalance = (freeUsdt ?? 0) > 1;
+                const isRunning = p.running;
                 return (
                   <div key={p.id} className="card p-4"
-                    style={p.running ? { border: '1px solid rgba(0,212,170,0.3)', boxShadow: '0 0 20px rgba(0,212,170,0.08)' } : {}}>
+                    style={isRunning ? { border: '1px solid rgba(0,212,170,0.3)', boxShadow: '0 0 20px rgba(0,212,170,0.08)' } : {}}>
                     {/* Portfolio header */}
-                    <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                    <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
                       <div className="flex items-center gap-2 flex-wrap">
                         <h2 className="section-title mb-0">{p.name}</h2>
-                        {p.running && (
+                        {isRunning && (
                           <span className="text-[10px] font-bold px-2 py-0.5 rounded-full animate-pulse"
                             style={{ background: 'rgba(34,197,94,0.15)', color: '#22c55e' }}>
                             ▶ {lang === 'ar' ? 'شغّالة' : 'Running'}
@@ -709,26 +756,80 @@ export default function Dashboard({ lang }: Props) {
                             ${portData.total_usdt.toLocaleString('en-US', { maximumFractionDigits: 2 })}
                           </span>
                         )}
-                        {/* Start / Stop toggle */}
-                        <button
-                          onClick={() => handlePortfolioToggle(portData ?? p)}
-                          disabled={togglingLoop === p.id}
-                          className={`flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                            p.running ? 'btn-danger' : 'btn-primary'
-                          }`}
-                        >
-                          {togglingLoop === p.id
-                            ? <RefreshCw size={11} className="spin" />
-                            : p.running
-                              ? <><Square size={11} /> {lang === 'ar' ? 'إيقاف' : 'Stop'}</>
-                              : <><Play size={11} /> {lang === 'ar' ? 'تشغيل' : 'Start'}</>
-                          }
-                        </button>
                         <span className="badge" style={{ background: 'var(--bg-input)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}>
                           {portData?.assets?.length ?? p.assets?.length ?? 0} {lang === 'ar' ? 'عملة' : 'coins'}
                         </span>
                       </div>
                     </div>
+
+                    {/* ── Action bar ── */}
+                    <div className="flex gap-1.5 mb-3 flex-wrap">
+                      {/* شراء وتفعيل */}
+                      <button
+                        onClick={() => { setSelectedPortId(p.id); setShowBuyModal(true); }}
+                        disabled={!hasBalance || buyActivating}
+                        className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-bold transition-all flex-1"
+                        style={{
+                          background: hasBalance ? 'rgba(0,212,170,0.15)' : 'rgba(255,255,255,0.04)',
+                          color: hasBalance ? '#00D4AA' : 'var(--text-muted)',
+                          border: `1px solid ${hasBalance ? 'rgba(0,212,170,0.35)' : 'rgba(255,255,255,0.08)'}`,
+                          opacity: hasBalance ? 1 : 0.45,
+                        }}
+                      >
+                        <ShoppingCart size={11} />
+                        {lang === 'ar' ? 'شراء وتفعيل' : 'Buy & Activate'}
+                      </button>
+
+                      {/* إيقاف وبيع */}
+                      <button
+                        onClick={() => handleStopAndSell(p)}
+                        disabled={!isRunning || sellingPort === p.id}
+                        className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-bold transition-all flex-1"
+                        style={{
+                          background: isRunning ? 'rgba(255,123,114,0.15)' : 'rgba(255,255,255,0.04)',
+                          color: isRunning ? '#FF7B72' : 'var(--text-muted)',
+                          border: `1px solid ${isRunning ? 'rgba(255,123,114,0.35)' : 'rgba(255,255,255,0.08)'}`,
+                          opacity: isRunning ? 1 : 0.45,
+                        }}
+                      >
+                        {sellingPort === p.id
+                          ? <RefreshCw size={11} className="spin" />
+                          : <Square size={11} />}
+                        {lang === 'ar' ? 'إيقاف وبيع' : 'Stop & Sell'}
+                      </button>
+
+                      {/* إعادة موازنة */}
+                      <button
+                        onClick={() => handlePortfolioRebalance(p)}
+                        disabled={rebalancingPort === p.id}
+                        className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-bold transition-all flex-1"
+                        style={{
+                          background: 'rgba(123,92,245,0.15)',
+                          color: '#A78BFA',
+                          border: '1px solid rgba(123,92,245,0.35)',
+                        }}
+                      >
+                        {rebalancingPort === p.id
+                          ? <RefreshCw size={11} className="spin" />
+                          : <Zap size={11} />}
+                        {lang === 'ar' ? 'موازنة' : 'Rebalance'}
+                      </button>
+
+                      {/* سجل العمليات */}
+                      <button
+                        onClick={() => handleShowHistory(p)}
+                        className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-bold transition-all flex-1"
+                        style={{
+                          background: 'rgba(96,165,250,0.12)',
+                          color: '#60A5FA',
+                          border: '1px solid rgba(96,165,250,0.25)',
+                        }}
+                      >
+                        <History size={11} />
+                        {lang === 'ar' ? 'السجل' : 'History'}
+                      </button>
+                    </div>
+
                     <AssetsTable
                       assets={portData?.assets ?? []}
                       loading={loadingPortAssets && !portData}
@@ -742,6 +843,46 @@ export default function Dashboard({ lang }: Props) {
           </div>
         )}
       </div>
+
+      {/* History modal */}
+      {historyPort && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center"
+          style={{ background: 'rgba(0,0,0,0.7)' }}
+          onClick={() => setHistoryPort(null)}
+        >
+          <div
+            className="w-full max-w-lg rounded-t-3xl p-4 space-y-3 max-h-[70vh] overflow-y-auto"
+            style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="font-bold text-sm" style={{ color: 'var(--text-main)' }}>
+                {lang === 'ar' ? `سجل: ${historyPort.name}` : `History: ${historyPort.name}`}
+              </h3>
+              <button onClick={() => setHistoryPort(null)} style={{ color: 'var(--text-muted)' }}>
+                <XCircle size={18} />
+              </button>
+            </div>
+            {historyPort.rows.length === 0 ? (
+              <p className="text-xs text-center py-4" style={{ color: 'var(--text-muted)' }}>
+                {lang === 'ar' ? 'لا توجد عمليات' : 'No operations yet'}
+              </p>
+            ) : (
+              historyPort.rows.map((r: any, i: number) => (
+                <div key={i} className="rounded-xl px-3 py-2 text-xs flex items-center justify-between gap-2"
+                  style={{ background: 'var(--bg-input)', border: '1px solid var(--border)' }}>
+                  <span className="font-bold" style={{ color: r.action === 'buy' ? '#00D4AA' : '#FF7B72' }}>
+                    {r.action?.toUpperCase()} {r.symbol}
+                  </span>
+                  <span style={{ color: 'var(--text-muted)' }}>{r.qty ?? ''}</span>
+                  <span style={{ color: 'var(--text-muted)' }}>{r.timestamp ? new Date(r.timestamp).toLocaleDateString() : ''}</span>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Footer */}
       <div className="flex items-center justify-center gap-2 pb-2">
