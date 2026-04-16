@@ -297,6 +297,9 @@ def init_db() -> None:
                 "ALTER TABLE grid_bots ADD COLUMN IF NOT EXISTS realised_profit REAL NOT NULL DEFAULT 0",
                 "ALTER TABLE grid_bots ADD COLUMN IF NOT EXISTS shift_count INTEGER NOT NULL DEFAULT 0",
                 "ALTER TABLE grid_bots ADD COLUMN IF NOT EXISTS initial_range_pct REAL NOT NULL DEFAULT 5.0",
+                "ALTER TABLE grid_bots ADD COLUMN IF NOT EXISTS lower_pct REAL NOT NULL DEFAULT 5.0",
+                "ALTER TABLE grid_bots ADD COLUMN IF NOT EXISTS upper_pct REAL NOT NULL DEFAULT 5.0",
+                "ALTER TABLE grid_bots ADD COLUMN IF NOT EXISTS expand_direction TEXT NOT NULL DEFAULT 'both'",
             ]
             for m in migrations:
                 try:
@@ -404,6 +407,21 @@ def init_db() -> None:
         try:
             with _conn() as conn:
                 conn.execute("ALTER TABLE grid_bots ADD COLUMN initial_range_pct REAL NOT NULL DEFAULT 5.0")
+        except Exception:
+            pass
+        try:
+            with _conn() as conn:
+                conn.execute("ALTER TABLE grid_bots ADD COLUMN lower_pct REAL NOT NULL DEFAULT 5.0")
+        except Exception:
+            pass
+        try:
+            with _conn() as conn:
+                conn.execute("ALTER TABLE grid_bots ADD COLUMN upper_pct REAL NOT NULL DEFAULT 5.0")
+        except Exception:
+            pass
+        try:
+            with _conn() as conn:
+                conn.execute("ALTER TABLE grid_bots ADD COLUMN expand_direction TEXT NOT NULL DEFAULT 'both'")
         except Exception:
             pass
         log.info("SQLite tables ready: %s", _SQLITE_PATH)
@@ -720,6 +738,60 @@ def get_grid_shift_info(bot_id: int) -> tuple[int, float]:
     except Exception as e:
         log.error("get_grid_shift_info failed: %s", e)
     return 0, 5.0
+
+
+def set_grid_range_pcts(bot_id: int, lower_pct: float, upper_pct: float) -> None:
+    """Store the user-defined lower/upper % range for a bot."""
+    try:
+        with _conn() as conn:
+            conn.cursor().execute(
+                _q("UPDATE grid_bots SET lower_pct=?, upper_pct=? WHERE id=?"),
+                (lower_pct, upper_pct, bot_id),
+            )
+    except Exception as e:
+        log.error("set_grid_range_pcts failed: %s", e)
+
+
+def get_grid_range_pcts(bot_id: int) -> tuple[float, float]:
+    """Return (lower_pct, upper_pct) for a bot."""
+    try:
+        with _conn() as conn:
+            cur = conn.cursor()
+            cur.execute(_q("SELECT lower_pct, upper_pct FROM grid_bots WHERE id=?"), (bot_id,))
+            row = cur.fetchone()
+            if row:
+                if _USE_POSTGRES:
+                    return float(row[0]), float(row[1])
+                return float(row["lower_pct"]), float(row["upper_pct"])
+    except Exception as e:
+        log.error("get_grid_range_pcts failed: %s", e)
+    return 5.0, 5.0
+
+
+def set_grid_expand_direction(bot_id: int, direction: str) -> None:
+    """Store expand direction: 'both' | 'lower' | 'upper'."""
+    try:
+        with _conn() as conn:
+            conn.cursor().execute(
+                _q("UPDATE grid_bots SET expand_direction=? WHERE id=?"),
+                (direction, bot_id),
+            )
+    except Exception as e:
+        log.error("set_grid_expand_direction failed: %s", e)
+
+
+def get_grid_expand_direction(bot_id: int) -> str:
+    """Return expand_direction for a bot ('both' | 'lower' | 'upper')."""
+    try:
+        with _conn() as conn:
+            cur = conn.cursor()
+            cur.execute(_q("SELECT expand_direction FROM grid_bots WHERE id=?"), (bot_id,))
+            row = cur.fetchone()
+            if row:
+                return str(row[0] if _USE_POSTGRES else row["expand_direction"])
+    except Exception as e:
+        log.error("get_grid_expand_direction failed: %s", e)
+    return "both"
 
 
 def set_grid_initial_range_pct(bot_id: int, pct: float) -> None:

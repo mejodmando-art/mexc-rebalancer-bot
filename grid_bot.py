@@ -32,6 +32,8 @@ from database import (
     add_grid_order, get_grid_orders,
     update_grid_order, delete_grid_bot, set_grid_bot_should_run,
     increment_grid_shift_count, get_grid_shift_info, set_grid_initial_range_pct,
+    set_grid_range_pcts, get_grid_range_pcts,
+    set_grid_expand_direction, get_grid_expand_direction,
 )
 
 log = logging.getLogger(__name__)
@@ -51,12 +53,23 @@ def _now() -> str:
 
 
 def calculate_grid_range(client: MEXCClient, symbol: str,
-                          volatility_pct: float = 5.0) -> tuple[float, float]:
+                          volatility_pct: float = 5.0,
+                          lower_pct: Optional[float] = None,
+                          upper_pct: Optional[float] = None) -> tuple[float, float]:
     """
-    Auto-calculate price range based on current price +/- volatility_pct%.
-    Returns (price_low, price_high).
+    Calculate price range from current price.
+
+    If lower_pct/upper_pct are provided they are used asymmetrically:
+      price_low  = price * (1 - lower_pct/100)
+      price_high = price * (1 + upper_pct/100)
+    Otherwise falls back to symmetric ±volatility_pct%.
     """
     price = client.get_price(symbol)
+    if lower_pct is not None and upper_pct is not None:
+        return (
+            round(price * (1 - lower_pct / 100), 8),
+            round(price * (1 + upper_pct / 100), 8),
+        )
     spread = price * (volatility_pct / 100)
     return round(price - spread, 8), round(price + spread, 8)
 
@@ -183,30 +196,55 @@ def _place_initial_orders(client: MEXCClient, bot_id: int, symbol: str,
                             levels: list[float], current_price: float,
                             usdt_per_grid: float, qty_prec: int,
                             mode: str,
-                            stop_event: Optional[threading.Event] = None) -> None:
+                            stop_event: Optional[threading.Event] = None,
+                            initial_buy_qty: float = 0.0) -> None:
     """
     Place BUY orders below current price and SELL orders above it.
-    Orders are placed gradually (PLACE_INTERVAL between each) to avoid
-    market impact.  In 'infinity' mode there is no upper bound for SELLs.
+
+    Grid allocation is split equally between levels below and above the current
+    price so each side gets the same number of orders and the same USDT per grid.
+
+    initial_buy_qty: base-asset quantity already purchased at market price before
+    grid placement (half-investment buy). SELL orders above are sized from this
+    held quantity divided equally across upper levels, so the bot can sell what
+    it actually owns. BUY orders below use usdt_per_grid as usual.
+
+    Orders are placed gradually (PLACE_INTERVAL between each) to avoid market
+    impact. In 'infinity' mode there is no upper bound for SELLs.
     Respects stop_event so the bot can be stopped mid-placement.
     """
-    for level in levels[:-1]:   # N+1 points; skip the very top for BUY
-        if stop_event and stop_event.is_set():
-            return
-        if level < current_price:
-            qty = usdt_per_grid / level
-            _place_limit_order(client, bot_id, symbol, "BUY", level, qty, qty_prec)
-            if stop_event:
-                stop_event.wait(PLACE_INTERVAL)
-            else:
-                time.sleep(PLACE_INTERVAL)
+    buy_levels  = [l for l in levels[:-1] if l < current_price]
+    sell_levels = [l for l in levels[1:]  if l > current_price]
 
-    for level in levels[1:]:    # skip the very bottom for SELL
+    # Equalise: use the smaller count so both sides have the same number of orders
+    n = min(len(buy_levels), len(sell_levels))
+    buy_levels  = buy_levels[-n:]   # closest n levels below price
+    sell_levels = sell_levels[:n]   # closest n levels above price
+
+    # SELL qty per level: distribute held base qty equally across upper levels
+    sell_qty_per_level = (
+        round(initial_buy_qty / n * (1 - FEE_RATE), qty_prec) if n > 0 and initial_buy_qty > 0
+        else 0.0
+    )
+
+    for level in buy_levels:
         if stop_event and stop_event.is_set():
             return
-        if level > current_price:
-            sell_qty = round((usdt_per_grid / level) * (1 - FEE_RATE), qty_prec)
-            _place_limit_order(client, bot_id, symbol, "SELL", level, sell_qty, qty_prec)
+        qty = usdt_per_grid / level
+        _place_limit_order(client, bot_id, symbol, "BUY", level, qty, qty_prec)
+        if stop_event:
+            stop_event.wait(PLACE_INTERVAL)
+        else:
+            time.sleep(PLACE_INTERVAL)
+
+    for level in sell_levels:
+        if stop_event and stop_event.is_set():
+            return
+        if mode == "infinity" or level <= levels[-1]:
+            qty = sell_qty_per_level if sell_qty_per_level > 0 else round(
+                (usdt_per_grid / level) * (1 - FEE_RATE), qty_prec
+            )
+            _place_limit_order(client, bot_id, symbol, "SELL", level, qty, qty_prec)
             if stop_event:
                 stop_event.wait(PLACE_INTERVAL)
             else:
@@ -219,29 +257,42 @@ def _rebuild_grid(client: MEXCClient, bot_id: int, symbol: str,
     """
     Cancel all open orders, shift grid to current price, and expand the range.
 
-    Range expansion rule:
-      - shift_count 0→1 (first shift): range_pct = initial_range_pct * 2
-      - shift_count 1→2 (second shift): range_pct = initial_range_pct * 4
-      - shift_count N→N+1: range_pct = initial_range_pct * 2^(N+1)
+    Expansion rule (doubles each shift):
+      shift N → range_pct = initial_range_pct * 2^N  (capped at 50%)
 
-    This means each successive shift doubles the previous range, so the grid
-    becomes progressively wider and shifts less frequently.
+    expand_direction controls which side grows:
+      'both'  — lower_pct and upper_pct both double
+      'lower' — only lower_pct doubles; upper_pct stays at initial
+      'upper' — only upper_pct doubles; lower_pct stays at initial
     """
     log.info("[Grid %d] rebuilding grid (price out of range)", bot_id)
     _cancel_all_open_orders(client, bot_id, symbol)
 
-    # Increment shift counter and get initial range %
     new_shift_count = increment_grid_shift_count(bot_id)
     _, initial_range_pct = get_grid_shift_info(bot_id)
+    lower_pct_init, upper_pct_init = get_grid_range_pcts(bot_id)
+    direction = get_grid_expand_direction(bot_id)
 
-    # Expand: range doubles with each shift (2^shift_count × initial)
-    expanded_pct = initial_range_pct * (2 ** new_shift_count)
-    # Cap at 50% to avoid unreasonably wide grids
-    expanded_pct = min(expanded_pct, 50.0)
+    multiplier = 2 ** new_shift_count
 
-    log.info("[Grid %d] shift #%d — range expanded to ±%.1f%%", bot_id, new_shift_count, expanded_pct)
+    if direction == "lower":
+        new_lower = min(lower_pct_init * multiplier, 50.0)
+        new_upper = upper_pct_init
+    elif direction == "upper":
+        new_lower = lower_pct_init
+        new_upper = min(upper_pct_init * multiplier, 50.0)
+    else:  # both
+        new_lower = min(lower_pct_init * multiplier, 50.0)
+        new_upper = min(upper_pct_init * multiplier, 50.0)
 
-    price_low, price_high = calculate_grid_range(client, symbol, volatility_pct=expanded_pct)
+    log.info(
+        "[Grid %d] shift #%d dir=%s — lower=%.1f%% upper=%.1f%%",
+        bot_id, new_shift_count, direction, new_lower, new_upper,
+    )
+
+    price_low, price_high = calculate_grid_range(
+        client, symbol, lower_pct=new_lower, upper_pct=new_upper
+    )
     grid_count = calculate_grid_count(investment, price_low, price_high)
     update_grid_bot_range(bot_id, price_low, price_high, grid_count)
 
@@ -249,8 +300,11 @@ def _rebuild_grid(client: MEXCClient, bot_id: int, symbol: str,
     usdt_per_grid = investment / grid_count
     current_price = client.get_price(symbol)
 
+    # On grid rebuild (price out of range) we already hold base asset from the
+    # initial market buy — no new market buy needed; SELL orders use usdt_per_grid sizing.
     _place_initial_orders(client, bot_id, symbol, levels, current_price,
-                           usdt_per_grid, qty_prec, mode, stop_event)
+                           usdt_per_grid, qty_prec, mode, stop_event,
+                           initial_buy_qty=0.0)
     return price_low, price_high, current_price, grid_count, levels
 
 
@@ -286,13 +340,40 @@ def _grid_loop(bot_id: int, stop_event: threading.Event) -> None:
         base_qty        = float(bot.get("base_qty") or 0)
         realised_profit = float(bot.get("realised_profit") or 0)
 
-        # Place initial BUY + SELL orders only if no open orders exist
-        # (avoids duplicates on resume after restart)
+        # Place initial orders only if no open orders exist (avoids duplicates on resume)
         existing_open = [o for o in get_grid_orders(bot_id) if o["status"] == "open"]
         if not existing_open:
             current_price = client.get_price(symbol)
+
+            # Buy 50% of investment at market price immediately so the bot holds
+            # base asset to back the SELL orders placed above current price.
+            # On resume after restart we skip this — base_qty is already tracked.
+            initial_buy_qty = 0.0
+            if base_qty == 0.0:
+                half_usdt = investment / 2.0
+                market_qty = round(half_usdt / current_price, qty_prec)
+                if market_qty > 0:
+                    try:
+                        resp = client.place_market_buy(symbol, half_usdt)
+                        filled_qty   = float(resp.get("executedQty", market_qty))
+                        filled_price = (
+                            float(resp.get("cummulativeQuoteQty", half_usdt)) / filled_qty
+                            if filled_qty > 0 else current_price
+                        )
+                        initial_buy_qty = filled_qty
+                        base_qty        = filled_qty
+                        avg_buy_price   = filled_price
+                        log.info(
+                            "[Grid %d] initial market BUY %.6f %s @ ~%.4f (%.2f USDT)",
+                            bot_id, filled_qty, symbol, filled_price, half_usdt,
+                        )
+                        update_grid_bot_position(bot_id, avg_buy_price, base_qty, 0.0, realised_profit)
+                    except Exception as e:
+                        log.warning("[Grid %d] initial market buy failed: %s — placing grid without pre-buy", bot_id, e)
+
             _place_initial_orders(client, bot_id, symbol, levels, current_price,
-                                   usdt_per_grid, qty_prec, mode, stop_event)
+                                   usdt_per_grid, qty_prec, mode, stop_event,
+                                   initial_buy_qty=initial_buy_qty)
 
         # Monitoring loop
         while not stop_event.is_set():
@@ -413,21 +494,31 @@ def start_grid_bot(symbol: str, investment: float,
                    grid_count: Optional[int] = None,
                    price_low: Optional[float] = None,
                    price_high: Optional[float] = None,
+                   lower_pct: Optional[float] = None,
+                   upper_pct: Optional[float] = None,
+                   expand_direction: str = "both",
                    mode: str = "normal",
                    use_base_balance: bool = False) -> int:
     """
     Create and start a grid bot.
+
+    Range input (choose one):
+      - lower_pct / upper_pct : percentage below/above current price (preferred)
+      - price_low / price_high : explicit prices (legacy / manual override)
+      If none provided, defaults to ±5%.
+
+    expand_direction: when price exits the range, which side expands:
+      'both'  — lower and upper both double each shift
+      'lower' — only lower side doubles
+      'upper' — only upper side doubles
 
     mode:
       'normal'   - standard grid with upper and lower bounds.
       'infinity' - no upper price cap; only price_low acts as a floor.
 
     use_base_balance:
-      When True, the bot reads the existing base-asset balance from the wallet
-      and adds its USDT value to `investment` (USDT+BASE mode from the spec).
+      When True, adds existing base-asset USDT value to investment.
 
-    If price_low/price_high are None, auto-calculates from current price +/-5%.
-    If grid_count is None, auto-calculates from investment size.
     Returns the new bot_id.
     """
     client = MEXCClient()
@@ -449,37 +540,50 @@ def start_grid_bot(symbol: str, investment: float,
         except Exception as e:
             log.warning("[Grid new] could not read base balance: %s", e)
 
-    if price_low is None or price_high is None:
+    # Resolve price range: % input takes priority over explicit prices
+    if lower_pct is not None or upper_pct is not None:
+        _lower = lower_pct if lower_pct is not None else 5.0
+        _upper = upper_pct if upper_pct is not None else 5.0
+        price_low, price_high = calculate_grid_range(
+            client, symbol, lower_pct=_lower, upper_pct=_upper
+        )
+    elif price_low is None or price_high is None:
+        _lower, _upper = 5.0, 5.0
         price_low, price_high = calculate_grid_range(client, symbol)
+    else:
+        # Derive % from explicit prices for consistent expand behaviour
+        try:
+            _cur = client.get_price(symbol)
+            _lower = round((_cur - price_low) / _cur * 100, 4) if _cur > 0 else 5.0
+            _upper = round((price_high - _cur) / _cur * 100, 4) if _cur > 0 else 5.0
+        except Exception:
+            _lower, _upper = 5.0, 5.0
 
     if grid_count is None:
         grid_count = calculate_grid_count(investment, price_low, price_high)
 
     config = {
-        "symbol":     symbol,
-        "investment": investment,
-        "grid_count": grid_count,
-        "price_low":  price_low,
-        "price_high": price_high,
-        "mode":       mode,
-        "auto_range": True,
-        "created_at": _now(),
+        "symbol":           symbol,
+        "investment":       investment,
+        "grid_count":       grid_count,
+        "price_low":        price_low,
+        "price_high":       price_high,
+        "lower_pct":        _lower,
+        "upper_pct":        _upper,
+        "expand_direction": expand_direction,
+        "mode":             mode,
+        "created_at":       _now(),
     }
 
     bot_id = create_grid_bot(symbol, investment, grid_count,
                               price_low, price_high, config, mode=mode)
-    log.info("[Grid %d] created: %s mode=%s inv=%.2f grids=%d range=[%.4f, %.4f]",
-             bot_id, symbol, mode, investment, grid_count, price_low, price_high)
+    log.info("[Grid %d] created: %s mode=%s inv=%.2f grids=%d range=[%.4f, %.4f] (↓%.1f%% ↑%.1f%%)",
+             bot_id, symbol, mode, investment, grid_count, price_low, price_high, _lower, _upper)
 
-    # Store the initial range % so _rebuild_grid can double it on each shift.
-    # Derive it from the actual price_low/price_high vs current price.
-    try:
-        current_price = client.get_price(symbol)
-        if current_price > 0:
-            half_range = ((price_high - price_low) / 2) / current_price * 100
-            set_grid_initial_range_pct(bot_id, round(half_range, 4))
-    except Exception:
-        set_grid_initial_range_pct(bot_id, 5.0)
+    # Persist range % and expand direction for use in _rebuild_grid
+    set_grid_range_pcts(bot_id, _lower, _upper)
+    set_grid_expand_direction(bot_id, expand_direction)
+    set_grid_initial_range_pct(bot_id, round((_lower + _upper) / 2, 4))
 
     set_grid_bot_should_run(bot_id, True)
     stop_event = threading.Event()
