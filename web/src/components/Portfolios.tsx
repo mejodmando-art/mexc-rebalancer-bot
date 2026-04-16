@@ -9,7 +9,7 @@ import {
 } from '../lib/api';
 import { Lang, tr } from '../lib/i18n';
 import {
-  ShoppingCart, Copy, Scale, StopCircle, Play, Square,
+  ShoppingCart, Scale, StopCircle, Play, Square,
   Trash2, Settings, Loader2, CheckCircle2,
 } from 'lucide-react';
 
@@ -404,7 +404,7 @@ export default function Portfolios({ lang, onActivated, onCreateBot, onEditPortf
   const [rebalModal, setRebalModal]         = useState<{ id: number; name: string; active: boolean } | null>(null);
   const [stopSellModal, setStopSellModal]   = useState<{ id: number; name: string } | null>(null);
   const [togglingLoop, setTogglingLoop]     = useState<number | null>(null);
-  const [copyModal, setCopyModal]           = useState<any | null>(null);
+
 
   const load = useCallback(async () => {
     try {
@@ -511,18 +511,7 @@ export default function Portfolios({ lang, onActivated, onCreateBot, onEditPortf
           onDone={(m) => { setMsg('✅ ' + m); load(); }}
         />
       )}
-      {copyModal && (
-        <CopyModal
-          source={copyModal}
-          lang={lang}
-          onClose={() => setCopyModal(null)}
-          onDone={() => {
-            setCopyModal(null);
-            setMsg('✅ ' + tr('copySuccess', lang));
-            load();
-          }}
-        />
-      )}
+
 
       <div className="space-y-5">
         {/* Header */}
@@ -660,55 +649,40 @@ export default function Portfolios({ lang, onActivated, onCreateBot, onEditPortf
 
                 {/* ── Action buttons ── */}
                 <div className="grid grid-cols-2 gap-1.5">
-                  {/* شراء وتفعيل */}
-                  <button
-                    onClick={() => handleBuyAndActivate(p)}
-                    disabled={activating === p.id || p.running}
-                    className="flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold transition-all disabled:opacity-40 active:scale-95"
-                    style={{
-                      background: 'rgba(52,211,153,0.12)',
-                      border: '1px solid rgba(52,211,153,0.3)',
-                      color: '#34D399',
-                    }}
-                  >
-                    {activating === p.id
-                      ? <Loader2 size={13} className="spin" />
-                      : <ShoppingCart size={13} />}
-                    {tr('buyAndActivate', lang)}
-                  </button>
+                  {/* Split button: شراء وتفعيل | تشغيل */}
+                  <div className="flex rounded-xl overflow-hidden col-span-2" style={{ border: '1px solid rgba(52,211,153,0.3)' }}>
+                    {/* شراء وتفعيل */}
+                    <button
+                      onClick={() => handleBuyAndActivate(p)}
+                      disabled={activating === p.id || p.running}
+                      className="flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-semibold transition-all disabled:opacity-40 active:scale-95"
+                      style={{ background: 'rgba(52,211,153,0.12)', color: '#34D399' }}
+                    >
+                      {activating === p.id
+                        ? <Loader2 size={13} className="spin" />
+                        : <ShoppingCart size={13} />}
+                      {tr('buyAndActivate', lang)}
+                    </button>
 
-                  {/* تشغيل بدون شراء */}
-                  <button
-                    onClick={() => handleToggleLoop(p)}
-                    disabled={togglingLoop === p.id || p.running}
-                    className="flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold transition-all disabled:opacity-40 active:scale-95"
-                    style={{
-                      background: p.running ? 'rgba(248,113,113,0.1)' : 'rgba(123,92,245,0.12)',
-                      border: `1px solid ${p.running ? 'rgba(248,113,113,0.3)' : 'rgba(123,92,245,0.3)'}`,
-                      color: p.running ? '#F87171' : '#A78BFA',
-                    }}
-                  >
-                    {togglingLoop === p.id
-                      ? <Loader2 size={13} className="spin" />
-                      : p.running ? <Square size={13} /> : <Play size={13} />}
-                    {p.running
-                      ? tr('stopPortfolio', lang)
-                      : (lang === 'ar' ? 'تشغيل' : 'Start')}
-                  </button>
+                    {/* فاصل */}
+                    <div style={{ width: 1, background: 'rgba(52,211,153,0.3)' }} />
 
-                  {/* نسخ محفظة */}
-                  <button
-                    onClick={() => setCopyModal(p)}
-                    className="flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold transition-all active:scale-95"
-                    style={{
-                      background: 'rgba(167,139,250,0.1)',
-                      border: '1px solid rgba(167,139,250,0.25)',
-                      color: '#A78BFA',
-                    }}
-                  >
-                    <Copy size={13} />
-                    {tr('copyPortfolio', lang)}
-                  </button>
+                    {/* تشغيل فقط */}
+                    <button
+                      onClick={() => handleToggleLoop(p)}
+                      disabled={togglingLoop === p.id}
+                      className="flex items-center justify-center gap-1 px-3 py-2 text-xs font-semibold transition-all disabled:opacity-40 active:scale-95"
+                      style={{
+                        background: p.running ? 'rgba(248,113,113,0.12)' : 'rgba(52,211,153,0.08)',
+                        color: p.running ? '#F87171' : '#34D399',
+                      }}
+                    >
+                      {togglingLoop === p.id
+                        ? <Loader2 size={13} className="spin" />
+                        : p.running ? <Square size={13} /> : <Play size={13} />}
+                      {p.running ? (lang === 'ar' ? 'إيقاف' : 'Stop') : (lang === 'ar' ? 'تشغيل' : 'Start')}
+                    </button>
+                  </div>
 
                   {/* إعادة توازن */}
                   <button
@@ -741,7 +715,6 @@ export default function Portfolios({ lang, onActivated, onCreateBot, onEditPortf
 
                 {/* حذف */}
                 <div className="flex gap-1.5">
-                  <div className="flex-1" />
 
                   {confirmDelete === p.id ? (
                     <div className="flex gap-1">
