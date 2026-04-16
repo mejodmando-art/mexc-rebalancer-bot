@@ -295,6 +295,8 @@ def init_db() -> None:
                 "ALTER TABLE grid_bots ADD COLUMN IF NOT EXISTS base_qty REAL NOT NULL DEFAULT 0",
                 "ALTER TABLE grid_bots ADD COLUMN IF NOT EXISTS unrealized_pnl REAL NOT NULL DEFAULT 0",
                 "ALTER TABLE grid_bots ADD COLUMN IF NOT EXISTS realised_profit REAL NOT NULL DEFAULT 0",
+                "ALTER TABLE grid_bots ADD COLUMN IF NOT EXISTS shift_count INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE grid_bots ADD COLUMN IF NOT EXISTS initial_range_pct REAL NOT NULL DEFAULT 5.0",
             ]
             for m in migrations:
                 try:
@@ -392,6 +394,16 @@ def init_db() -> None:
         try:
             with _conn() as conn:
                 conn.execute("ALTER TABLE grid_bots ADD COLUMN realised_profit REAL NOT NULL DEFAULT 0")
+        except Exception:
+            pass
+        try:
+            with _conn() as conn:
+                conn.execute("ALTER TABLE grid_bots ADD COLUMN shift_count INTEGER NOT NULL DEFAULT 0")
+        except Exception:
+            pass
+        try:
+            with _conn() as conn:
+                conn.execute("ALTER TABLE grid_bots ADD COLUMN initial_range_pct REAL NOT NULL DEFAULT 5.0")
         except Exception:
             pass
         log.info("SQLite tables ready: %s", _SQLITE_PATH)
@@ -678,6 +690,46 @@ def update_grid_bot_range(bot_id: int, price_low: float, price_high: float,
             )
     except Exception as e:
         log.error("update_grid_bot_range failed: %s", e)
+
+
+def increment_grid_shift_count(bot_id: int) -> int:
+    """Increment shift_count and return the new value."""
+    try:
+        with _conn() as conn:
+            cur = conn.cursor()
+            cur.execute(_q("UPDATE grid_bots SET shift_count = shift_count + 1 WHERE id=?"), (bot_id,))
+            cur.execute(_q("SELECT shift_count FROM grid_bots WHERE id=?"), (bot_id,))
+            row = cur.fetchone()
+            return int(row[0] if _USE_POSTGRES else row["shift_count"])
+    except Exception as e:
+        log.error("increment_grid_shift_count failed: %s", e)
+        return 1
+
+
+def get_grid_shift_info(bot_id: int) -> tuple[int, float]:
+    """Return (shift_count, initial_range_pct) for a bot."""
+    try:
+        with _conn() as conn:
+            cur = conn.cursor()
+            cur.execute(_q("SELECT shift_count, initial_range_pct FROM grid_bots WHERE id=?"), (bot_id,))
+            row = cur.fetchone()
+            if row:
+                if _USE_POSTGRES:
+                    return int(row[0]), float(row[1])
+                return int(row["shift_count"]), float(row["initial_range_pct"])
+    except Exception as e:
+        log.error("get_grid_shift_info failed: %s", e)
+    return 0, 5.0
+
+
+def set_grid_initial_range_pct(bot_id: int, pct: float) -> None:
+    """Store the initial range % so expansions can double it each time."""
+    try:
+        with _conn() as conn:
+            cur = conn.cursor()
+            cur.execute(_q("UPDATE grid_bots SET initial_range_pct=? WHERE id=?"), (pct, bot_id))
+    except Exception as e:
+        log.error("set_grid_initial_range_pct failed: %s", e)
 
 
 def delete_grid_bot(bot_id: int) -> None:

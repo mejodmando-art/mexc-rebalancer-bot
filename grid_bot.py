@@ -31,6 +31,7 @@ from database import (
     update_grid_bot_position, update_grid_bot_range,
     add_grid_order, get_grid_orders,
     update_grid_order, delete_grid_bot, set_grid_bot_should_run,
+    increment_grid_shift_count, get_grid_shift_info, set_grid_initial_range_pct,
 )
 
 log = logging.getLogger(__name__)
@@ -216,13 +217,31 @@ def _rebuild_grid(client: MEXCClient, bot_id: int, symbol: str,
                    investment: float, mode: str, qty_prec: int,
                    stop_event: Optional[threading.Event] = None) -> tuple[float, float, float, int, list[float]]:
     """
-    Cancel all open orders, recalculate range around current price, place
-    new grid. Returns (price_low, price_high, current_price, grid_count, levels).
+    Cancel all open orders, shift grid to current price, and expand the range.
+
+    Range expansion rule:
+      - shift_count 0→1 (first shift): range_pct = initial_range_pct * 2
+      - shift_count 1→2 (second shift): range_pct = initial_range_pct * 4
+      - shift_count N→N+1: range_pct = initial_range_pct * 2^(N+1)
+
+    This means each successive shift doubles the previous range, so the grid
+    becomes progressively wider and shifts less frequently.
     """
     log.info("[Grid %d] rebuilding grid (price out of range)", bot_id)
     _cancel_all_open_orders(client, bot_id, symbol)
 
-    price_low, price_high = calculate_grid_range(client, symbol)
+    # Increment shift counter and get initial range %
+    new_shift_count = increment_grid_shift_count(bot_id)
+    _, initial_range_pct = get_grid_shift_info(bot_id)
+
+    # Expand: range doubles with each shift (2^shift_count × initial)
+    expanded_pct = initial_range_pct * (2 ** new_shift_count)
+    # Cap at 50% to avoid unreasonably wide grids
+    expanded_pct = min(expanded_pct, 50.0)
+
+    log.info("[Grid %d] shift #%d — range expanded to ±%.1f%%", bot_id, new_shift_count, expanded_pct)
+
+    price_low, price_high = calculate_grid_range(client, symbol, volatility_pct=expanded_pct)
     grid_count = calculate_grid_count(investment, price_low, price_high)
     update_grid_bot_range(bot_id, price_low, price_high, grid_count)
 
@@ -451,6 +470,16 @@ def start_grid_bot(symbol: str, investment: float,
                               price_low, price_high, config, mode=mode)
     log.info("[Grid %d] created: %s mode=%s inv=%.2f grids=%d range=[%.4f, %.4f]",
              bot_id, symbol, mode, investment, grid_count, price_low, price_high)
+
+    # Store the initial range % so _rebuild_grid can double it on each shift.
+    # Derive it from the actual price_low/price_high vs current price.
+    try:
+        current_price = client.get_price(symbol)
+        if current_price > 0:
+            half_range = ((price_high - price_low) / 2) / current_price * 100
+            set_grid_initial_range_pct(bot_id, round(half_range, 4))
+    except Exception:
+        set_grid_initial_range_pct(bot_id, 5.0)
 
     set_grid_bot_should_run(bot_id, True)
     stop_event = threading.Event()
