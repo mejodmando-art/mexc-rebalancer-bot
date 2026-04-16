@@ -234,7 +234,10 @@ function CreateGridBotModal({ ar, onClose, onCreated }: {
 
   const handleCreate = async () => {
     const invNum = parseFloat(investment);
-    if (!symbol || invNum < 1) { setError(ar ? 'أدخل الزوج والمبلغ' : 'Enter symbol and amount'); return; }
+    if (!symbol || !investment || isNaN(invNum) || invNum < 1) {
+      setError(ar ? 'أدخل الزوج والمبلغ' : 'Enter symbol and amount');
+      return;
+    }
     const lp = parseFloat(lowerPct);
     const up = parseFloat(upperPct);
     if (isNaN(lp) || lp <= 0 || isNaN(up) || up <= 0) {
@@ -266,8 +269,8 @@ function CreateGridBotModal({ ar, onClose, onCreated }: {
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center" style={{ background: 'rgba(0,0,0,0.8)' }} onClick={onClose}>
-      <div className="w-full max-w-lg rounded-t-3xl p-5 space-y-4 max-h-[85vh] overflow-y-auto"
-        style={{ background: '#0f1923', border: '1px solid rgba(0,245,212,0.2)' }}
+      <div className="w-full max-w-lg rounded-t-3xl p-5 space-y-4 overflow-y-auto"
+        style={{ background: '#0f1923', border: '1px solid rgba(0,245,212,0.2)', maxHeight: '92vh', overscrollBehavior: 'contain' }}
         onClick={e => e.stopPropagation()}>
 
         <div className="flex items-center justify-between">
