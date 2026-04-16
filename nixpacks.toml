@@ -10,6 +10,7 @@ cmds = [
 [phases.build]
 cmds = [
   "cd web && npm run build",
+  "mkdir -p static api/static",
   "cp -r web/out/. static/",
   "cp -r web/out/. api/static/"
 ]

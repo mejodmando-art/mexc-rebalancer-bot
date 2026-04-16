@@ -40,4 +40,4 @@ web/out/
 web/tsconfig.tsbuildinfo
 web/node_modules/
 api/static/
-static/_next/
+static/
