@@ -100,12 +100,12 @@ export default function Navbar({ active, onNav, botRunning, lang, onLangToggle, 
       <nav
         className="lg:hidden fixed bottom-0 inset-x-0 z-50"
         style={{
-          background: 'rgba(8,4,20,0.96)',
-          borderTop: '1px solid rgba(123,92,245,0.2)',
-          backdropFilter: 'blur(24px)',
-          WebkitBackdropFilter: 'blur(24px)',
+          background: 'rgba(6,3,18,0.97)',
+          borderTop: '1px solid rgba(255,255,255,0.07)',
+          backdropFilter: 'blur(28px)',
+          WebkitBackdropFilter: 'blur(28px)',
           paddingBottom: 'env(safe-area-inset-bottom)',
-          boxShadow: '0 -8px 32px rgba(0,0,0,0.5)',
+          boxShadow: '0 -12px 40px rgba(0,0,0,0.6)',
         }}
       >
         <div className="flex">
@@ -115,53 +115,53 @@ export default function Navbar({ active, onNav, botRunning, lang, onLangToggle, 
               <button
                 key={key}
                 onClick={() => onNav(key)}
-                className="flex-1 flex flex-col items-center justify-center py-2 gap-1 transition-all active:scale-90 relative"
-                style={{ color: isActive ? color : 'var(--text-muted)' }}
+                className="flex-1 flex flex-col items-center justify-center py-2.5 gap-1 transition-all active:scale-90 relative"
               >
-                {/* Active top glow line */}
+                {/* Active top glow bar */}
                 {isActive && (
                   <span
-                    className="absolute top-0 w-8 h-0.5 rounded-full"
+                    className="absolute top-0 inset-x-4 h-0.5 rounded-full"
                     style={{ background: `linear-gradient(90deg, transparent, ${color}, transparent)` }}
                   />
                 )}
 
-                {/* Icon container */}
+                {/* Icon pill */}
                 <span
                   className="flex items-center justify-center transition-all duration-300"
                   style={{
-                    width: 42,
-                    height: 42,
-                    borderRadius: '14px',
+                    width: 44,
+                    height: 36,
+                    borderRadius: '12px',
                     background: isActive
-                      ? `linear-gradient(145deg, ${color}30, ${color}12)`
+                      ? `linear-gradient(145deg, ${color}28, ${color}10)`
                       : 'transparent',
                     boxShadow: isActive
-                      ? `0 4px 16px ${glow}, inset 0 1px 0 rgba(255,255,255,0.12)`
+                      ? `0 2px 14px ${glow}, inset 0 1px 0 rgba(255,255,255,0.1)`
                       : 'none',
-                    border: isActive
-                      ? `1px solid ${color}44`
-                      : '1px solid transparent',
-                    transform: isActive ? 'translateY(-2px) scale(1.06)' : 'translateY(0) scale(1)',
+                    border: isActive ? `1px solid ${color}50` : '1px solid transparent',
+                    transform: isActive ? 'translateY(-3px) scale(1.08)' : 'translateY(0) scale(1)',
                   }}
                 >
                   <Icon
-                    size={isActive ? 22 : 20}
-                    strokeWidth={isActive ? 2.5 : 1.8}
+                    size={isActive ? 21 : 19}
+                    strokeWidth={isActive ? 2.8 : 1.7}
                     style={{
-                      color: isActive ? color : 'var(--text-muted)',
-                      filter: isActive ? `drop-shadow(0 0 6px ${glow})` : 'none',
+                      color: isActive ? color : 'rgba(255,255,255,0.28)',
+                      filter: isActive ? `drop-shadow(0 0 8px ${glow})` : 'none',
+                      transition: 'all 0.2s',
                     }}
                   />
                 </span>
 
+                {/* Label */}
                 <span
                   style={{
                     fontSize: '9px',
-                    fontWeight: isActive ? 800 : 500,
-                    color: isActive ? color : 'var(--text-muted)',
-                    textShadow: isActive ? `0 0 8px ${glow}` : 'none',
-                    letterSpacing: '0.02em',
+                    fontWeight: isActive ? 900 : 500,
+                    color: isActive ? color : 'rgba(255,255,255,0.28)',
+                    textShadow: isActive ? `0 0 10px ${glow}` : 'none',
+                    letterSpacing: isActive ? '0.03em' : '0.01em',
+                    transition: 'all 0.2s',
                   }}
                 >
                   {tr(labelKey, lang)}

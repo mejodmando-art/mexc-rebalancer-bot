@@ -79,7 +79,7 @@ export default function App() {
               {tab === 'dashboard'  && <Dashboard      lang={lang} />}
               {tab === 'portfolios' && <Portfolios     lang={lang} onActivated={() => setTab('dashboard')} onCreateBot={() => setTab('create')} />}
               {tab === 'create'     && <CreateBot      lang={lang} onCreated={() => setTab('portfolios')} />}
-              {tab === 'settings'   && <Settings       lang={lang} onSaved={() => setTab('dashboard')} />}
+              {tab === 'settings'   && <Settings       lang={lang} dark={dark} onLangToggle={toggleLang} onThemeToggle={toggleTheme} onSaved={() => setTab('dashboard')} />}
               {tab === 'copy'       && <CopyPortfolio  lang={lang} onCreated={() => setTab('portfolios')} />}
               {tab === 'grid'       && (
                 <>
