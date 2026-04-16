@@ -199,9 +199,10 @@ function CreateGridBotModal({ ar, onClose, onCreated }: {
   const [showSymbolPicker, setShowSymbolPicker] = useState(false);
   const [investment,       setInvestment]       = useState('');
   const [mode,             setMode]             = useState<'normal' | 'infinity'>('normal');
-  const [gridCountManual,  setGridCountManual]  = useState<number | null>(null); // null = auto
-  const [priceLow,         setPriceLow]         = useState('');
-  const [priceHigh,        setPriceHigh]        = useState('');
+  const [gridCountManual,  setGridCountManual]  = useState<number | null>(null);
+  const [lowerPct,         setLowerPct]         = useState('5');
+  const [upperPct,         setUpperPct]         = useState('5');
+  const [expandDir,        setExpandDir]        = useState<'both' | 'lower' | 'upper'>('both');
   const [preview,          setPreview]          = useState<any>(null);
   const [loading,          setLoading]          = useState(false);
   const [creating,         setCreating]         = useState(false);
@@ -212,12 +213,20 @@ function CreateGridBotModal({ ar, onClose, onCreated }: {
     if (!symbol || inv < 1) { setPreview(null); return; }
     const t = setTimeout(async () => {
       setLoading(true);
-      try { setPreview(await previewGridBot(symbol, inv, gridCountManual ?? undefined)); setError(''); }
+      try {
+        setPreview(await previewGridBot(
+          symbol, inv,
+          gridCountManual ?? undefined,
+          parseFloat(lowerPct) || 5,
+          parseFloat(upperPct) || 5,
+        ));
+        setError('');
+      }
       catch (e: any) { setError(e.message); setPreview(null); }
       finally { setLoading(false); }
     }, 700);
     return () => clearTimeout(t);
-  }, [symbol, investment, gridCountManual]);
+  }, [symbol, investment, gridCountManual, lowerPct, upperPct]);
 
   const inv = parseFloat(investment) || 0;
   const freeUsdt: number | null = preview?.free_usdt ?? null;
@@ -226,15 +235,23 @@ function CreateGridBotModal({ ar, onClose, onCreated }: {
   const handleCreate = async () => {
     const invNum = parseFloat(investment);
     if (!symbol || invNum < 1) { setError(ar ? 'أدخل الزوج والمبلغ' : 'Enter symbol and amount'); return; }
-    const low  = priceLow  ? parseFloat(priceLow)  : undefined;
-    const high = priceHigh ? parseFloat(priceHigh) : undefined;
-    if (low !== undefined && high !== undefined && low >= high) {
-      setError(ar ? 'السعر الأدنى يجب أن يكون أقل من الأعلى' : 'Price low must be less than price high');
+    const lp = parseFloat(lowerPct);
+    const up = parseFloat(upperPct);
+    if (isNaN(lp) || lp <= 0 || isNaN(up) || up <= 0) {
+      setError(ar ? 'أدخل نسبة نطاق صحيحة (أكبر من 0)' : 'Enter valid range % (greater than 0)');
       return;
     }
     setCreating(true); setError('');
     try {
-      await createGridBot({ symbol, investment: invNum, mode, grid_count: gridCountManual ?? undefined, price_low: low, price_high: high });
+      await createGridBot({
+        symbol,
+        investment: invNum,
+        mode,
+        grid_count: gridCountManual ?? undefined,
+        lower_pct: lp,
+        upper_pct: mode === 'infinity' ? 0.1 : up,
+        expand_direction: expandDir,
+      });
       onCreated();
     }
     catch (e: any) { setError(e.message); }
@@ -444,69 +461,120 @@ function CreateGridBotModal({ ar, onClose, onCreated }: {
           )}
         </div>
 
-        {/* النطاق السعري */}
+        {/* نطاق الشبكة % */}
         <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <div className="text-xs font-semibold" style={{ color: 'rgba(255,255,255,0.5)' }}>
-              {ar ? 'النطاق السعري (اختياري)' : 'Price Range (optional)'}
-            </div>
-            {(priceLow || priceHigh) && (
-              <button
-                onClick={() => { setPriceLow(''); setPriceHigh(''); }}
-                className="text-[10px] px-2 py-0.5 rounded-lg font-bold"
-                style={{ background: 'rgba(255,82,82,0.12)', color: '#FF5252', border: '1px solid rgba(255,82,82,0.25)' }}>
-                {ar ? 'مسح' : 'Clear'}
-              </button>
-            )}
+          <div className="text-xs font-semibold" style={{ color: 'rgba(255,255,255,0.5)' }}>
+            {ar ? 'نطاق الشبكة (%)' : 'Grid Range (%)'}
           </div>
-          {/* Preview range hint */}
-          {preview && !priceLow && !priceHigh && (
+
+          {/* معاينة السعر المحسوب */}
+          {preview && (
             <div className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs"
               style={{ background: 'rgba(0,245,212,0.06)', border: '1px solid rgba(0,245,212,0.15)' }}>
-              <span style={{ color: 'rgba(255,255,255,0.4)' }}>{ar ? 'تلقائي:' : 'Auto:'}</span>
-              <span style={{ color: '#00F5D4', fontWeight: 700 }}>${preview.price_low?.toFixed(4)}</span>
+              <span style={{ color: '#00E676', fontWeight: 700 }}>↓ ${preview.price_low?.toFixed(4)}</span>
               <span style={{ color: 'rgba(255,255,255,0.3)' }}>→</span>
-              <span style={{ color: '#00F5D4', fontWeight: 700 }}>${preview.price_high?.toFixed(4)}</span>
+              <span style={{ color: '#FF5252', fontWeight: 700 }}>
+                {mode === 'infinity' ? '∞' : `↑ $${preview.price_high?.toFixed(4)}`}
+              </span>
             </div>
           )}
+
           <div className="grid grid-cols-2 gap-2">
+            {/* نطاق أسفل */}
             <div className="space-y-1">
               <div className="text-[10px] font-semibold" style={{ color: 'rgba(0,230,118,0.7)' }}>
-                ↓ {ar ? 'الحد الأدنى' : 'Price Low'}
+                ↓ {ar ? 'نطاق أسفل' : 'Lower Range'}
               </div>
-              <input
-                type="number" min={0} step="any"
-                value={priceLow}
-                onChange={e => setPriceLow(e.target.value)}
-                placeholder={preview?.price_low?.toFixed(4) ?? '0.0000'}
-                className="w-full rounded-xl px-3 py-2 text-sm font-bold outline-none"
-                style={{ background: 'rgba(0,230,118,0.06)', color: '#00E676', border: '1px solid rgba(0,230,118,0.25)' }}
-              />
+              <div className="relative">
+                <input
+                  type="number" min={0.1} max={50} step={0.5}
+                  value={lowerPct}
+                  onChange={e => setLowerPct(e.target.value)}
+                  className="w-full rounded-xl px-3 py-2 text-sm font-bold outline-none pe-6"
+                  style={{ background: 'rgba(0,230,118,0.06)', color: '#00E676', border: '1px solid rgba(0,230,118,0.25)' }}
+                />
+                <span className="absolute end-2 top-1/2 -translate-y-1/2 text-[10px] font-bold pointer-events-none" style={{ color: '#00E676' }}>%</span>
+              </div>
+              <div className="flex gap-1">
+                {[2, 5, 10].map(v => (
+                  <button key={v} onClick={() => setLowerPct(String(v))}
+                    className="flex-1 py-1 rounded-lg text-[9px] font-bold"
+                    style={{
+                      background: lowerPct === String(v) ? 'rgba(0,230,118,0.15)' : 'rgba(255,255,255,0.04)',
+                      color: lowerPct === String(v) ? '#00E676' : 'rgba(255,255,255,0.3)',
+                      border: `1px solid ${lowerPct === String(v) ? 'rgba(0,230,118,0.3)' : 'rgba(255,255,255,0.08)'}`,
+                    }}>
+                    {v}%
+                  </button>
+                ))}
+              </div>
             </div>
+
+            {/* نطاق أعلى */}
             <div className="space-y-1">
-              <div className="text-[10px] font-semibold" style={{ color: 'rgba(255,82,82,0.7)' }}>
-                ↑ {ar ? 'الحد الأعلى' : 'Price High'}
+              <div className="text-[10px] font-semibold" style={{ color: mode === 'infinity' ? 'rgba(255,255,255,0.2)' : 'rgba(255,82,82,0.7)' }}>
+                ↑ {ar ? 'نطاق أعلى' : 'Upper Range'}
+                {mode === 'infinity' && <span className="ms-1">∞</span>}
               </div>
-              <input
-                type="number" min={0} step="any"
-                value={priceHigh}
-                onChange={e => setPriceHigh(e.target.value)}
-                placeholder={mode === 'infinity' ? '∞' : (preview?.price_high?.toFixed(4) ?? '0.0000')}
-                disabled={mode === 'infinity'}
-                className="w-full rounded-xl px-3 py-2 text-sm font-bold outline-none"
-                style={{
-                  background: mode === 'infinity' ? 'rgba(255,255,255,0.03)' : 'rgba(255,82,82,0.06)',
-                  color: mode === 'infinity' ? 'rgba(255,255,255,0.2)' : '#FF5252',
-                  border: `1px solid ${mode === 'infinity' ? 'rgba(255,255,255,0.08)' : 'rgba(255,82,82,0.25)'}`,
-                }}
-              />
+              <div className="relative">
+                <input
+                  type="number" min={0.1} max={50} step={0.5}
+                  value={mode === 'infinity' ? '' : upperPct}
+                  onChange={e => setUpperPct(e.target.value)}
+                  disabled={mode === 'infinity'}
+                  placeholder={mode === 'infinity' ? '∞' : undefined}
+                  className="w-full rounded-xl px-3 py-2 text-sm font-bold outline-none pe-6"
+                  style={{
+                    background: mode === 'infinity' ? 'rgba(255,255,255,0.03)' : 'rgba(255,82,82,0.06)',
+                    color: mode === 'infinity' ? 'rgba(255,255,255,0.2)' : '#FF5252',
+                    border: `1px solid ${mode === 'infinity' ? 'rgba(255,255,255,0.08)' : 'rgba(255,82,82,0.25)'}`,
+                  }}
+                />
+                {mode !== 'infinity' && (
+                  <span className="absolute end-2 top-1/2 -translate-y-1/2 text-[10px] font-bold pointer-events-none" style={{ color: '#FF5252' }}>%</span>
+                )}
+              </div>
+              {mode !== 'infinity' && (
+                <div className="flex gap-1">
+                  {[2, 5, 10].map(v => (
+                    <button key={v} onClick={() => setUpperPct(String(v))}
+                      className="flex-1 py-1 rounded-lg text-[9px] font-bold"
+                      style={{
+                        background: upperPct === String(v) ? 'rgba(255,82,82,0.15)' : 'rgba(255,255,255,0.04)',
+                        color: upperPct === String(v) ? '#FF5252' : 'rgba(255,255,255,0.3)',
+                        border: `1px solid ${upperPct === String(v) ? 'rgba(255,82,82,0.3)' : 'rgba(255,255,255,0.08)'}`,
+                      }}>
+                      {v}%
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
-          {priceLow && priceHigh && parseFloat(priceLow) >= parseFloat(priceHigh) && (
-            <div className="text-[10px] text-center" style={{ color: '#FF5252' }}>
-              ⚠ {ar ? 'الحد الأدنى يجب أن يكون أقل من الأعلى' : 'Low must be less than high'}
+
+          {/* اتجاه التوسع */}
+          <div className="space-y-1.5 pt-1">
+            <div className="text-[10px] font-semibold" style={{ color: 'rgba(255,255,255,0.35)' }}>
+              {ar ? 'عند تجاوز النطاق — وسّع:' : 'When price exits range — expand:'}
             </div>
-          )}
+            <div className="grid grid-cols-3 gap-1.5">
+              {([
+                ['both',  ar ? 'الجهتين'  : 'Both',  '↕'],
+                ['lower', ar ? 'أسفل فقط' : 'Lower', '↓'],
+                ['upper', ar ? 'أعلى فقط' : 'Upper', '↑'],
+              ] as const).map(([val, label, icon]) => (
+                <button key={val} onClick={() => setExpandDir(val)}
+                  className="flex flex-col items-center gap-0.5 py-2 rounded-xl"
+                  style={{
+                    background: expandDir === val ? 'rgba(240,185,11,0.12)' : 'rgba(255,255,255,0.04)',
+                    border: `1px solid ${expandDir === val ? 'rgba(240,185,11,0.4)' : 'rgba(255,255,255,0.08)'}`,
+                  }}>
+                  <span className="text-sm leading-none" style={{ color: expandDir === val ? '#F0B90B' : 'rgba(255,255,255,0.3)' }}>{icon}</span>
+                  <span className="text-[9px] font-bold" style={{ color: expandDir === val ? '#F0B90B' : 'rgba(255,255,255,0.3)' }}>{label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
 
         {/* النوع */}
