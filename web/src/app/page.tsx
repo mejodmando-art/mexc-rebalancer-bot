@@ -9,6 +9,7 @@ import CreateBot from '../components/CreateBot';
 import Settings from '../components/Settings';
 import CopyPortfolio from '../components/CopyPortfolio';
 import GridBot from '../components/GridBot';
+import MobileGridBot from '../components/MobileGridBot';
 import { ToastProvider } from '../components/Toast';
 import { getBotStatus } from '../lib/api';
 import { Lang } from '../lib/i18n';
@@ -80,7 +81,14 @@ export default function App() {
               {tab === 'create'     && <CreateBot      lang={lang} onCreated={() => setTab('portfolios')} />}
               {tab === 'settings'   && <Settings       lang={lang} onSaved={() => setTab('dashboard')} />}
               {tab === 'copy'       && <CopyPortfolio  lang={lang} onCreated={() => setTab('portfolios')} />}
-              {tab === 'grid'       && <GridBot        lang={lang} />}
+              {tab === 'grid'       && (
+                <>
+                  {/* Desktop grid bot view */}
+                  <div className="hidden lg:block"><GridBot lang={lang} /></div>
+                  {/* Mobile grid bot view */}
+                  <div className="block lg:hidden -mx-4 sm:-mx-6"><MobileGridBot lang={lang} /></div>
+                </>
+              )}
             </div>
           </main>
         </div>
