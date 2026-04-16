@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Lang } from '../lib/i18n';
 import {
-  listGridBots, stopGridBot, resumeGridBot, deleteGridBot, getGridOrders,
+  listGridBots, stopGridBot, resumeGridBot, deleteGridBot, getGridOrders, createGridBot,
 } from '../lib/api';
 
 interface Props { lang: Lang; }
@@ -191,27 +191,91 @@ function OrdersTable({ orders, ar }: { orders: any[]; ar: boolean }) {
   );
 }
 
+function SettingsModal({ bot, ar, onClose, onSave }: {
+  bot: any; ar: boolean;
+  onClose: () => void;
+  onSave: (investment: number, gridCount: number) => void;
+}) {
+  const [investment, setInvestment] = useState(String(Number(bot.investment ?? bot.invested_usdt ?? 50)));
+  const [gridCount,  setGridCount]  = useState(String(Number(bot.grid_count ?? 20)));
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center" style={{ background: 'rgba(0,0,0,0.75)' }} onClick={onClose}>
+      <div className="w-full max-w-lg rounded-t-3xl p-5 space-y-4"
+        style={{ background: '#0f1923', border: '1px solid rgba(0,245,212,0.2)' }}
+        onClick={e => e.stopPropagation()}>
+        <h3 className="font-bold text-base text-center" style={{ color: '#00F5D4' }}>
+          {ar ? 'إعدادات الشبكة' : 'Grid Settings'}
+        </h3>
+
+        {/* قيمة الدخول */}
+        <div className="space-y-1">
+          <label className="text-xs font-semibold" style={{ color: 'rgba(255,255,255,0.5)' }}>
+            {ar ? 'قيمة الدخول (USDT)' : 'Investment (USDT)'}
+          </label>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setInvestment(v => String(Math.max(1, Number(v) - 10)))}
+              className="w-10 h-10 rounded-xl text-lg font-bold flex items-center justify-center"
+              style={{ background: 'rgba(255,82,82,0.15)', color: '#FF5252', border: '1px solid rgba(255,82,82,0.3)' }}>−</button>
+            <input type="number" value={investment} onChange={e => setInvestment(e.target.value)}
+              className="flex-1 text-center font-bold text-base rounded-xl px-3 py-2 outline-none"
+              style={{ background: 'rgba(255,255,255,0.06)', color: '#fff', border: '1px solid rgba(0,245,212,0.2)' }} />
+            <button onClick={() => setInvestment(v => String(Number(v) + 10))}
+              className="w-10 h-10 rounded-xl text-lg font-bold flex items-center justify-center"
+              style={{ background: 'rgba(0,230,118,0.15)', color: '#00E676', border: '1px solid rgba(0,230,118,0.3)' }}>+</button>
+          </div>
+        </div>
+
+        {/* عدد الشبكات */}
+        <div className="space-y-1">
+          <label className="text-xs font-semibold" style={{ color: 'rgba(255,255,255,0.5)' }}>
+            {ar ? 'عدد الشبكات' : 'Grid Count'}
+          </label>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setGridCount(v => String(Math.max(2, Number(v) - 1)))}
+              className="w-10 h-10 rounded-xl text-lg font-bold flex items-center justify-center"
+              style={{ background: 'rgba(255,82,82,0.15)', color: '#FF5252', border: '1px solid rgba(255,82,82,0.3)' }}>−</button>
+            <input type="number" value={gridCount} onChange={e => setGridCount(e.target.value)}
+              className="flex-1 text-center font-bold text-base rounded-xl px-3 py-2 outline-none"
+              style={{ background: 'rgba(255,255,255,0.06)', color: '#fff', border: '1px solid rgba(0,245,212,0.2)' }} />
+            <button onClick={() => setGridCount(v => String(Number(v) + 1))}
+              className="w-10 h-10 rounded-xl text-lg font-bold flex items-center justify-center"
+              style={{ background: 'rgba(0,230,118,0.15)', color: '#00E676', border: '1px solid rgba(0,230,118,0.3)' }}>+</button>
+          </div>
+        </div>
+
+        <div className="flex gap-3 pt-1">
+          <button onClick={onClose} className="flex-1 py-3 rounded-2xl text-sm font-bold"
+            style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.5)', border: '1px solid rgba(255,255,255,0.1)' }}>
+            {ar ? 'إلغاء' : 'Cancel'}
+          </button>
+          <button onClick={() => onSave(Number(investment), Number(gridCount))}
+            className="flex-1 py-3 rounded-2xl text-sm font-bold"
+            style={{ background: 'rgba(0,245,212,0.15)', color: '#00F5D4', border: '1px solid rgba(0,245,212,0.35)' }}>
+            {ar ? 'حفظ' : 'Save'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function BotCard({ bot, lang, onRefresh }: { bot: any; lang: Lang; onRefresh: () => void }) {
   const ar = lang === 'ar';
-  const [orders, setOrders]         = useState<any[]>([]);
-  const [stopping, setStopping]     = useState(false);
-  const [deleting, setDeleting]     = useState(false);
-  const [riskOn, setRiskOn]         = useState(true);
-  const [showOrders, setShowOrders] = useState(false);
+  const [orders, setOrders]           = useState<any[]>([]);
+  const [stopping, setStopping]       = useState(false);
+  const [deleting, setDeleting]       = useState(false);
+  const [rebuilding, setRebuilding]   = useState(false);
+  const [showOrders, setShowOrders]   = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
 
   const isRunning = bot.status === 'running';
-  const low       = Number(bot.price_low  ?? 72000);
-  const high      = Number(bot.price_high ?? 96000);
-  const current   = Number(bot.current_price ?? bot.last_price ?? 84372.5);
-  const gridCount = Number(bot.grid_count ?? 24);
-  const invested  = Number(bot.investment ?? bot.invested_usdt ?? 1000);
-  const realPnl   = Number(bot.realized_pnl   ?? 248.75);
-  const unrealPnl = Number(bot.unrealized_pnl ?? 86.20);
-  const realPct   = invested > 0 ? (realPnl / invested) * 100 : 12.44;
-  const unrealPct = invested > 0 ? (unrealPnl / invested) * 100 : 4.31;
-  const utilPct   = Math.min(70, 100);
-  const drawdown  = 15;
-  const stopLoss  = low;
+  const invested  = Number(bot.investment ?? bot.invested_usdt ?? 50);
+  const realPnl   = Number(bot.realized_pnl   ?? 0);
+  const unrealPnl = Number(bot.unrealized_pnl ?? 0);
+  const realPct   = invested > 0 ? (realPnl / invested) * 100 : 0;
+  const unrealPct = invested > 0 ? (unrealPnl / invested) * 100 : 0;
+  const utilPct   = Math.min(Math.abs(invested > 0 ? (invested / (invested + 30)) * 100 : 70), 100);
 
   useEffect(() => {
     if (!showOrders) return;
@@ -227,23 +291,42 @@ function BotCard({ bot, lang, onRefresh }: { bot: any; lang: Lang; onRefresh: ()
     try { await resumeGridBot(bot.id); onRefresh(); } finally { setStopping(false); }
   };
   const handleDelete = async () => {
-    if (!confirm(ar ? 'حذف البوت؟' : 'Delete this bot?')) return;
+    if (!confirm(ar ? 'إغلاق طارئ وحذف البوت؟' : 'Emergency close & delete bot?')) return;
     setDeleting(true);
     try { await deleteGridBot(bot.id); onRefresh(); } finally { setDeleting(false); }
   };
+  const handleRebuild = async (investment?: number, gridCount?: number) => {
+    setRebuilding(true);
+    setShowSettings(false);
+    try {
+      await stopGridBot(bot.id);
+      await deleteGridBot(bot.id);
+      await createGridBot({
+        symbol: bot.symbol,
+        investment: investment ?? invested,
+        grid_count: gridCount ?? Number(bot.grid_count ?? 20),
+        mode: bot.mode ?? 'normal',
+      });
+      onRefresh();
+    } finally { setRebuilding(false); }
+  };
+  const handleSaveSettings = (investment: number, gridCount: number) => {
+    handleRebuild(investment, gridCount);
+  };
 
-  const modeTags = [
-    bot.mode === 'infinity' ? (ar ? 'لانهائي' : 'Infinity') : (ar ? 'عادي' : 'Normal'),
-    ar ? 'استثمار تلقائي' : 'Auto-Invest',
-  ];
+  // Symbol display: remove USDT suffix for cleaner look
+  const symbolDisplay = (bot.symbol ?? 'BTC/USDT').replace('USDT', '');
 
   return (
     <div className="mgb-card">
 
-      {/* ── Header: pair + status ── */}
-      <div className="mgb-card-header">
-        <div className="mgb-pair-block">
-          <span className="mgb-pair">{bot.symbol ?? 'BTC/USDT'}</span>
+      {/* ── Header: symbol bold + invested USDT ── */}
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <span style={{ fontSize: 22, fontWeight: 900, color: '#fff', letterSpacing: -0.5 }}>
+            {symbolDisplay}
+          </span>
+          <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.35)', fontWeight: 600 }}>/ USDT</span>
           <div className="mgb-status-pill" style={{ background: isRunning ? 'rgba(0,230,118,0.15)' : 'rgba(255,82,82,0.12)' }}>
             <PulsingDot color={isRunning ? '#00E676' : '#FF5252'} />
             <span style={{ color: isRunning ? '#00E676' : '#FF5252', fontSize: 11, fontWeight: 600 }}>
@@ -251,22 +334,13 @@ function BotCard({ bot, lang, onRefresh }: { bot: any; lang: Lang; onRefresh: ()
             </span>
           </div>
         </div>
-        <div className="mgb-price-block">
-          <span className="mgb-current-price">${current.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-          <span className="mgb-price-change" style={{ color: '#00E676' }}>+2.34%</span>
+        <div className="text-end">
+          <div style={{ fontSize: 20, fontWeight: 900, color: '#00F5D4' }}>
+            ${invested.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </div>
+          <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', fontWeight: 600 }}>USDT</div>
         </div>
       </div>
-
-      {/* ── Mode tags ── */}
-      <div className="mgb-tags">
-        {modeTags.map(tag => (
-          <span key={tag} className="mgb-tag">{tag}</span>
-        ))}
-        <span className="mgb-tag mgb-tag-grids">{gridCount} {ar ? 'شبكة' : 'Grids'}</span>
-      </div>
-
-      {/* ── Range bar ── */}
-      <RangeBar low={low} high={high} current={current} />
 
       {/* ── PnL cards ── */}
       <div className="mgb-pnl-row">
@@ -302,8 +376,9 @@ function BotCard({ bot, lang, onRefresh }: { bot: any; lang: Lang; onRefresh: ()
       </button>
       {showOrders && <OrdersTable orders={orders} ar={ar} />}
 
-      {/* ── Quick controls ── */}
-      <div className="mgb-controls">
+      {/* ── 4 buttons 2×2 ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 12 }}>
+        {/* إيقاف / تشغيل */}
         {isRunning ? (
           <button className="mgb-btn mgb-btn-stop" onClick={handleStop} disabled={stopping}>
             {stopping ? '…' : (ar ? 'إيقاف' : 'Stop')}
@@ -313,43 +388,32 @@ function BotCard({ bot, lang, onRefresh }: { bot: any; lang: Lang; onRefresh: ()
             {stopping ? '…' : (ar ? 'تشغيل' : 'Start')}
           </button>
         )}
-        <button className="mgb-btn mgb-btn-rebuild" onClick={onRefresh}>
-          {ar ? 'إعادة بناء' : 'Rebuild'}
-        </button>
-        <button className="mgb-btn mgb-btn-settings">
-          {ar ? 'إعدادات' : 'Settings'}
-        </button>
+
+        {/* إغلاق طارئ */}
         <button className="mgb-btn mgb-btn-emergency" onClick={handleDelete} disabled={deleting}>
           {deleting ? '…' : (ar ? 'إغلاق طارئ' : 'Emergency Close')}
         </button>
+
+        {/* إعدادات */}
+        <button className="mgb-btn mgb-btn-settings" onClick={() => setShowSettings(true)}>
+          {ar ? 'إعدادات' : 'Settings'}
+        </button>
+
+        {/* إعادة بناء */}
+        <button className="mgb-btn mgb-btn-rebuild" onClick={() => handleRebuild()} disabled={rebuilding}>
+          {rebuilding ? '…' : (ar ? 'إعادة بناء' : 'Rebuild')}
+        </button>
       </div>
 
-      {/* ── Risk management ── */}
-      <div className="mgb-risk-section">
-        <div className="mgb-risk-header">
-          <span className="mgb-section-label">{ar ? 'إدارة المخاطر' : 'Risk Management'}</span>
-          <button
-            className="mgb-toggle"
-            onClick={() => setRiskOn(v => !v)}
-            aria-pressed={riskOn}
-            style={{ background: riskOn ? '#00F5D4' : 'rgba(255,255,255,0.1)' }}
-          >
-            <span className="mgb-toggle-thumb" style={{ transform: riskOn ? 'translateX(18px)' : 'translateX(2px)' }} />
-          </button>
-        </div>
-        {riskOn && (
-          <div className="mgb-risk-body">
-            <div className="mgb-risk-row">
-              <span className="mgb-muted">{ar ? 'الحد الأقصى للخسارة' : 'Max Drawdown'}</span>
-              <RiskBar value={drawdown} max={20} />
-            </div>
-            <div className="mgb-risk-row">
-              <span className="mgb-muted">{ar ? 'وقف الخسارة' : 'Stop-Loss'}</span>
-              <span className="mgb-mono" style={{ color: '#FF9800' }}>${stopLoss.toLocaleString()}</span>
-            </div>
-          </div>
-        )}
-      </div>
+      {/* Settings modal */}
+      {showSettings && (
+        <SettingsModal
+          bot={bot}
+          ar={ar}
+          onClose={() => setShowSettings(false)}
+          onSave={handleSaveSettings}
+        />
+      )}
 
     </div>
   );
