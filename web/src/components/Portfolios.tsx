@@ -9,7 +9,7 @@ import {
 } from '../lib/api';
 import { Lang, tr } from '../lib/i18n';
 
-interface Props { lang: Lang; onActivated: () => void; onCreateBot?: () => void; }
+interface Props { lang: Lang; onActivated: () => void; onCreateBot?: () => void; onEditPortfolio?: (id: number) => void; }
 
 type RebalanceType = 'market_value' | 'equal';
 
@@ -390,7 +390,7 @@ function CopyModal({ source, lang, onClose, onDone }: CopyModalProps) {
 }
 
 // ── Main component ───────────────────────────────────────────────────────────
-export default function Portfolios({ lang, onActivated, onCreateBot }: Props) {
+export default function Portfolios({ lang, onActivated, onCreateBot, onEditPortfolio }: Props) {
   const [portfolios, setPortfolios]       = useState<any[]>([]);
   const [loading, setLoading]             = useState(true);
   const [msg, setMsg]                     = useState('');
@@ -654,89 +654,84 @@ export default function Portfolios({ lang, onActivated, onCreateBot }: Props) {
                   </div>
                 </div>
 
-                {/* Buy & Activate button — only for non-active portfolios */}
-                {!p.running && (
+                {/* ── Action buttons: 2×2 grid ── */}
+                <div className="grid grid-cols-2 gap-2">
+                  {/* Row 1: Buy & Activate / Copy */}
                   <button
                     onClick={() => handleBuyAndActivate(p)}
-                    disabled={activating === p.id}
-                    className="w-full py-2 rounded-xl text-sm font-semibold transition-all disabled:opacity-40 btn-primary"
+                    disabled={activating === p.id || p.running}
+                    className="py-2.5 rounded-xl text-sm font-semibold transition-all disabled:opacity-40 btn-primary"
                   >
                     {activating === p.id ? '⏳' : `🛒 ${tr('buyAndActivate', lang)}`}
                   </button>
-                )}
 
-                {/* Copy portfolio button */}
-                <button
-                  onClick={() => setCopyModal(p)}
-                  className="w-full py-2 rounded-xl text-sm font-semibold transition-colors"
-                  style={{
-                    background: 'var(--bg-input)',
-                    border: '1px solid var(--border)',
-                    color: 'var(--text-muted)',
-                  }}
-                >
-                  📋 {tr('copyPortfolio', lang)}
-                </button>
+                  <button
+                    onClick={() => setCopyModal(p)}
+                    className="py-2.5 rounded-xl text-sm font-semibold transition-colors"
+                    style={{ background: 'var(--bg-input)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}
+                  >
+                    📋 {tr('copyPortfolio', lang)}
+                  </button>
 
-                {/* Rebalance button */}
-                <button
-                  onClick={() => setRebalModal({ id: p.id, name: p.name, active: true })}
-                  className="w-full py-2 rounded-xl border-2 border-brand text-brand text-sm font-semibold hover:bg-brand/10 transition-colors"
-                >
-                  ⚖️ {tr('rebalancePortfolio', lang)}
-                </button>
+                  {/* Row 2: Rebalance / Stop & Sell */}
+                  <button
+                    onClick={() => setRebalModal({ id: p.id, name: p.name, active: true })}
+                    className="py-2.5 rounded-xl border-2 border-brand text-brand text-sm font-semibold hover:bg-brand/10 transition-colors"
+                  >
+                    ⚖️ {tr('rebalancePortfolio', lang)}
+                  </button>
 
-                {/* Stop & Sell button — all portfolios */}
-                <button
-                  onClick={() => setStopSellModal({ id: p.id, name: p.name })}
-                  className="w-full py-2 rounded-xl border-2 border-red-700 text-red-400 text-sm font-semibold hover:bg-red-900/20 transition-colors"
-                >
-                  🛑 {tr('stopAndSell', lang)}
-                </button>
+                  <button
+                    onClick={() => setStopSellModal({ id: p.id, name: p.name })}
+                    className="py-2.5 rounded-xl border-2 border-red-700 text-red-400 text-sm font-semibold hover:bg-red-900/20 transition-colors"
+                  >
+                    🛑 {tr('stopAndSell', lang)}
+                  </button>
+                </div>
 
-                {/* Start / Stop / Delete actions */}
-                <div className="flex gap-2 pt-2 border-t" style={{ borderColor: 'var(--border)' }}>
-                  {/* Start / Stop toggle */}
+                {/* Row 3: Start/Stop + Delete (full row) */}
+                <div className="flex gap-2">
                   <button
                     onClick={() => handleToggleLoop(p)}
                     disabled={togglingLoop === p.id}
-                    className={`flex-1 text-sm py-1.5 rounded-xl font-semibold transition-colors ${
-                      p.running
-                        ? 'bg-gray-700 text-gray-200 hover:bg-gray-600'
-                        : 'btn-primary'
+                    className={`flex-1 text-sm py-2.5 rounded-xl font-semibold transition-colors ${
+                      p.running ? 'bg-gray-700 text-gray-200 hover:bg-gray-600' : 'btn-primary'
                     }`}
                   >
                     {togglingLoop === p.id ? '⏳' : p.running ? `⏹ ${tr('stopPortfolio', lang)}` : `▶️ ${tr('startPortfolio', lang)}`}
                   </button>
 
-                  {/* Delete */}
                   {confirmDelete === p.id ? (
                     <div className="flex gap-1">
-                      <button
-                        onClick={() => handleDelete(p.id)}
-                        disabled={deleting === p.id}
-                        className="btn-danger text-xs px-3 py-1.5"
-                      >
+                      <button onClick={() => handleDelete(p.id)} disabled={deleting === p.id} className="btn-danger text-xs px-3 py-2.5">
                         {deleting === p.id ? '⏳' : tr('confirmDelete', lang)}
                       </button>
-                      <button
-                        onClick={() => setConfirmDelete(null)}
-                        className="btn-secondary text-xs px-3 py-1.5"
-                      >
-                        ✖
-                      </button>
+                      <button onClick={() => setConfirmDelete(null)} className="btn-secondary text-xs px-3 py-2.5">✖</button>
                     </div>
                   ) : (
                     <button
                       onClick={() => setConfirmDelete(p.id)}
                       disabled={p.running}
-                      className="btn-secondary text-sm px-3 py-1.5 disabled:opacity-30"
+                      className="btn-secondary text-sm px-3 py-2.5 disabled:opacity-30"
                       title={p.running ? tr('cantDeleteActive', lang) : tr('deletePortfolio', lang)}
                     >
                       🗑️
                     </button>
                   )}
                 </div>
+
+                {/* Row 4: Portfolio settings — full width */}
+                <button
+                  onClick={() => onEditPortfolio?.(p.id)}
+                  className="w-full py-2.5 rounded-xl text-sm font-semibold transition-all"
+                  style={{
+                    background: 'rgba(96,165,250,0.08)',
+                    border: '1px solid rgba(96,165,250,0.3)',
+                    color: '#60A5FA',
+                  }}
+                >
+                  ⚙️ {lang === 'ar' ? 'إعدادات المحفظة' : 'Portfolio Settings'}
+                </button>
               </div>
             ))}
           </div>

@@ -10,18 +10,20 @@ import Settings from '../components/Settings';
 import CopyPortfolio from '../components/CopyPortfolio';
 import GridBot from '../components/GridBot';
 import MobileGridBot from '../components/MobileGridBot';
+import PortfolioSettings from '../components/PortfolioSettings';
 import { ToastProvider } from '../components/Toast';
 import { getBotStatus } from '../lib/api';
 import { Lang } from '../lib/i18n';
 import ErrorBoundary from '../components/ErrorBoundary';
 
-type Tab = 'dashboard' | 'portfolios' | 'create' | 'settings' | 'copy' | 'grid';
+type Tab = 'dashboard' | 'portfolios' | 'create' | 'settings' | 'copy' | 'grid' | 'portfolio-settings';
 
 export default function App() {
-  const [tab,        setTab]        = useState<Tab>('dashboard');
-  const [botRunning, setBotRunning] = useState(false);
-  const [lang,       setLang]       = useState<Lang>('ar');
-  const [dark,       setDark]       = useState(true);
+  const [tab,              setTab]              = useState<Tab>('dashboard');
+  const [editPortfolioId,  setEditPortfolioId]  = useState<number | null>(null);
+  const [botRunning,       setBotRunning]       = useState(false);
+  const [lang,             setLang]             = useState<Lang>('ar');
+  const [dark,             setDark]             = useState(true);
 
   useEffect(() => {
     const html = document.documentElement;
@@ -77,7 +79,8 @@ export default function App() {
           <main className="flex-1 px-4 sm:px-6 py-6 pb-24 lg:pb-8 max-w-screen-xl mx-auto w-full">
             <div key={tab} className="animate-fade-up">
               {tab === 'dashboard'  && <Dashboard      lang={lang} />}
-              {tab === 'portfolios' && <Portfolios     lang={lang} onActivated={() => setTab('dashboard')} onCreateBot={() => setTab('create')} />}
+              {tab === 'portfolios' && <Portfolios     lang={lang} onActivated={() => setTab('dashboard')} onCreateBot={() => setTab('create')} onEditPortfolio={(id) => { setEditPortfolioId(id); setTab('portfolio-settings'); }} />}
+              {tab === 'portfolio-settings' && editPortfolioId !== null && <PortfolioSettings lang={lang} portfolioId={editPortfolioId} onBack={() => setTab('portfolios')} />}
               {tab === 'create'     && <CreateBot      lang={lang} onCreated={() => setTab('portfolios')} />}
               {tab === 'settings'   && <Settings       lang={lang} dark={dark} onLangToggle={toggleLang} onThemeToggle={toggleTheme} onSaved={() => setTab('dashboard')} />}
               {tab === 'copy'       && <CopyPortfolio  lang={lang} onCreated={() => setTab('portfolios')} />}
