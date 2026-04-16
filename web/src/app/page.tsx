@@ -86,7 +86,7 @@ export default function App() {
                   {/* Desktop grid bot view */}
                   <div className="hidden lg:block"><GridBot lang={lang} /></div>
                   {/* Mobile grid bot view */}
-                  <div className="block lg:hidden -mx-4 sm:-mx-6"><MobileGridBot lang={lang} /></div>
+                  <div className="block lg:hidden -mx-4 sm:-mx-6"><MobileGridBot lang={lang} onNavigate={setTab} /></div>
                 </>
               )}
             </div>

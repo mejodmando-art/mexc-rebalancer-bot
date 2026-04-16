@@ -6,7 +6,7 @@ import {
   listGridBots, stopGridBot, resumeGridBot, deleteGridBot, getGridOrders, createGridBot,
 } from '../lib/api';
 
-interface Props { lang: Lang; }
+interface Props { lang: Lang; onNavigate?: (tab: any) => void; }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
@@ -415,7 +415,7 @@ function BotCard({ bot, lang, onRefresh }: { bot: any; lang: Lang; onRefresh: ()
 }
 
 // ── Main export ───────────────────────────────────────────────────────────────
-export default function MobileGridBot({ lang }: Props) {
+export default function MobileGridBot({ lang, onNavigate }: Props) {
   const ar = lang === 'ar';
   const [bots, setBots]       = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -456,7 +456,7 @@ export default function MobileGridBot({ lang }: Props) {
 
       {/* ── Create new bot button ── */}
       <button
-        onClick={() => window.location.hash = '#create-bot'}
+        onClick={() => onNavigate?.('create')}
         style={{
           width: '100%',
           padding: '14px',

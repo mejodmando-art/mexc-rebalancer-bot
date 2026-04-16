@@ -983,7 +983,6 @@ body::before {
 .mgb-btn-rebuild  { background: rgba(0,245,212,0.10); color: var(--mgb-cyan); border: 1px solid rgba(0,245,212,0.20); }
 .mgb-btn-settings { background: rgba(255,152,0,0.10); color: var(--mgb-orange); border: 1px solid rgba(255,152,0,0.20); }
 .mgb-btn-emergency {
-  grid-column: 1 / -1;
   background: rgba(255,82,82,0.14);
   color: #FF5252;
   border: 1px solid rgba(255,82,82,0.28);
