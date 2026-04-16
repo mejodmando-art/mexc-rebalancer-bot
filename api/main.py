@@ -120,13 +120,29 @@ def _make_loop(portfolio_id: int, stop_event: threading.Event) -> None:
 
                 current_mode = cfg["rebalance"]["mode"]
 
-                # SL/TP guard runs on every cycle regardless of mode
-                check_sl_tp(client, cfg)
+                # SL/TP guard runs on every cycle regardless of mode.
+                # Triggered symbols are excluded from rebalance this cycle to
+                # prevent the rebalancer from buying them back immediately.
+                sl_tp_triggered = check_sl_tp(client, cfg)
+                sl_tp_symbols = {t["symbol"] for t in sl_tp_triggered}
+                if sl_tp_symbols:
+                    log.info("Portfolio %d: SL/TP triggered for %s", portfolio_id, sl_tp_symbols)
+                    for t in sl_tp_triggered:
+                        _notify_discord(
+                            f"⚠️ **{t['action']}** — {t['symbol']} | "
+                            f"entry={t['entry_price']:.4f} current={t['current_price']:.4f} "
+                            f"change={t['change_pct']:+.2f}% | Portfolio {portfolio_id}"
+                        )
 
                 if current_mode == "proportional":
                     interval = cfg["rebalance"]["proportional"]["check_interval_minutes"] * 60
-                    if needs_rebalance_proportional(client, cfg):
-                        execute_rebalance(client, cfg)
+                    if needs_rebalance_proportional(client, cfg, exclude_symbols=sl_tp_symbols):
+                        result = execute_rebalance(client, cfg, exclude_symbols=sl_tp_symbols,
+                                                   portfolio_id=portfolio_id)
+                        trades = [r for r in result if r.get("action") in ("BUY", "SELL")]
+                        if trades:
+                            summary = ", ".join(f"{r['action']} {r['symbol']} {r['diff_usdt']:+.2f}$" for r in trades)
+                            _notify_discord(f"🔄 Rebalance (portfolio {portfolio_id}): {summary}")
                     stop_event.wait(interval)
 
                 elif current_mode == "timed":
@@ -138,7 +154,12 @@ def _make_loop(portfolio_id: int, stop_event: threading.Event) -> None:
                         timed_next_run = next_run_time(frequency, target_hour=target_hour)
                         log.info("Portfolio %d: next timed rebalance at %s UTC", portfolio_id, timed_next_run.isoformat())
                     if datetime.utcnow() >= timed_next_run:
-                        execute_rebalance(client, cfg)
+                        result = execute_rebalance(client, cfg, exclude_symbols=sl_tp_symbols,
+                                                   portfolio_id=portfolio_id)
+                        trades = [r for r in result if r.get("action") in ("BUY", "SELL")]
+                        if trades:
+                            summary = ", ".join(f"{r['action']} {r['symbol']} {r['diff_usdt']:+.2f}$" for r in trades)
+                            _notify_discord(f"🔄 Rebalance [{frequency}] (portfolio {portfolio_id}): {summary}")
                         timed_next_run = next_run_time(frequency, target_hour=target_hour)
                         log.info("Portfolio %d: next timed rebalance at %s UTC", portfolio_id, timed_next_run.isoformat())
                     short_freq = frequency in TIMED_FREQUENCY_MINUTES and frequency not in ("daily", "weekly", "monthly")
@@ -224,14 +245,7 @@ def _run_rebalance_with_cancel(job_id: str, client: MEXCClient, cfg: dict) -> No
         log.info("Rebalance %s cancelled by user", job_id)
         return
     try:
-        # Use active portfolio id for history isolation
-        try:
-            from database import list_portfolios as _lp
-            _active = next((p for p in _lp() if p.get("active")), None)
-            _pid = _active["id"] if _active else None
-        except Exception:
-            _pid = None
-        result = execute_rebalance(client, cfg)
+        result = execute_rebalance(client, cfg, portfolio_id=1)
         entry["result"] = result
     except Exception as e:
         entry["result"] = [{"error": str(e)}]
@@ -257,6 +271,21 @@ def _send_discord(webhook_url: str, message: str) -> None:
         _req.post(webhook_url, json={"content": message}, timeout=5)
     except Exception as e:
         log.warning("Discord notification failed: %s", e)
+
+
+def _notify_discord(message: str) -> None:
+    """Send a Discord notification if Discord is enabled in config.
+
+    Reads discord_enabled and discord_webhook_url from config.json so
+    notification settings are always up-to-date without restarting the bot.
+    """
+    try:
+        cfg = load_config()
+        notif = cfg.get("notifications", {})
+        if notif.get("discord_enabled") and notif.get("discord_webhook_url"):
+            _send_discord(notif["discord_webhook_url"], message)
+    except Exception as e:
+        log.warning("_notify_discord error: %s", e)
 
 
 # ---------------------------------------------------------------------------
@@ -383,10 +412,9 @@ class ApiKeyAuthMiddleware(BaseHTTPMiddleware):
         "/docs",
         "/openapi.json",
         "/redoc",
-        "/api/status",
-        "/api/history",
-        "/api/snapshots",
-        "/api/config",
+        # NOTE: /api/status, /api/history, /api/snapshots, /api/config are
+        # intentionally NOT public — they expose balances and trade history.
+        # They require API_AUTH_KEY when that env var is set.
         "/api/rebalance/status/",
         "/api/mexc/status",
         "/api/db/status",
@@ -635,13 +663,13 @@ def get_status():
 
 
 @app.get("/api/history")
-def get_history(limit: int = 10):
-    return get_rebalance_history(limit)
+def get_history(limit: int = 10, portfolio_id: int = 1):
+    return get_rebalance_history(limit, portfolio_id=portfolio_id)
 
 
 @app.get("/api/snapshots")
-def get_portfolio_snapshots(limit: int = 90):
-    return get_snapshots(limit)
+def get_portfolio_snapshots(limit: int = 90, portfolio_id: int = 1):
+    return get_snapshots(limit, portfolio_id=portfolio_id)
 
 
 # ---------------------------------------------------------------------------
@@ -1351,9 +1379,9 @@ def api_rebalance_portfolio(portfolio_id: int, body: PortfolioRebalanceRequest):
             return
         try:
             if body.rebalance_type == "equal":
-                result = execute_rebalance_equal(client, cfg)
+                result = execute_rebalance_equal(client, cfg, portfolio_id=portfolio_id)
             else:
-                result = execute_rebalance(client, cfg)
+                result = execute_rebalance(client, cfg, portfolio_id=portfolio_id)
             entry["result"] = result
         except Exception as exc:
             log.error("Portfolio rebalance failed (id=%s): %s", portfolio_id, exc)

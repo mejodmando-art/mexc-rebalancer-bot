@@ -98,10 +98,17 @@ def get_symbol_precision(client: MEXCClient, symbol: str) -> tuple[int, int]:
 def _place_limit_order(client: MEXCClient, bot_id: int, symbol: str,
                         side: str, price: float, qty: float,
                         qty_prec: int) -> Optional[str]:
-    """Place a single LIMIT order and record it in DB. Returns order_id or None."""
+    """Place a single LIMIT order and record it in DB. Returns order_id or None.
+
+    Order placement and DB recording are kept in strict sequence: if the exchange
+    call succeeds but the DB write fails, the order_id is still returned so the
+    caller can log it. The order is recorded with status 'open' before returning
+    so _cancel_all_open_orders can always find and cancel it.
+    """
     qty = round(qty, qty_prec)
     if qty <= 0:
         return None
+    order_id: Optional[str] = None
     try:
         resp = client._post("/api/v3/order", {
             "symbol":      symbol,
@@ -112,7 +119,17 @@ def _place_limit_order(client: MEXCClient, bot_id: int, symbol: str,
             "timeInForce": "GTC",
         })
         order_id = str(resp.get("orderId", ""))
-        add_grid_order(bot_id, order_id, side, price, qty)
+        # Record in DB immediately after exchange confirms the order.
+        # If this write fails the order exists on MEXC but not in DB (orphan).
+        # We log a critical warning so the operator can cancel it manually.
+        try:
+            add_grid_order(bot_id, order_id, side, price, qty)
+        except Exception as db_err:
+            log.error(
+                "[Grid %d] ORPHAN ORDER — placed %s %s @ %.8f qty=%.6f orderId=%s "
+                "but DB write failed: %s — cancel this order manually on MEXC",
+                bot_id, side, symbol, price, qty, order_id, db_err,
+            )
         log.info("[Grid %d] %s @ %.8f qty=%.6f", bot_id, side, price, qty)
         return order_id
     except Exception as e:
@@ -313,10 +330,21 @@ def _grid_loop(bot_id: int, stop_event: threading.Event) -> None:
                                 update_grid_order(order["order_id"], "filled", 0.0)
 
                             elif side == "SELL":
-                                # Realised profit = (sell - avg_buy) * qty
-                                profit_per_unit  = filled_price - avg_buy_price
-                                grid_profit      = round(profit_per_unit * filled_qty, 4)
-                                realised_profit += grid_profit
+                                # Only count profit when we have a valid avg_buy_price.
+                                # A SELL filling before any BUY (avg_buy_price == 0) means
+                                # the order was placed at startup above the current price;
+                                # there is no cost basis to compute profit against.
+                                if avg_buy_price > 0:
+                                    profit_per_unit  = filled_price - avg_buy_price
+                                    grid_profit      = round(profit_per_unit * filled_qty, 4)
+                                    realised_profit += grid_profit
+                                else:
+                                    grid_profit = 0.0
+                                    log.info(
+                                        "[Grid %d] SELL filled @ %.8f before any BUY — "
+                                        "skipping profit calculation (no cost basis)",
+                                        bot_id, filled_price,
+                                    )
 
                                 # Reduce held position
                                 base_qty = max(0.0, base_qty - filled_qty)
@@ -435,13 +463,23 @@ def start_grid_bot(symbol: str, investment: float,
 
 
 def stop_grid_bot(bot_id: int) -> None:
-    """Signal the grid loop to stop and cancel all open orders."""
+    """Signal the grid loop to stop and cancel all open orders.
+
+    The loop thread is joined before cancelling orders to avoid a race where
+    the thread places new orders between stop_event.set() and the cancel call.
+    """
     set_grid_bot_should_run(bot_id, False)
 
     with _lock:
         entry = _grid_loops.get(bot_id)
     if entry:
         entry["stop_event"].set()
+        # Wait for the loop thread to finish before cancelling so no new orders
+        # are placed after we issue cancels.
+        entry["thread"].join(timeout=15)
+        if entry["thread"].is_alive():
+            log.warning("[Grid %d] loop thread did not stop within 15 s — "
+                        "proceeding with order cancellation anyway", bot_id)
 
     try:
         client = MEXCClient()
