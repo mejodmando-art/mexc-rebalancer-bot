@@ -342,11 +342,11 @@ function BotCard({ bot, lang, onRefresh }: { bot: any; lang: Lang; onRefresh: ()
         </div>
       </div>
 
-      {/* ── PnL cards ── */}
-      <div className="mgb-pnl-row">
+      {/* ── PnL row (2 cards, no ring) ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
         <div className="mgb-pnl-card">
           <span className="mgb-pnl-label">{ar ? 'ربح محقق' : 'Realized PnL'}</span>
-          <span className="mgb-pnl-value" style={{ color: realPnl >= 0 ? '#00E676' : '#FF5252' }}>
+          <span style={{ fontSize: 18, fontWeight: 900, color: realPnl >= 0 ? '#00E676' : '#FF5252' }}>
             {realPnl >= 0 ? '+' : ''}${realPnl.toFixed(2)}
           </span>
           <span className="mgb-pnl-pct" style={{ color: realPnl >= 0 ? '#00E676' : '#FF5252' }}>
@@ -355,17 +355,12 @@ function BotCard({ bot, lang, onRefresh }: { bot: any; lang: Lang; onRefresh: ()
         </div>
         <div className="mgb-pnl-card">
           <span className="mgb-pnl-label">{ar ? 'ربح غير محقق' : 'Unrealized PnL'}</span>
-          <span className="mgb-pnl-value" style={{ color: unrealPnl >= 0 ? '#00F5D4' : '#FF5252' }}>
+          <span style={{ fontSize: 18, fontWeight: 900, color: unrealPnl >= 0 ? '#00F5D4' : '#FF5252' }}>
             {unrealPnl >= 0 ? '+' : ''}${unrealPnl.toFixed(2)}
           </span>
           <span className="mgb-pnl-pct" style={{ color: unrealPnl >= 0 ? '#00F5D4' : '#FF5252' }}>
             ({unrealPct >= 0 ? '+' : ''}{unrealPct.toFixed(2)}%)
           </span>
-        </div>
-        <div className="mgb-pnl-card mgb-pnl-ring-card">
-          <span className="mgb-pnl-label">{ar ? 'المستثمر' : 'Invested'}</span>
-          <PnlRing pct={utilPct} />
-          <span className="mgb-pnl-usdt">${invested.toLocaleString()}</span>
         </div>
       </div>
 
@@ -458,6 +453,33 @@ export default function MobileGridBot({ lang }: Props) {
           {ar ? 'تحديث' : 'Refresh'}
         </button>
       </div>
+
+      {/* ── Create new bot button ── */}
+      <button
+        onClick={() => window.location.hash = '#create-bot'}
+        style={{
+          width: '100%',
+          padding: '14px',
+          borderRadius: 16,
+          fontSize: 15,
+          fontWeight: 800,
+          background: 'linear-gradient(135deg, rgba(0,245,212,0.2), rgba(123,92,245,0.2))',
+          color: '#00F5D4',
+          border: '1px solid rgba(0,245,212,0.4)',
+          boxShadow: '0 0 20px rgba(0,245,212,0.15)',
+          marginBottom: 12,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 8,
+          cursor: 'pointer',
+        }}
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+          <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="16" /><line x1="8" y1="12" x2="16" y2="12" />
+        </svg>
+        {ar ? 'إنشاء بوت جديد' : 'Create New Bot'}
+      </button>
 
       {loading ? (
         <div className="mgb-loading">
