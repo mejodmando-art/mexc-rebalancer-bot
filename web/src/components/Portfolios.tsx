@@ -677,6 +677,25 @@ export default function Portfolios({ lang, onActivated, onCreateBot, onEditPortf
                     {tr('buyAndActivate', lang)}
                   </button>
 
+                  {/* تشغيل بدون شراء */}
+                  <button
+                    onClick={() => handleToggleLoop(p)}
+                    disabled={togglingLoop === p.id || p.running}
+                    className="flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold transition-all disabled:opacity-40 active:scale-95"
+                    style={{
+                      background: p.running ? 'rgba(248,113,113,0.1)' : 'rgba(123,92,245,0.12)',
+                      border: `1px solid ${p.running ? 'rgba(248,113,113,0.3)' : 'rgba(123,92,245,0.3)'}`,
+                      color: p.running ? '#F87171' : '#A78BFA',
+                    }}
+                  >
+                    {togglingLoop === p.id
+                      ? <Loader2 size={13} className="spin" />
+                      : p.running ? <Square size={13} /> : <Play size={13} />}
+                    {p.running
+                      ? tr('stopPortfolio', lang)
+                      : (lang === 'ar' ? 'تشغيل' : 'Start')}
+                  </button>
+
                   {/* نسخ محفظة */}
                   <button
                     onClick={() => setCopyModal(p)}
@@ -720,29 +739,9 @@ export default function Portfolios({ lang, onActivated, onCreateBot, onEditPortf
                   </button>
                 </div>
 
-                {/* تشغيل / إيقاف + حذف */}
+                {/* حذف */}
                 <div className="flex gap-1.5">
-                  <button
-                    onClick={() => handleToggleLoop(p)}
-                    disabled={togglingLoop === p.id}
-                    className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold transition-all active:scale-95 disabled:opacity-50"
-                    style={p.running ? {
-                      background: 'rgba(248,113,113,0.1)',
-                      border: '1px solid rgba(248,113,113,0.28)',
-                      color: '#F87171',
-                    } : {
-                      background: 'linear-gradient(135deg, rgba(123,92,245,0.25), rgba(59,130,246,0.2))',
-                      border: '1px solid rgba(123,92,245,0.4)',
-                      color: '#C4B5FD',
-                    }}
-                  >
-                    {togglingLoop === p.id
-                      ? <Loader2 size={13} className="spin" />
-                      : p.running ? <Square size={13} /> : <Play size={13} />}
-                    {togglingLoop === p.id
-                      ? (lang === 'ar' ? '...' : '...')
-                      : p.running ? tr('stopPortfolio', lang) : tr('startPortfolio', lang)}
-                  </button>
+                  <div className="flex-1" />
 
                   {confirmDelete === p.id ? (
                     <div className="flex gap-1">
