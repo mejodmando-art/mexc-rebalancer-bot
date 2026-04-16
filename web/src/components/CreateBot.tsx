@@ -47,7 +47,7 @@ export default function CreateBot({ lang, onCreated }: Props) {
   const [timedHour, setTimedHour]       = useState(10);
   const [stopLoss, setStopLoss]         = useState<number | ''>('');
   const [takeProfit, setTakeProfit]     = useState<number | ''>('');
-  const [paperTrading, setPaperTrading] = useState(false);
+
   const [saving, setSaving]             = useState(false);
   const [error, setError]               = useState('');
   const [success, setSuccess]           = useState('');
@@ -149,7 +149,7 @@ export default function CreateBot({ lang, onCreated }: Props) {
         },
         termination: { sell_at_termination: false },
         asset_transfer: { enable_asset_transfer: false },
-        paper_trading: paperTrading,
+        paper_trading: false,
         last_rebalance: null,
       };
       const saved = await savePortfolio(fullConfig);
@@ -490,32 +490,7 @@ export default function CreateBot({ lang, onCreated }: Props) {
         </div>
       </div>
 
-      {/* ── Extra options ── */}
-      <div className="card space-y-4">
-        <div className="label mb-0">{tr('extraOptions', lang)}</div>
-        <label className="flex items-center justify-between cursor-pointer">
-          <div>
-            <div className="text-sm font-medium" style={{ color: 'var(--text-main)' }}>
-              🧪 {tr('paperMode', lang)}
-            </div>
-            <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
-              {tr('paperModeDesc', lang)}
-            </div>
-          </div>
-          <div
-            className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer ${
-              paperTrading ? 'bg-yellow-500' : 'bg-gray-700'
-            }`}
-            onClick={() => setPaperTrading(!paperTrading)}
-          >
-            <div
-              className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
-                paperTrading ? 'translate-x-5' : 'translate-x-0.5'
-              }`}
-            />
-          </div>
-        </label>
-      </div>
+
 
       {error   && <div className="card border-red-700 text-red-400 text-sm">{error}</div>}
       {success && <div className="card border-green-700 text-green-400 text-sm">{success}</div>}

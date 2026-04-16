@@ -9,7 +9,7 @@ import {
 } from '../lib/api';
 import { Lang, tr } from '../lib/i18n';
 
-interface Props { lang: Lang; onActivated: () => void; }
+interface Props { lang: Lang; onActivated: () => void; onCreateBot?: () => void; }
 
 type RebalanceType = 'market_value' | 'equal';
 
@@ -390,7 +390,7 @@ function CopyModal({ source, lang, onClose, onDone }: CopyModalProps) {
 }
 
 // ── Main component ───────────────────────────────────────────────────────────
-export default function Portfolios({ lang, onActivated }: Props) {
+export default function Portfolios({ lang, onActivated, onCreateBot }: Props) {
   const [portfolios, setPortfolios]       = useState<any[]>([]);
   const [loading, setLoading]             = useState(true);
   const [msg, setMsg]                     = useState('');
@@ -531,8 +531,25 @@ export default function Portfolios({ lang, onActivated }: Props) {
               {tr('myPortfoliosDesc', lang)}
             </p>
           </div>
-          <div className="text-sm font-semibold px-3 py-1 rounded-xl" style={{ background: 'var(--bg-card)', color: 'var(--text-muted)' }}>
-            {portfolios.length} / 10 {tr('portfolioCount', lang)}
+          <div className="flex items-center gap-2">
+            <div className="text-sm font-semibold px-3 py-1 rounded-xl" style={{ background: 'var(--bg-card)', color: 'var(--text-muted)' }}>
+              {portfolios.length} / 10 {tr('portfolioCount', lang)}
+            </div>
+            {onCreateBot && (
+              <button
+                onClick={onCreateBot}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-sm transition-all active:scale-95"
+                style={{
+                  background: 'linear-gradient(135deg, #7B5CF5, #3B82F6)',
+                  color: '#fff',
+                  boxShadow: '0 4px 16px rgba(123,92,245,0.45)',
+                  border: '1px solid rgba(255,255,255,0.15)',
+                }}
+              >
+                <span className="text-lg leading-none">+</span>
+                <span>{lang === 'ar' ? 'إنشاء محفظة' : 'New Portfolio'}</span>
+              </button>
+            )}
           </div>
         </div>
 

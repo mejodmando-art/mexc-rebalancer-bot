@@ -1,6 +1,6 @@
 'use client';
 
-import { Moon, Sun, LayoutDashboard, Briefcase, PlusCircle, Settings, Grid3x3 } from 'lucide-react';
+import { Moon, Sun, BarChart2, Wallet, Settings, Bot } from 'lucide-react';
 import { Lang, tr } from '../lib/i18n';
 
 type Tab = 'dashboard' | 'portfolios' | 'create' | 'settings' | 'copy' | 'grid';
@@ -16,11 +16,10 @@ interface NavbarProps {
 }
 
 const TABS: { key: Tab; icon: React.ElementType; labelKey: string; color: string; glow: string }[] = [
-  { key: 'dashboard',  icon: LayoutDashboard, labelKey: 'dashboard',    color: '#00D4AA', glow: 'rgba(0,212,170,0.5)' },
-  { key: 'portfolios', icon: Briefcase,        labelKey: 'myPortfolios', color: '#60A5FA', glow: 'rgba(96,165,250,0.5)' },
-  { key: 'create',     icon: PlusCircle,       labelKey: 'createBot',    color: '#A78BFA', glow: 'rgba(167,139,250,0.5)' },
-  { key: 'grid',       icon: Grid3x3,          labelKey: 'gridBot',      color: '#F0B90B', glow: 'rgba(240,185,11,0.5)' },
-  { key: 'settings',   icon: Settings,         labelKey: 'settings',     color: '#FB923C', glow: 'rgba(251,146,60,0.5)' },
+  { key: 'dashboard',  icon: BarChart2, labelKey: 'dashboard',    color: '#00D4AA', glow: 'rgba(0,212,170,0.5)' },
+  { key: 'portfolios', icon: Wallet,    labelKey: 'myPortfolios', color: '#60A5FA', glow: 'rgba(96,165,250,0.5)' },
+  { key: 'grid',       icon: Bot,       labelKey: 'gridBot',      color: '#F0B90B', glow: 'rgba(240,185,11,0.5)' },
+  { key: 'settings',   icon: Settings,  labelKey: 'settings',     color: '#FB923C', glow: 'rgba(251,146,60,0.5)' },
 ];
 
 export default function Navbar({ active, onNav, botRunning, lang, onLangToggle, dark, onThemeToggle }: NavbarProps) {
@@ -112,7 +111,6 @@ export default function Navbar({ active, onNav, botRunning, lang, onLangToggle, 
         <div className="flex">
           {TABS.map(({ key, icon: Icon, labelKey, color, glow }) => {
             const isActive = active === key;
-            const isCreate = key === 'create';
             return (
               <button
                 key={key}
@@ -132,34 +130,27 @@ export default function Navbar({ active, onNav, botRunning, lang, onLangToggle, 
                 <span
                   className="flex items-center justify-center transition-all duration-300"
                   style={{
-                    width: isCreate ? 48 : 42,
-                    height: isCreate ? 48 : 42,
-                    borderRadius: isCreate ? '16px' : '14px',
-                    background: isCreate
-                      ? 'linear-gradient(135deg, #7B5CF5, #3B82F6)'
-                      : isActive
-                        ? `linear-gradient(145deg, ${color}30, ${color}12)`
-                        : 'transparent',
-                    boxShadow: isCreate
-                      ? '0 4px 20px rgba(123,92,245,0.55), inset 0 1px 0 rgba(255,255,255,0.2)'
-                      : isActive
-                        ? `0 4px 16px ${glow}, inset 0 1px 0 rgba(255,255,255,0.12)`
-                        : 'none',
-                    border: isCreate
-                      ? '1px solid rgba(255,255,255,0.15)'
-                      : isActive
-                        ? `1px solid ${color}44`
-                        : '1px solid transparent',
+                    width: 42,
+                    height: 42,
+                    borderRadius: '14px',
+                    background: isActive
+                      ? `linear-gradient(145deg, ${color}30, ${color}12)`
+                      : 'transparent',
+                    boxShadow: isActive
+                      ? `0 4px 16px ${glow}, inset 0 1px 0 rgba(255,255,255,0.12)`
+                      : 'none',
+                    border: isActive
+                      ? `1px solid ${color}44`
+                      : '1px solid transparent',
                     transform: isActive ? 'translateY(-2px) scale(1.06)' : 'translateY(0) scale(1)',
-                    marginTop: isCreate ? '-8px' : '0',
                   }}
                 >
                   <Icon
-                    size={isCreate ? 22 : isActive ? 22 : 20}
-                    strokeWidth={isActive || isCreate ? 2.5 : 1.8}
+                    size={isActive ? 22 : 20}
+                    strokeWidth={isActive ? 2.5 : 1.8}
                     style={{
-                      color: isCreate ? '#fff' : isActive ? color : 'var(--text-muted)',
-                      filter: isActive && !isCreate ? `drop-shadow(0 0 6px ${glow})` : 'none',
+                      color: isActive ? color : 'var(--text-muted)',
+                      filter: isActive ? `drop-shadow(0 0 6px ${glow})` : 'none',
                     }}
                   />
                 </span>
