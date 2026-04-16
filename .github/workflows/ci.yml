@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+
+jobs:
+  lint-and-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Compile check
+        run: |
+          python -m py_compile api/main.py smart_portfolio.py mexc_client.py database.py
+
+      - name: API auth middleware presence check
+        run: |
+          grep -q "class ApiKeyAuthMiddleware" api/main.py
+          grep -q "API_AUTH_KEY" api/main.py
+          grep -q "CORS_ALLOW_ORIGINS" api/main.py
+          grep -q "API_AUTH_KEY" .env.example
+
+      - name: Start API + smoke endpoints
+        env:
+          API_AUTH_KEY: testkey
+          CORS_ALLOW_ORIGINS: http://localhost:3000
+        run: |
+          nohup python -m uvicorn api.main:app --host 127.0.0.1 --port 8000 > server.log 2>&1 &
+          sleep 4
+          curl -fsS http://127.0.0.1:8000/api/status > /dev/null
+          code=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://127.0.0.1:8000/api/rebalance)
+          test "$code" = "401"
+          code=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://127.0.0.1:8000/api/rebalance -H "X-API-Key: testkey")
+          test "$code" = "200"
