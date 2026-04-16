@@ -64,16 +64,16 @@ export default function App() {
   return (
     <ErrorBoundary>
     <ToastProvider>
-      <div className="min-h-screen" style={{ background: 'var(--bg-base)' }}>
+      <div className="min-h-screen" style={{ background: 'var(--bg-base)', overflowX: 'hidden' }}>
         <Sidebar active={tab} onNav={setTab} botRunning={botRunning} lang={lang} />
 
-        <div className="flex flex-col min-h-screen lg:pl-60 xl:pl-64">
+        <div className="flex flex-col min-h-screen lg:pl-60 xl:pl-64" style={{ overflowX: 'hidden' }}>
           <Navbar
             active={tab} onNav={setTab} botRunning={botRunning}
             lang={lang} onLangToggle={toggleLang}
             dark={dark} onThemeToggle={toggleTheme}
           />
-          <main className="flex-1 px-4 sm:px-6 py-6 pb-24 lg:pb-8 max-w-screen-xl mx-auto w-full">
+          <main className="flex-1 px-4 sm:px-6 py-6 pb-24 lg:pb-8 max-w-screen-xl mx-auto w-full" style={{ overflowX: 'hidden' }}>
             <div key={tab} className="animate-fade-up">
               {tab === 'dashboard'  && <Dashboard      lang={lang} />}
               {tab === 'portfolios' && <Portfolios     lang={lang} onActivated={() => setTab('dashboard')} onCreateBot={() => setTab('create')} onEditPortfolio={() => setTab('portfolios')} />}

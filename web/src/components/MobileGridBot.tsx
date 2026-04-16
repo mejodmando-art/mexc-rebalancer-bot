@@ -200,6 +200,8 @@ function CreateGridBotModal({ ar, onClose, onCreated }: {
   const [investment,       setInvestment]       = useState('');
   const [mode,             setMode]             = useState<'normal' | 'infinity'>('normal');
   const [gridCountManual,  setGridCountManual]  = useState<number | null>(null); // null = auto
+  const [priceLow,         setPriceLow]         = useState('');
+  const [priceHigh,        setPriceHigh]        = useState('');
   const [preview,          setPreview]          = useState<any>(null);
   const [loading,          setLoading]          = useState(false);
   const [creating,         setCreating]         = useState(false);
@@ -224,8 +226,17 @@ function CreateGridBotModal({ ar, onClose, onCreated }: {
   const handleCreate = async () => {
     const invNum = parseFloat(investment);
     if (!symbol || invNum < 1) { setError(ar ? 'أدخل الزوج والمبلغ' : 'Enter symbol and amount'); return; }
+    const low  = priceLow  ? parseFloat(priceLow)  : undefined;
+    const high = priceHigh ? parseFloat(priceHigh) : undefined;
+    if (low !== undefined && high !== undefined && low >= high) {
+      setError(ar ? 'السعر الأدنى يجب أن يكون أقل من الأعلى' : 'Price low must be less than price high');
+      return;
+    }
     setCreating(true); setError('');
-    try { await createGridBot({ symbol, investment: invNum, mode, grid_count: gridCountManual ?? undefined }); onCreated(); }
+    try {
+      await createGridBot({ symbol, investment: invNum, mode, grid_count: gridCountManual ?? undefined, price_low: low, price_high: high });
+      onCreated();
+    }
     catch (e: any) { setError(e.message); }
     finally { setCreating(false); }
   };
@@ -429,6 +440,71 @@ function CreateGridBotModal({ ar, onClose, onCreated }: {
           {gridCountManual === null && (
             <div className="text-[10px] text-center" style={{ color: 'rgba(255,255,255,0.3)' }}>
               {ar ? 'سيتم الحساب تلقائياً حسب المبلغ' : 'Auto-calculated from investment amount'}
+            </div>
+          )}
+        </div>
+
+        {/* النطاق السعري */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <div className="text-xs font-semibold" style={{ color: 'rgba(255,255,255,0.5)' }}>
+              {ar ? 'النطاق السعري (اختياري)' : 'Price Range (optional)'}
+            </div>
+            {(priceLow || priceHigh) && (
+              <button
+                onClick={() => { setPriceLow(''); setPriceHigh(''); }}
+                className="text-[10px] px-2 py-0.5 rounded-lg font-bold"
+                style={{ background: 'rgba(255,82,82,0.12)', color: '#FF5252', border: '1px solid rgba(255,82,82,0.25)' }}>
+                {ar ? 'مسح' : 'Clear'}
+              </button>
+            )}
+          </div>
+          {/* Preview range hint */}
+          {preview && !priceLow && !priceHigh && (
+            <div className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs"
+              style={{ background: 'rgba(0,245,212,0.06)', border: '1px solid rgba(0,245,212,0.15)' }}>
+              <span style={{ color: 'rgba(255,255,255,0.4)' }}>{ar ? 'تلقائي:' : 'Auto:'}</span>
+              <span style={{ color: '#00F5D4', fontWeight: 700 }}>${preview.price_low?.toFixed(4)}</span>
+              <span style={{ color: 'rgba(255,255,255,0.3)' }}>→</span>
+              <span style={{ color: '#00F5D4', fontWeight: 700 }}>${preview.price_high?.toFixed(4)}</span>
+            </div>
+          )}
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1">
+              <div className="text-[10px] font-semibold" style={{ color: 'rgba(0,230,118,0.7)' }}>
+                ↓ {ar ? 'الحد الأدنى' : 'Price Low'}
+              </div>
+              <input
+                type="number" min={0} step="any"
+                value={priceLow}
+                onChange={e => setPriceLow(e.target.value)}
+                placeholder={preview?.price_low?.toFixed(4) ?? '0.0000'}
+                className="w-full rounded-xl px-3 py-2 text-sm font-bold outline-none"
+                style={{ background: 'rgba(0,230,118,0.06)', color: '#00E676', border: '1px solid rgba(0,230,118,0.25)' }}
+              />
+            </div>
+            <div className="space-y-1">
+              <div className="text-[10px] font-semibold" style={{ color: 'rgba(255,82,82,0.7)' }}>
+                ↑ {ar ? 'الحد الأعلى' : 'Price High'}
+              </div>
+              <input
+                type="number" min={0} step="any"
+                value={priceHigh}
+                onChange={e => setPriceHigh(e.target.value)}
+                placeholder={mode === 'infinity' ? '∞' : (preview?.price_high?.toFixed(4) ?? '0.0000')}
+                disabled={mode === 'infinity'}
+                className="w-full rounded-xl px-3 py-2 text-sm font-bold outline-none"
+                style={{
+                  background: mode === 'infinity' ? 'rgba(255,255,255,0.03)' : 'rgba(255,82,82,0.06)',
+                  color: mode === 'infinity' ? 'rgba(255,255,255,0.2)' : '#FF5252',
+                  border: `1px solid ${mode === 'infinity' ? 'rgba(255,255,255,0.08)' : 'rgba(255,82,82,0.25)'}`,
+                }}
+              />
+            </div>
+          </div>
+          {priceLow && priceHigh && parseFloat(priceLow) >= parseFloat(priceHigh) && (
+            <div className="text-[10px] text-center" style={{ color: '#FF5252' }}>
+              ⚠ {ar ? 'الحد الأدنى يجب أن يكون أقل من الأعلى' : 'Low must be less than high'}
             </div>
           )}
         </div>

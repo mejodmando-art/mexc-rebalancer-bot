@@ -446,13 +446,21 @@ export default function Dashboard({ lang }: Props) {
         });
 
         // Collect grid-bot coins: symbol → { value_usdt }
-        const gridMap: Record<string, { value_usdt: number }> = {};
+        // Use current_value_usdt (base_qty × live price) when available,
+        // fall back to investment amount if bot hasn't bought yet (base_qty=0)
+        const gridMap: Record<string, { value_usdt: number; hasPosition: boolean }> = {};
         gridBots.forEach(g => {
           const sym = (g.symbol ?? '').replace(/USDT$/i, '').toUpperCase();
           if (!sym) return;
-          const val = g.current_value_usdt ?? g.investment ?? 0;
-          if (!gridMap[sym]) gridMap[sym] = { value_usdt: 0 };
+          const baseQty = g.base_qty ?? 0;
+          const hasPosition = baseQty > 0;
+          // If bot has a position use live value, else show investment as deployed capital
+          const val = hasPosition
+            ? (g.current_value_usdt ?? 0)
+            : (g.investment ?? 0);
+          if (!gridMap[sym]) gridMap[sym] = { value_usdt: 0, hasPosition };
           gridMap[sym].value_usdt += val;
+          if (hasPosition) gridMap[sym].hasPosition = true;
         });
 
         // Union of all symbols
@@ -519,8 +527,15 @@ export default function Dashboard({ lang }: Props) {
                               {lang === 'ar' ? 'شبكي' : 'Grid'}
                             </span>
                             <span className="num text-xs font-bold" style={{ color: '#F0B90B' }}>
-                              ${gr.value_usdt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              {gr.value_usdt > 0
+                                ? '$' + gr.value_usdt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                                : '—'}
                             </span>
+                            {!gr.hasPosition && gr.value_usdt > 0 && (
+                              <span className="text-[8px]" style={{ color: 'rgba(240,185,11,0.5)' }}>
+                                {lang === 'ar' ? 'استثمار' : 'inv'}
+                              </span>
+                            )}
                           </div>
                         </>
                       ) : rb ? (
@@ -538,8 +553,15 @@ export default function Dashboard({ lang }: Props) {
                             {lang === 'ar' ? 'بوت شبكي' : 'Grid Bot'}
                           </span>
                           <span className="num text-xs font-bold" style={{ color: '#F0B90B' }}>
-                            ${gr!.value_usdt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            {gr!.value_usdt > 0
+                              ? '$' + gr!.value_usdt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                              : '—'}
                           </span>
+                          {!gr!.hasPosition && gr!.value_usdt > 0 && (
+                            <span className="text-[8px]" style={{ color: 'rgba(240,185,11,0.5)' }} title={lang === 'ar' ? 'مبلغ الاستثمار' : 'Investment amount'}>
+                              {lang === 'ar' ? 'استثمار' : 'inv'}
+                            </span>
+                          )}
                         </div>
                       )}
                     </div>
