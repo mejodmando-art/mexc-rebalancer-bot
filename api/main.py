@@ -63,6 +63,7 @@ from smart_portfolio import (
     execute_rebalance_equal,
     get_pnl,
     get_portfolio_value,
+    is_paper_trading,
     load_config,
     save_config,
     validate_allocations,
@@ -125,7 +126,7 @@ def _make_loop(portfolio_id: int, stop_event: threading.Event) -> None:
                 if current_mode == "proportional":
                     interval = cfg["rebalance"]["proportional"]["check_interval_minutes"] * 60
                     if needs_rebalance_proportional(client, cfg):
-                        execute_rebalance(client, cfg, portfolio_id=portfolio_id)
+                        execute_rebalance(client, cfg)
                     stop_event.wait(interval)
 
                 elif current_mode == "timed":
@@ -137,7 +138,7 @@ def _make_loop(portfolio_id: int, stop_event: threading.Event) -> None:
                         timed_next_run = next_run_time(frequency, target_hour=target_hour)
                         log.info("Portfolio %d: next timed rebalance at %s UTC", portfolio_id, timed_next_run.isoformat())
                     if datetime.utcnow() >= timed_next_run:
-                        execute_rebalance(client, cfg, portfolio_id=portfolio_id)
+                        execute_rebalance(client, cfg)
                         timed_next_run = next_run_time(frequency, target_hour=target_hour)
                         log.info("Portfolio %d: next timed rebalance at %s UTC", portfolio_id, timed_next_run.isoformat())
                     short_freq = frequency in TIMED_FREQUENCY_MINUTES and frequency not in ("daily", "weekly", "monthly")
@@ -230,7 +231,7 @@ def _run_rebalance_with_cancel(job_id: str, client: MEXCClient, cfg: dict) -> No
             _pid = _active["id"] if _active else None
         except Exception:
             _pid = None
-        result = execute_rebalance(client, cfg, portfolio_id=_pid)
+        result = execute_rebalance(client, cfg)
         entry["result"] = result
     except Exception as e:
         entry["result"] = [{"error": str(e)}]
@@ -1352,7 +1353,7 @@ def api_rebalance_portfolio(portfolio_id: int, body: PortfolioRebalanceRequest):
             if body.rebalance_type == "equal":
                 result = execute_rebalance_equal(client, cfg)
             else:
-                result = execute_rebalance(client, cfg, portfolio_id=portfolio_id)
+                result = execute_rebalance(client, cfg)
             entry["result"] = result
         except Exception as exc:
             log.error("Portfolio rebalance failed (id=%s): %s", portfolio_id, exc)
@@ -1383,6 +1384,7 @@ def api_stop_and_sell(portfolio_id: int):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+    paper = is_paper_trading(cfg)
     assets = cfg["portfolio"]["assets"]
     results = []
     for a in assets:
@@ -1394,14 +1396,18 @@ def api_stop_and_sell(portfolio_id: int):
             if balance <= 0:
                 results.append({"symbol": sym, "action": "SKIP", "reason": "zero balance"})
                 continue
-            resp = client.place_market_sell(f"{sym}USDT", balance)
-            log.info("stop-and-sell: sold %.8f %s → %s", balance, sym, resp)
-            results.append({"symbol": sym, "action": "SOLD", "qty": balance})
+            if paper:
+                log.info("stop-and-sell [PAPER]: would sell %.8f %s", balance, sym)
+                results.append({"symbol": sym, "action": "PAPER_SELL", "qty": balance})
+            else:
+                resp = client.place_market_sell(f"{sym}USDT", balance)
+                log.info("stop-and-sell: sold %.8f %s → %s", balance, sym, resp)
+                results.append({"symbol": sym, "action": "SOLD", "qty": balance})
         except Exception as e:
             log.error("stop-and-sell: failed to sell %s: %s", sym, e)
             results.append({"symbol": sym, "action": "ERROR", "error": str(e)})
 
-    return {"ok": True, "results": results}
+    return {"ok": True, "paper": paper, "results": results}
 
 
 @app.get("/api/portfolios/{portfolio_id}/assets")
