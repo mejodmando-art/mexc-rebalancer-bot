@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Lang } from '../lib/i18n';
 import {
-  listGridBots, stopGridBot, resumeGridBot, deleteGridBot, getGridOrders, createGridBot,
+  listGridBots, stopGridBot, resumeGridBot, deleteGridBot, getGridOrders, createGridBot, previewGridBot,
 } from '../lib/api';
 
 interface Props { lang: Lang; onNavigate?: (tab: any) => void; }
@@ -187,6 +187,158 @@ function OrdersTable({ orders, ar }: { orders: any[]; ar: boolean }) {
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function CreateGridBotModal({ ar, onClose, onCreated }: {
+  ar: boolean; onClose: () => void; onCreated: () => void;
+}) {
+  const [symbol,     setSymbol]     = useState('BTC');
+  const [investment, setInvestment] = useState('');
+  const [mode,       setMode]       = useState<'normal' | 'infinity'>('normal');
+  const [preview,    setPreview]    = useState<any>(null);
+  const [loading,    setLoading]    = useState(false);
+  const [creating,   setCreating]   = useState(false);
+  const [error,      setError]      = useState('');
+
+  useEffect(() => {
+    const inv = parseFloat(investment);
+    if (!symbol || inv < 1) { setPreview(null); return; }
+    const t = setTimeout(async () => {
+      setLoading(true);
+      try { setPreview(await previewGridBot(symbol, inv)); setError(''); }
+      catch (e: any) { setError(e.message); setPreview(null); }
+      finally { setLoading(false); }
+    }, 700);
+    return () => clearTimeout(t);
+  }, [symbol, investment]);
+
+  const handleCreate = async () => {
+    const inv = parseFloat(investment);
+    if (!symbol || inv < 1) { setError(ar ? 'أدخل الزوج والمبلغ' : 'Enter symbol and amount'); return; }
+    setCreating(true); setError('');
+    try { await createGridBot({ symbol, investment: inv, mode }); onCreated(); }
+    catch (e: any) { setError(e.message); }
+    finally { setCreating(false); }
+  };
+
+  const POPULAR = ['BTC','ETH','SOL','BNB','XRP','TAO','AIA','FET'];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center" style={{ background: 'rgba(0,0,0,0.8)' }} onClick={onClose}>
+      <div className="w-full max-w-lg rounded-t-3xl p-5 space-y-4 max-h-[85vh] overflow-y-auto"
+        style={{ background: '#0f1923', border: '1px solid rgba(0,245,212,0.2)' }}
+        onClick={e => e.stopPropagation()}>
+
+        <div className="flex items-center justify-between">
+          <h3 className="font-bold text-base" style={{ color: '#00F5D4' }}>
+            {ar ? 'إنشاء بوت شبكي جديد' : 'New Grid Bot'}
+          </h3>
+          <button onClick={onClose} style={{ color: 'rgba(255,255,255,0.4)', fontSize: 20 }}>✕</button>
+        </div>
+
+        {/* العملة */}
+        <div className="space-y-2">
+          <div className="text-xs font-semibold" style={{ color: 'rgba(255,255,255,0.5)' }}>
+            {ar ? 'العملة' : 'Symbol'}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {POPULAR.map(s => (
+              <button key={s} onClick={() => setSymbol(s)}
+                className="px-3 py-1.5 rounded-xl text-xs font-bold"
+                style={{
+                  background: symbol === s ? 'rgba(240,185,11,0.15)' : 'rgba(255,255,255,0.06)',
+                  color: symbol === s ? '#F0B90B' : 'rgba(255,255,255,0.5)',
+                  border: `1px solid ${symbol === s ? 'rgba(240,185,11,0.4)' : 'rgba(255,255,255,0.1)'}`,
+                }}>
+                {s}
+              </button>
+            ))}
+          </div>
+          <input value={symbol} onChange={e => setSymbol(e.target.value.toUpperCase().replace('USDT', ''))}
+            placeholder="BTC" maxLength={10}
+            className="w-full rounded-xl px-3 py-2 text-sm font-bold outline-none uppercase"
+            style={{ background: 'rgba(255,255,255,0.06)', color: '#fff', border: '1px solid rgba(0,245,212,0.2)' }} />
+        </div>
+
+        {/* المبلغ */}
+        <div className="space-y-2">
+          <div className="text-xs font-semibold" style={{ color: 'rgba(255,255,255,0.5)' }}>
+            {ar ? 'مبلغ الاستثمار (USDT)' : 'Investment (USDT)'}
+          </div>
+          <input type="number" min={10} value={investment} onChange={e => setInvestment(e.target.value)}
+            placeholder="100"
+            className="w-full rounded-xl px-3 py-2 text-lg font-bold outline-none"
+            style={{ background: 'rgba(255,255,255,0.06)', color: '#fff', border: '1px solid rgba(0,245,212,0.2)' }} />
+          <div className="flex gap-2">
+            {[30, 50, 100, 200].map(v => (
+              <button key={v} onClick={() => setInvestment(String(v))}
+                className="flex-1 py-1.5 rounded-xl text-xs font-bold"
+                style={{
+                  background: investment === String(v) ? 'rgba(240,185,11,0.12)' : 'rgba(255,255,255,0.06)',
+                  color: investment === String(v) ? '#F0B90B' : 'rgba(255,255,255,0.4)',
+                  border: `1px solid ${investment === String(v) ? 'rgba(240,185,11,0.3)' : 'rgba(255,255,255,0.1)'}`,
+                }}>
+                ${v}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* النوع */}
+        <div className="space-y-2">
+          <div className="text-xs font-semibold" style={{ color: 'rgba(255,255,255,0.5)' }}>
+            {ar ? 'نوع الشبكة' : 'Grid Mode'}
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            {([['normal', ar ? 'عادي' : 'Normal'], ['infinity', ar ? 'لامحدود ∞' : 'Infinity ∞']] as const).map(([val, label]) => (
+              <button key={val} onClick={() => setMode(val)}
+                className="py-2.5 rounded-xl text-sm font-bold"
+                style={{
+                  background: mode === val ? 'rgba(240,185,11,0.12)' : 'rgba(255,255,255,0.06)',
+                  color: mode === val ? '#F0B90B' : 'rgba(255,255,255,0.5)',
+                  border: `1px solid ${mode === val ? 'rgba(240,185,11,0.4)' : 'rgba(255,255,255,0.1)'}`,
+                }}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Preview */}
+        {loading && <div className="text-center text-xs py-2" style={{ color: 'rgba(255,255,255,0.4)' }}>
+          {ar ? 'جاري الحساب...' : 'Calculating...'}
+        </div>}
+        {preview && !loading && (
+          <div className="rounded-xl p-3 space-y-2" style={{ background: 'rgba(0,245,212,0.06)', border: '1px solid rgba(0,245,212,0.15)' }}>
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div><span style={{ color: 'rgba(255,255,255,0.4)' }}>{ar ? 'السعر الحالي' : 'Price'}: </span><span style={{ color: '#F0B90B', fontWeight: 700 }}>${preview.current_price?.toFixed(4)}</span></div>
+              <div><span style={{ color: 'rgba(255,255,255,0.4)' }}>{ar ? 'عدد الشبكات' : 'Grids'}: </span><span style={{ color: '#60A5FA', fontWeight: 700 }}>{preview.grid_count}</span></div>
+              <div><span style={{ color: 'rgba(255,255,255,0.4)' }}>{ar ? 'لكل شبكة' : 'Per grid'}: </span><span style={{ color: '#A78BFA', fontWeight: 700 }}>${preview.usdt_per_grid?.toFixed(2)}</span></div>
+              <div><span style={{ color: 'rgba(255,255,255,0.4)' }}>{ar ? 'ربح/دورة' : 'Profit'}: </span><span style={{ color: '#00D4AA', fontWeight: 700 }}>${(preview.est_profit_per_grid ?? 0).toFixed(4)}</span></div>
+            </div>
+          </div>
+        )}
+
+        {error && <div className="text-xs text-center py-1" style={{ color: '#FF5252' }}>{error}</div>}
+
+        <div className="flex gap-3 pt-1">
+          <button onClick={onClose} className="flex-1 py-3 rounded-2xl text-sm font-bold"
+            style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.5)', border: '1px solid rgba(255,255,255,0.1)' }}>
+            {ar ? 'إلغاء' : 'Cancel'}
+          </button>
+          <button onClick={handleCreate} disabled={creating || !investment}
+            className="flex-1 py-3 rounded-2xl text-sm font-bold"
+            style={{
+              background: creating || !investment ? 'rgba(255,255,255,0.06)' : 'rgba(0,245,212,0.15)',
+              color: creating || !investment ? 'rgba(255,255,255,0.3)' : '#00F5D4',
+              border: `1px solid ${creating || !investment ? 'rgba(255,255,255,0.1)' : 'rgba(0,245,212,0.35)'}`,
+            }}>
+            {creating ? '...' : (ar ? 'إنشاء' : 'Create')}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -417,9 +569,10 @@ function BotCard({ bot, lang, onRefresh }: { bot: any; lang: Lang; onRefresh: ()
 // ── Main export ───────────────────────────────────────────────────────────────
 export default function MobileGridBot({ lang, onNavigate }: Props) {
   const ar = lang === 'ar';
-  const [bots, setBots]       = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [bots, setBots]             = useState<any[]>([]);
+  const [loading, setLoading]       = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [showCreate, setShowCreate] = useState(false);
 
   const load = useCallback(async (showSpinner = false) => {
     if (showSpinner) setRefreshing(true);
@@ -456,7 +609,7 @@ export default function MobileGridBot({ lang, onNavigate }: Props) {
 
       {/* ── Create new bot button ── */}
       <button
-        onClick={() => onNavigate?.('create')}
+        onClick={() => setShowCreate(true)}
         style={{
           width: '100%',
           padding: '14px',
@@ -480,6 +633,14 @@ export default function MobileGridBot({ lang, onNavigate }: Props) {
         </svg>
         {ar ? 'إنشاء بوت جديد' : 'Create New Bot'}
       </button>
+
+      {showCreate && (
+        <CreateGridBotModal
+          ar={ar}
+          onClose={() => setShowCreate(false)}
+          onCreated={() => { setShowCreate(false); load(true); }}
+        />
+      )}
 
       {loading ? (
         <div className="mgb-loading">
