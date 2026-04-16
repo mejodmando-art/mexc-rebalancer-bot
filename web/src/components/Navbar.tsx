@@ -15,11 +15,12 @@ interface NavbarProps {
   onThemeToggle: () => void;
 }
 
+// Unified accent: purple/violet palette for all tabs, with per-tab tint
 const TABS: { key: Tab; icon: React.ElementType; labelKey: string; color: string; glow: string }[] = [
-  { key: 'dashboard',  icon: BarChart2, labelKey: 'dashboard',    color: '#00D4AA', glow: 'rgba(0,212,170,0.5)' },
-  { key: 'portfolios', icon: Wallet,    labelKey: 'myPortfolios', color: '#60A5FA', glow: 'rgba(96,165,250,0.5)' },
-  { key: 'grid',       icon: Bot,       labelKey: 'gridBot',      color: '#F0B90B', glow: 'rgba(240,185,11,0.5)' },
-  { key: 'settings',   icon: Settings,  labelKey: 'settings',     color: '#FB923C', glow: 'rgba(251,146,60,0.5)' },
+  { key: 'settings',   icon: Settings,  labelKey: 'settings',     color: '#A78BFA', glow: 'rgba(167,139,250,0.45)' },
+  { key: 'grid',       icon: Bot,       labelKey: 'gridBot',      color: '#818CF8', glow: 'rgba(129,140,248,0.45)' },
+  { key: 'portfolios', icon: Wallet,    labelKey: 'myPortfolios', color: '#60A5FA', glow: 'rgba(96,165,250,0.45)' },
+  { key: 'dashboard',  icon: BarChart2, labelKey: 'dashboard',    color: '#34D399', glow: 'rgba(52,211,153,0.45)' },
 ];
 
 export default function Navbar({ active, onNav, botRunning, lang, onLangToggle, dark, onThemeToggle }: NavbarProps) {
@@ -100,54 +101,50 @@ export default function Navbar({ active, onNav, botRunning, lang, onLangToggle, 
       <nav
         className="lg:hidden fixed bottom-0 inset-x-0 z-50"
         style={{
-          background: 'rgba(6,3,18,0.97)',
-          borderTop: '1px solid rgba(255,255,255,0.07)',
-          backdropFilter: 'blur(28px)',
-          WebkitBackdropFilter: 'blur(28px)',
+          background: 'rgba(8,5,22,0.98)',
+          borderTop: '1px solid rgba(167,139,250,0.12)',
+          backdropFilter: 'blur(24px)',
+          WebkitBackdropFilter: 'blur(24px)',
           paddingBottom: 'env(safe-area-inset-bottom)',
-          boxShadow: '0 -12px 40px rgba(0,0,0,0.6)',
+          boxShadow: '0 -8px 32px rgba(0,0,0,0.5)',
         }}
       >
-        <div className="flex">
+        <div className="flex h-[58px]">
           {TABS.map(({ key, icon: Icon, labelKey, color, glow }) => {
             const isActive = active === key;
             return (
               <button
                 key={key}
                 onClick={() => onNav(key)}
-                className="flex-1 flex flex-col items-center justify-center py-2.5 gap-1 transition-all active:scale-90 relative"
+                className="flex-1 flex flex-col items-center justify-center gap-0.5 transition-all active:scale-90 relative"
               >
-                {/* Active top glow bar */}
-                {isActive && (
-                  <span
-                    className="absolute top-0 inset-x-4 h-0.5 rounded-full"
-                    style={{ background: `linear-gradient(90deg, transparent, ${color}, transparent)` }}
-                  />
-                )}
-
-                {/* Icon pill */}
+                {/* Active indicator bar at top */}
                 <span
-                  className="flex items-center justify-center transition-all duration-300"
+                  className="absolute top-0 rounded-b-full transition-all duration-300"
                   style={{
-                    width: 44,
-                    height: 36,
-                    borderRadius: '12px',
-                    background: isActive
-                      ? `linear-gradient(145deg, ${color}28, ${color}10)`
-                      : 'transparent',
-                    boxShadow: isActive
-                      ? `0 2px 14px ${glow}, inset 0 1px 0 rgba(255,255,255,0.1)`
-                      : 'none',
-                    border: isActive ? `1px solid ${color}50` : '1px solid transparent',
-                    transform: isActive ? 'translateY(-3px) scale(1.08)' : 'translateY(0) scale(1)',
+                    left: '25%', right: '25%', height: isActive ? 2 : 0,
+                    background: color,
+                    boxShadow: isActive ? `0 0 8px ${glow}` : 'none',
+                  }}
+                />
+
+                {/* Icon */}
+                <span
+                  className="flex items-center justify-center transition-all duration-200"
+                  style={{
+                    width: 36,
+                    height: 30,
+                    borderRadius: '10px',
+                    background: isActive ? `${color}18` : 'transparent',
+                    transform: isActive ? 'translateY(-1px)' : 'none',
                   }}
                 >
                   <Icon
-                    size={isActive ? 21 : 19}
-                    strokeWidth={isActive ? 2.8 : 1.7}
+                    size={18}
+                    strokeWidth={isActive ? 2.5 : 1.8}
                     style={{
-                      color: isActive ? color : 'rgba(255,255,255,0.28)',
-                      filter: isActive ? `drop-shadow(0 0 8px ${glow})` : 'none',
+                      color: isActive ? color : 'rgba(255,255,255,0.32)',
+                      filter: isActive ? `drop-shadow(0 0 6px ${glow})` : 'none',
                       transition: 'all 0.2s',
                     }}
                   />
@@ -157,11 +154,11 @@ export default function Navbar({ active, onNav, botRunning, lang, onLangToggle, 
                 <span
                   style={{
                     fontSize: '9px',
-                    fontWeight: isActive ? 900 : 500,
-                    color: isActive ? color : 'rgba(255,255,255,0.28)',
-                    textShadow: isActive ? `0 0 10px ${glow}` : 'none',
-                    letterSpacing: isActive ? '0.03em' : '0.01em',
+                    fontWeight: isActive ? 700 : 400,
+                    color: isActive ? color : 'rgba(255,255,255,0.3)',
+                    letterSpacing: '0.02em',
                     transition: 'all 0.2s',
+                    lineHeight: 1,
                   }}
                 >
                   {tr(labelKey, lang)}

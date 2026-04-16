@@ -8,6 +8,10 @@ import {
   savePortfolio, getPortfolio,
 } from '../lib/api';
 import { Lang, tr } from '../lib/i18n';
+import {
+  ShoppingCart, Copy, Scale, StopCircle, Play, Square,
+  Trash2, Settings, Loader2, CheckCircle2,
+} from 'lucide-react';
 
 interface Props { lang: Lang; onActivated: () => void; onCreateBot?: () => void; onEditPortfolio?: (id: number) => void; }
 
@@ -654,83 +658,134 @@ export default function Portfolios({ lang, onActivated, onCreateBot, onEditPortf
                   </div>
                 </div>
 
-                {/* ── Action buttons: 2×2 grid ── */}
-                <div className="grid grid-cols-2 gap-2">
-                  {/* Row 1: Buy & Activate / Copy */}
+                {/* ── Action buttons ── */}
+                <div className="grid grid-cols-2 gap-1.5">
+                  {/* شراء وتفعيل */}
                   <button
                     onClick={() => handleBuyAndActivate(p)}
                     disabled={activating === p.id || p.running}
-                    className="py-2.5 rounded-xl text-sm font-semibold transition-all disabled:opacity-40 btn-primary"
+                    className="flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold transition-all disabled:opacity-40 active:scale-95"
+                    style={{
+                      background: 'rgba(52,211,153,0.12)',
+                      border: '1px solid rgba(52,211,153,0.3)',
+                      color: '#34D399',
+                    }}
                   >
-                    {activating === p.id ? '⏳' : `🛒 ${tr('buyAndActivate', lang)}`}
+                    {activating === p.id
+                      ? <Loader2 size={13} className="spin" />
+                      : <ShoppingCart size={13} />}
+                    {tr('buyAndActivate', lang)}
                   </button>
 
+                  {/* نسخ محفظة */}
                   <button
                     onClick={() => setCopyModal(p)}
-                    className="py-2.5 rounded-xl text-sm font-semibold transition-colors"
-                    style={{ background: 'var(--bg-input)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}
+                    className="flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold transition-all active:scale-95"
+                    style={{
+                      background: 'rgba(167,139,250,0.1)',
+                      border: '1px solid rgba(167,139,250,0.25)',
+                      color: '#A78BFA',
+                    }}
                   >
-                    📋 {tr('copyPortfolio', lang)}
+                    <Copy size={13} />
+                    {tr('copyPortfolio', lang)}
                   </button>
 
-                  {/* Row 2: Rebalance / Stop & Sell */}
+                  {/* إعادة توازن */}
                   <button
                     onClick={() => setRebalModal({ id: p.id, name: p.name, active: true })}
-                    className="py-2.5 rounded-xl border-2 border-brand text-brand text-sm font-semibold hover:bg-brand/10 transition-colors"
+                    className="flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold transition-all active:scale-95"
+                    style={{
+                      background: 'rgba(129,140,248,0.1)',
+                      border: '1px solid rgba(129,140,248,0.28)',
+                      color: '#818CF8',
+                    }}
                   >
-                    ⚖️ {tr('rebalancePortfolio', lang)}
+                    <Scale size={13} />
+                    {tr('rebalancePortfolio', lang)}
                   </button>
 
+                  {/* إيقاف وبيع */}
                   <button
                     onClick={() => setStopSellModal({ id: p.id, name: p.name })}
-                    className="py-2.5 rounded-xl border-2 border-red-700 text-red-400 text-sm font-semibold hover:bg-red-900/20 transition-colors"
+                    className="flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold transition-all active:scale-95"
+                    style={{
+                      background: 'rgba(248,113,113,0.1)',
+                      border: '1px solid rgba(248,113,113,0.28)',
+                      color: '#F87171',
+                    }}
                   >
-                    🛑 {tr('stopAndSell', lang)}
+                    <StopCircle size={13} />
+                    {tr('stopAndSell', lang)}
                   </button>
                 </div>
 
-                {/* Row 3: Start/Stop + Delete (full row) */}
-                <div className="flex gap-2">
+                {/* تشغيل / إيقاف + حذف */}
+                <div className="flex gap-1.5">
                   <button
                     onClick={() => handleToggleLoop(p)}
                     disabled={togglingLoop === p.id}
-                    className={`flex-1 text-sm py-2.5 rounded-xl font-semibold transition-colors ${
-                      p.running ? 'bg-gray-700 text-gray-200 hover:bg-gray-600' : 'btn-primary'
-                    }`}
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold transition-all active:scale-95 disabled:opacity-50"
+                    style={p.running ? {
+                      background: 'rgba(248,113,113,0.1)',
+                      border: '1px solid rgba(248,113,113,0.28)',
+                      color: '#F87171',
+                    } : {
+                      background: 'linear-gradient(135deg, rgba(123,92,245,0.25), rgba(59,130,246,0.2))',
+                      border: '1px solid rgba(123,92,245,0.4)',
+                      color: '#C4B5FD',
+                    }}
                   >
-                    {togglingLoop === p.id ? '⏳' : p.running ? `⏹ ${tr('stopPortfolio', lang)}` : `▶️ ${tr('startPortfolio', lang)}`}
+                    {togglingLoop === p.id
+                      ? <Loader2 size={13} className="spin" />
+                      : p.running ? <Square size={13} /> : <Play size={13} />}
+                    {togglingLoop === p.id
+                      ? (lang === 'ar' ? '...' : '...')
+                      : p.running ? tr('stopPortfolio', lang) : tr('startPortfolio', lang)}
                   </button>
 
                   {confirmDelete === p.id ? (
                     <div className="flex gap-1">
-                      <button onClick={() => handleDelete(p.id)} disabled={deleting === p.id} className="btn-danger text-xs px-3 py-2.5">
-                        {deleting === p.id ? '⏳' : tr('confirmDelete', lang)}
+                      <button
+                        onClick={() => handleDelete(p.id)}
+                        disabled={deleting === p.id}
+                        className="flex items-center gap-1 px-2.5 py-2 rounded-xl text-xs font-semibold transition-all active:scale-95"
+                        style={{ background: 'rgba(248,113,113,0.15)', border: '1px solid rgba(248,113,113,0.4)', color: '#F87171' }}
+                      >
+                        {deleting === p.id ? <Loader2 size={12} className="spin" /> : <CheckCircle2 size={12} />}
+                        {tr('confirmDelete', lang)}
                       </button>
-                      <button onClick={() => setConfirmDelete(null)} className="btn-secondary text-xs px-3 py-2.5">✖</button>
+                      <button
+                        onClick={() => setConfirmDelete(null)}
+                        className="px-2.5 py-2 rounded-xl text-xs font-semibold transition-all active:scale-95"
+                        style={{ background: 'var(--bg-input)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}
+                      >✕</button>
                     </div>
                   ) : (
                     <button
                       onClick={() => setConfirmDelete(p.id)}
                       disabled={p.running}
-                      className="btn-secondary text-sm px-3 py-2.5 disabled:opacity-30"
+                      className="flex items-center justify-center px-3 py-2 rounded-xl transition-all active:scale-95 disabled:opacity-30"
+                      style={{ background: 'var(--bg-input)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}
                       title={p.running ? tr('cantDeleteActive', lang) : tr('deletePortfolio', lang)}
                     >
-                      🗑️
+                      <Trash2 size={13} />
                     </button>
                   )}
                 </div>
 
-                {/* Row 4: Portfolio settings — full width */}
+                {/* إعدادات المحفظة */}
                 <button
                   onClick={() => onEditPortfolio?.(p.id)}
-                  className="w-full py-2.5 rounded-xl text-sm font-semibold transition-all"
+                  className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold transition-all active:scale-95"
                   style={{
-                    background: 'rgba(96,165,250,0.08)',
-                    border: '1px solid rgba(96,165,250,0.3)',
+                    background: 'rgba(96,165,250,0.07)',
+                    border: '1px solid rgba(96,165,250,0.22)',
                     color: '#60A5FA',
                   }}
                 >
-                  ⚙️ {lang === 'ar' ? 'إعدادات المحفظة' : 'Portfolio Settings'}
+                  <Settings size={13} />
+                  {lang === 'ar' ? 'إعدادات المحفظة' : 'Portfolio Settings'}
                 </button>
               </div>
             ))}
