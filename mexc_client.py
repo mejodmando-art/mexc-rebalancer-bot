@@ -147,16 +147,46 @@ class MEXCClient:
         }
         return self._post("/api/v3/order", params)
 
+    def get_step_size(self, symbol: str) -> float:
+        """Return the minimum quantity increment (stepSize) for a symbol.
+
+        Falls back to 1e-8 if the info cannot be fetched so callers always
+        get a usable value.
+        """
+        try:
+            info = self.get_symbol_info(symbol)
+            for f in info.get("filters", []):
+                if f.get("filterType") == "LOT_SIZE":
+                    return float(f.get("stepSize", 1e-8))
+        except Exception:
+            pass
+        return 1e-8
+
+    def _round_step(self, qty: float, step: float) -> float:
+        """Round qty down to the nearest valid step multiple."""
+        if step <= 0:
+            return round(qty, 8)
+        import math
+        factor = 1.0 / step
+        return math.floor(qty * factor) / factor
+
     def place_market_sell(self, symbol: str, base_size: float) -> dict:
         """
         Market sell using base currency amount.
         base_size: amount of the base asset to sell.
+        Quantity is rounded down to the symbol's stepSize to avoid MEXC
+        'Invalid quantity' rejections.
         """
+        step = self.get_step_size(symbol)
+        qty = self._round_step(base_size, step)
+        # Express with enough decimal places to represent the step size.
+        decimals = max(0, -int(f"{step:.10f}".rstrip("0").find(".")) + len(f"{step:.10f}".rstrip("0").split(".")[1]))
+        qty_str = f"{qty:.{decimals}f}" if decimals > 0 else str(int(qty))
         params = {
             "symbol": symbol,
             "side": "SELL",
             "type": "MARKET",
-            "quantity": str(round(base_size, 8)),
+            "quantity": qty_str,
         }
         return self._post("/api/v3/order", params)
 

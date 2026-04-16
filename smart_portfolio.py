@@ -92,15 +92,24 @@ def load_config(path: str = CONFIG_PATH) -> dict:
         return json.load(f)
 
 
-def save_config(cfg: dict, path: str = CONFIG_PATH) -> None:
-    """Persist config to the active portfolio in DB (if one exists) and to config.json."""
+def save_config(cfg: dict, path: str = CONFIG_PATH, portfolio_id: int | None = None) -> None:
+    """Persist config to the DB portfolio and to config.json.
+
+    portfolio_id: when provided, saves to that specific portfolio instead of
+    the active one.  Pass this whenever saving from within a per-portfolio
+    rebalance loop to avoid overwriting a different portfolio's config.
+    """
     try:
         from database import list_portfolios, update_portfolio_config
-        portfolios = list_portfolios()
-        active = next((p for p in portfolios if p.get("active")), None)
-        if active:
-            update_portfolio_config(active["id"], cfg)
-            log.info("Config saved to DB (portfolio id=%s)", active["id"])
+        target_id = portfolio_id
+        if target_id is None:
+            portfolios = list_portfolios()
+            active = next((p for p in portfolios if p.get("active")), None)
+            if active:
+                target_id = active["id"]
+        if target_id is not None:
+            update_portfolio_config(target_id, cfg)
+            log.info("Config saved to DB (portfolio id=%s)", target_id)
     except Exception as e:
         log.warning("Could not save config to DB (%s) — saving to config.json only", e)
     with open(path, "w") as f:
@@ -119,6 +128,13 @@ def validate_allocations(assets: list) -> None:
     if len(symbols) != len(set(symbols)):
         dupes = [s for s in symbols if symbols.count(s) > 1]
         raise ValueError(f"Duplicate symbols: {', '.join(set(dupes))}")
+    # Each allocation must be strictly positive to prevent assets being sold
+    # to zero on every rebalance cycle.
+    for a in assets:
+        if a["allocation_pct"] <= 0:
+            raise ValueError(
+                f"Allocation for {a['symbol']} must be greater than 0% (got {a['allocation_pct']}%)."
+            )
     total = sum(a["allocation_pct"] for a in assets)
     if abs(total - 100.0) > 0.01:
         raise ValueError(f"Allocations must sum to 100% (got {total:.2f}%).")
@@ -382,7 +398,7 @@ def get_portfolio_value(
 # Rebalance execution
 # ---------------------------------------------------------------------------
 
-def execute_rebalance(client: MEXCClient, cfg: dict) -> list:
+def execute_rebalance(client: MEXCClient, cfg: dict, _portfolio_id: int | None = None) -> list:
     """
     Rebalance logic:
     1. Compute the effective portfolio total = sum(asset values) + free USDT
@@ -391,14 +407,24 @@ def execute_rebalance(client: MEXCClient, cfg: dict) -> list:
     2. Sell assets that are worth more than their target share of that total.
     3. After sells settle, buy assets that are worth less than their target.
 
-    The effective total is recalculated after sells so that the USDT freed by
-    selling is available for buys.
+    _portfolio_id: when provided, config is saved back to this specific
+    portfolio in the DB instead of the active one.  Pass this from per-portfolio
+    loops to avoid cross-portfolio config corruption in multi-portfolio setups.
     """
     paper = is_paper_trading(cfg)
 
     assets_cfg = cfg["portfolio"]["assets"]
     budget_usdt = cfg["portfolio"].get("total_usdt", 0)
     details = []
+
+    # Guard: a zero budget would set every asset's target to 0 and liquidate
+    # the entire portfolio.  Abort early instead.
+    if budget_usdt <= 0:
+        log.error(
+            "Rebalance aborted: budget_usdt=%.2f — set total_usdt in portfolio config before rebalancing.",
+            budget_usdt,
+        )
+        return [{"action": "ABORTED", "reason": "budget_usdt is 0 or not set"}]
 
     log.info("Rebalance start | budget=%.2f USDT%s", budget_usdt, " [PAPER]" if paper else "")
 
@@ -409,9 +435,13 @@ def execute_rebalance(client: MEXCClient, cfg: dict) -> list:
         try:
             balance = client.get_asset_balance(sym) if sym != "USDT" else client.get_asset_balance("USDT")
             price   = client.get_price(f"{sym}USDT") if sym != "USDT" else 1.0
+            # Treat a zero price as a fetch failure to avoid ZeroDivisionError
+            # when computing sell quantity (diff / price).
+            if price <= 0 and sym != "USDT":
+                raise ValueError(f"price returned 0 for {sym} — skipping to avoid division by zero")
             actuals[sym] = {"balance": balance, "price": price, "value_usdt": balance * price}
         except Exception as e:
-            log.warning("Cannot fetch %s: %s", sym, e)
+            log.warning("Cannot fetch %s: %s — skipping asset", sym, e)
             actuals[sym] = {"balance": 0.0, "price": 0.0, "value_usdt": 0.0}
 
     # ── Compute effective total ──────────────────────────────────────────
@@ -452,9 +482,10 @@ def execute_rebalance(client: MEXCClient, cfg: dict) -> list:
             "action":     "SKIP",
         }
 
-        if diff > 1.0:    # زيادة أكبر من 1$ → بيع
-            sells.append({"sym": sym, "diff": diff, "price": actuals[sym]["price"], "entry": entry})
-        elif diff < -1.0: # ناقص أكبر من 1$ → شراء (الحد الأدنى 1$)
+        price = actuals[sym]["price"]
+        if diff > 1.0 and price > 0:    # زيادة أكبر من 1$ → بيع
+            sells.append({"sym": sym, "diff": diff, "price": price, "entry": entry})
+        elif diff < -1.0:               # ناقص أكبر من 1$ → شراء (الحد الأدنى 1$)
             buys.append({"sym": sym, "diff": abs(diff), "entry": entry})
         else:
             details.append(entry)
@@ -492,7 +523,8 @@ def execute_rebalance(client: MEXCClient, cfg: dict) -> list:
             log.warning("Could not fetch USDT: %s", e)
             usdt_remaining = None
     else:
-        usdt_remaining = None
+        # Paper mode: simulate budget cap so paper results reflect live behaviour.
+        usdt_remaining = min(free_usdt, budget_usdt)
 
     for b in buys:
         sym, entry = b["sym"], b["entry"]
@@ -502,7 +534,7 @@ def execute_rebalance(client: MEXCClient, cfg: dict) -> list:
 
         spend = b["diff"]
 
-        if not paper and usdt_remaining is not None:
+        if usdt_remaining is not None:
             if usdt_remaining <= 0:
                 entry["action"] = "SKIP_NO_FUNDS"
                 details.append(entry)
@@ -526,27 +558,44 @@ def execute_rebalance(client: MEXCClient, cfg: dict) -> list:
             except Exception as e:
                 log.error("Buy failed %s: %s", sym, e)
                 entry["action"] = f"BUY_ERROR: {e}"
+        else:
+            if usdt_remaining is not None:
+                usdt_remaining -= spend
         details.append(entry)
 
     # Persist to DB and config
     mode = cfg["rebalance"]["mode"]
     record_rebalance(mode, effective_total, details, paper=paper)
-    record_snapshot(effective_total, [
-        {"symbol": a["symbol"], "value_usdt": round(effective_total * a["allocation_pct"] / 100, 2), "actual_pct": a["allocation_pct"]}
-        for a in assets_cfg
-    ])
+
+    # Snapshot uses actual post-rebalance balances, not theoretical targets.
+    # Re-fetch balances so failed orders don't corrupt the P&L chart.
+    snapshot_assets = []
+    for a in assets_cfg:
+        sym = a["symbol"]
+        try:
+            bal = client.get_asset_balance(sym) if sym != "USDT" else client.get_asset_balance("USDT")
+            price = actuals[sym]["price"] if sym != "USDT" else 1.0
+            val = round(bal * price, 2)
+        except Exception:
+            val = round(actuals[sym]["value_usdt"], 2)
+        snapshot_assets.append({
+            "symbol": sym,
+            "value_usdt": val,
+            "actual_pct": round(val / effective_total * 100, 2) if effective_total else 0,
+        })
+    record_snapshot(effective_total, snapshot_assets)
 
     cfg["last_rebalance"] = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
-    save_config(cfg)
+    save_config(cfg, portfolio_id=_portfolio_id)
 
     return details
 
 
-def execute_rebalance_equal(client: MEXCClient, cfg: dict) -> list:
+def execute_rebalance_equal(client: MEXCClient, cfg: dict, _portfolio_id: int | None = None) -> list:
     """
     Rebalance by redistributing equally across all assets regardless of
-    their configured allocation_pct.  Temporarily overrides targets to
-    equal shares, then delegates to execute_rebalance.
+    their configured allocation_pct.  Uses a deep copy so the user's
+    original allocation percentages are never overwritten in the DB.
     """
     import copy
     cfg_eq = copy.deepcopy(cfg)
@@ -556,7 +605,16 @@ def execute_rebalance_equal(client: MEXCClient, cfg: dict) -> list:
     remainder = round(100.0 - base * (n - 1), 4)
     for i, a in enumerate(assets):
         a["allocation_pct"] = remainder if i == n - 1 else base
-    return execute_rebalance(client, cfg_eq)
+    # Pass _portfolio_id so save_config targets the right portfolio.
+    # The deep-copied cfg_eq carries equal allocations only for execution;
+    # the original cfg (with user allocations) is untouched in the DB because
+    # save_config inside execute_rebalance will write cfg_eq — but we restore
+    # the original allocations before saving to avoid overwriting user config.
+    result = execute_rebalance(client, cfg_eq, _portfolio_id=_portfolio_id)
+    # Restore original allocations in DB so user config is preserved.
+    cfg["last_rebalance"] = cfg_eq.get("last_rebalance", cfg.get("last_rebalance"))
+    save_config(cfg, portfolio_id=_portfolio_id)
+    return result
 
 
 def get_pnl(cfg: dict, current_usdt: float | None = None) -> dict:
