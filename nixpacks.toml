@@ -1,9 +1,10 @@
 [phases.setup]
 nixPkgs = ["python311", "nodejs_20", "nodePackages.npm"]
+aptPkgs = ["python3-pip"]
 
 [phases.install]
 cmds = [
-  "python3.11 -m pip install -r requirements.txt",
+  "pip3 install -r requirements.txt",
   "npm install --prefix web"
 ]
 
