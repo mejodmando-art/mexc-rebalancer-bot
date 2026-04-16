@@ -555,8 +555,8 @@ export default function Dashboard({ lang }: Props) {
         </div>
       )}
 
-      {/* ── Coin list section ─────────────────────────────────────────────── */}
-      <div className="animate-fade-up space-y-3" style={{ animationDelay: '0.15s' }}>
+      {/* ── Coin list section removed ── */}
+      {false && <div className="animate-fade-up space-y-3" style={{ animationDelay: '0.15s' }}>
         <div className="flex items-center justify-between">
           <h2 className="font-bold text-base" style={{ color: 'var(--text-main)' }}>
             {lang === 'ar' ? 'توزيع العملات' : 'Coin Allocation'}
@@ -842,7 +842,7 @@ export default function Dashboard({ lang }: Props) {
             )}
           </div>
         )}
-      </div>
+      </div>}
 
       {/* History modal */}
       {historyPort && (
