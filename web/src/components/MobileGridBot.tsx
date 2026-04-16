@@ -209,9 +209,11 @@ function CreateGridBotModal({ ar, onClose, onCreated }: {
   const [creating,         setCreating]         = useState(false);
   const [error,            setError]            = useState('');
 
-  // Scroll to top when modal opens so symbol/amount sections are visible first
+  // Reset scroll to top on mount
   useEffect(() => {
-    if (scrollRef.current) scrollRef.current.scrollTop = 0;
+    requestAnimationFrame(() => {
+      if (scrollRef.current) scrollRef.current.scrollTop = 0;
+    });
   }, []);
 
   useEffect(() => {
@@ -274,9 +276,9 @@ function CreateGridBotModal({ ar, onClose, onCreated }: {
     : POPULAR;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center" style={{ background: 'rgba(0,0,0,0.8)' }} onClick={onClose}>
-      <div ref={scrollRef} className="w-full max-w-lg rounded-t-3xl p-5 space-y-4 overflow-y-auto"
-        style={{ background: '#0f1923', border: '1px solid rgba(0,245,212,0.2)', maxHeight: '92vh', overscrollBehavior: 'contain' }}
+    <div className="fixed inset-0 z-50 flex flex-col justify-end" style={{ background: 'rgba(0,0,0,0.8)' }} onClick={onClose}>
+      <div ref={scrollRef} className="w-full max-w-lg mx-auto rounded-t-3xl p-5 space-y-4 overflow-y-auto"
+        style={{ background: '#0f1923', border: '1px solid rgba(0,245,212,0.2)', height: '92vh', overscrollBehavior: 'contain' }}
         onClick={e => e.stopPropagation()}>
 
         <div className="flex items-center justify-between">
