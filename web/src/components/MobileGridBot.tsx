@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Lang } from '../lib/i18n';
 import {
   listGridBots, stopGridBot, resumeGridBot, deleteGridBot, getGridOrders, createGridBot, previewGridBot,
@@ -194,6 +194,7 @@ function OrdersTable({ orders, ar }: { orders: any[]; ar: boolean }) {
 function CreateGridBotModal({ ar, onClose, onCreated }: {
   ar: boolean; onClose: () => void; onCreated: () => void;
 }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
   const [symbol,           setSymbol]           = useState('BTC');
   const [symbolSearch,     setSymbolSearch]     = useState('');
   const [showSymbolPicker, setShowSymbolPicker] = useState(false);
@@ -207,6 +208,11 @@ function CreateGridBotModal({ ar, onClose, onCreated }: {
   const [loading,          setLoading]          = useState(false);
   const [creating,         setCreating]         = useState(false);
   const [error,            setError]            = useState('');
+
+  // Scroll to top when modal opens so symbol/amount sections are visible first
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = 0;
+  }, []);
 
   useEffect(() => {
     const inv = parseFloat(investment);
@@ -269,7 +275,7 @@ function CreateGridBotModal({ ar, onClose, onCreated }: {
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center" style={{ background: 'rgba(0,0,0,0.8)' }} onClick={onClose}>
-      <div className="w-full max-w-lg rounded-t-3xl p-5 space-y-4 overflow-y-auto"
+      <div ref={scrollRef} className="w-full max-w-lg rounded-t-3xl p-5 space-y-4 overflow-y-auto"
         style={{ background: '#0f1923', border: '1px solid rgba(0,245,212,0.2)', maxHeight: '92vh', overscrollBehavior: 'contain' }}
         onClick={e => e.stopPropagation()}>
 
