@@ -3,7 +3,7 @@
 import { TrendingUp, ChevronRight, LayoutDashboard, Briefcase, PlusCircle, Grid3x3 } from 'lucide-react';
 import { Lang, tr } from '../lib/i18n';
 
-type Tab = 'dashboard' | 'portfolios' | 'create' | 'copy' | 'grid';
+type Tab = 'dashboard' | 'portfolios' | 'create' | 'grid';
 
 interface SidebarProps {
   active: Tab;

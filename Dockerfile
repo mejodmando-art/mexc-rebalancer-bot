@@ -11,6 +11,5 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 COPY --from=frontend /app/web/out ./static
-COPY --from=frontend /app/web/out ./api/static
 EXPOSE 8000
 CMD ["python", "main.py"]

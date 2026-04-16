@@ -3,7 +3,7 @@
 import { Moon, Sun, BarChart2, Wallet, Bot } from 'lucide-react';
 import { Lang, tr } from '../lib/i18n';
 
-type Tab = 'dashboard' | 'portfolios' | 'create' | 'copy' | 'grid';
+type Tab = 'dashboard' | 'portfolios' | 'create' | 'grid';
 
 interface NavbarProps {
   active: Tab;

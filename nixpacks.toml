@@ -11,9 +11,8 @@ cmds = [
 [phases.build]
 cmds = [
   "npm run build --prefix web",
-  "mkdir -p static api/static",
+  "mkdir -p static",
   "cp -r web/out/. static/",
-  "cp -r web/out/. api/static/",
   "ls static/index.html && echo '✓ static OK'"
 ]
 
