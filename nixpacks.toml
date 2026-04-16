@@ -4,16 +4,16 @@ nixPkgs = ["python311", "nodejs_20", "nodePackages.npm"]
 [phases.install]
 cmds = [
   "pip install -r requirements.txt",
-  "cd web && npm ci --prefer-offline"
+  "npm install --prefix web"
 ]
 
 [phases.build]
 cmds = [
-  "cd web && npm run build && cd ..",
+  "npm run build --prefix web",
   "mkdir -p static api/static",
   "cp -r web/out/. static/",
   "cp -r web/out/. api/static/",
-  "ls static/index.html && echo 'static OK'"
+  "ls static/index.html && echo '✓ static OK'"
 ]
 
 [start]
