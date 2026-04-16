@@ -78,7 +78,7 @@ export default function App() {
           />
           <main className="flex-1 px-4 sm:px-6 py-6 pb-24 lg:pb-8 max-w-screen-xl mx-auto w-full">
             <div key={tab} className="animate-fade-up">
-              {tab === 'dashboard'  && <Dashboard      lang={lang} />}
+              {tab === 'dashboard'  && <Dashboard      lang={lang} botRunning={botRunning} onBotRunningChange={setBotRunning} />}
               {tab === 'portfolios' && <Portfolios     lang={lang} onActivated={() => setTab('dashboard')} onCreateBot={() => setTab('create')} onEditPortfolio={(id) => { setEditPortfolioId(id); setTab('portfolio-settings'); }} />}
               {tab === 'portfolio-settings' && editPortfolioId !== null && <PortfolioSettings lang={lang} portfolioId={editPortfolioId} onBack={() => setTab('portfolios')} />}
               {tab === 'create'     && <CreateBot      lang={lang} onCreated={() => setTab('portfolios')} />}

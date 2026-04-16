@@ -7,7 +7,7 @@ import {
   CheckCircle2, XCircle, ShoppingCart, History,
 } from 'lucide-react';
 import {
-  getStatus, getBotStatus,
+  getStatus,
   startBot, stopBot, triggerRebalance, cancelRebalance,
   getRebalanceJobStatus, getAccountTotal,
   listPortfolios, activatePortfolio, rebalancePortfolio, startPortfolio,
@@ -24,7 +24,7 @@ interface StatusData {
   total_usdt: number; assets: Asset[];
   bot_name?: string; mode?: string;
 }
-interface Props { lang: Lang }
+interface Props { lang: Lang; botRunning?: boolean; onBotRunningChange?: (v: boolean) => void }
 
 function createRipple(e: React.MouseEvent<HTMLButtonElement>) {
   const btn = e.currentTarget;
@@ -39,11 +39,13 @@ function createRipple(e: React.MouseEvent<HTMLButtonElement>) {
   setTimeout(() => ripple.remove(), 700);
 }
 
-export default function Dashboard({ lang }: Props) {
+export default function Dashboard({ lang, botRunning: botRunningProp = false, onBotRunningChange }: Props) {
   const toast = useToast();
 
   const [status,       setStatus]       = useState<StatusData | null>(null);
-  const [botRunning,   setBotRunning]   = useState(false);
+  const [botRunning,   setBotRunning]   = useState(botRunningProp);
+
+  useEffect(() => { setBotRunning(botRunningProp); }, [botRunningProp]);
   const [loading,      setLoading]      = useState(true);
   const [accountTotal, setAccountTotal] = useState<number | null>(null);
 
@@ -98,9 +100,8 @@ export default function Dashboard({ lang }: Props) {
     if (!silent) setLoading(true);
     else setRefreshing(true);
     try {
-      const [s, bot] = await Promise.all([getStatus(), getBotStatus()]);
+      const s = await getStatus();
       setStatus(s);
-      setBotRunning(bot?.running ?? false);
       getAccountTotal().then(r => {
         setAccountTotal(r.total_usdt);
 
@@ -201,6 +202,7 @@ export default function Dashboard({ lang }: Props) {
       }
       await startPortfolio(portfolioId);
       setBotRunning(true);
+      onBotRunningChange?.(true);
       toast.success(
         lang === 'ar' ? 'تم الشراء والتفعيل' : 'Bought & activated',
         lang === 'ar' ? 'تم شراء العملات وتشغيل المحفظة' : 'Assets purchased and portfolio started'
@@ -280,10 +282,10 @@ export default function Dashboard({ lang }: Props) {
     setBotLoading(true);
     try {
       if (botRunning) {
-        await stopBot(); setBotRunning(false);
+        await stopBot(); setBotRunning(false); onBotRunningChange?.(false);
         toast.info(lang === 'ar' ? 'تم إيقاف البوت' : 'Bot stopped');
       } else {
-        await startBot(); setBotRunning(true);
+        await startBot(); setBotRunning(true); onBotRunningChange?.(true);
         toast.success(lang === 'ar' ? 'تم تشغيل البوت' : 'Bot started');
       }
     } catch (err: any) {
