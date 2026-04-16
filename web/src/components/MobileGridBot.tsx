@@ -295,12 +295,6 @@ function BotCard({ bot, lang, onRefresh }: { bot: any; lang: Lang; onRefresh: ()
         </div>
       </div>
 
-      {/* ── Grid ladder chart ── */}
-      <div className="mgb-chart-wrap">
-        <span className="mgb-section-label">{ar ? 'سلم الشبكة' : 'Grid Ladder'}</span>
-        <GridLadderChart low={low} high={high} current={current} gridCount={gridCount} />
-      </div>
-
       {/* ── Orders toggle ── */}
       <button className="mgb-orders-toggle" onClick={() => setShowOrders(v => !v)}>
         <span>{ar ? 'الأوامر النشطة' : 'Active Orders'}</span>
