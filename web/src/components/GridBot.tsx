@@ -40,9 +40,12 @@ function CreateForm({ lang, onCreated }: { lang: Lang; onCreated: () => void }) 
   const [investment, setInvestment]       = useState('');
   const [mode, setMode]                   = useState<'normal' | 'infinity'>('normal');
   const [useBaseBalance, setUseBaseBalance] = useState(false);
-  const [gridCountManual, setGridCountManual] = useState<number | null>(null); // null = auto
-  const [priceLow,  setPriceLow]          = useState('');
-  const [priceHigh, setPriceHigh]         = useState('');
+  const [gridCountManual, setGridCountManual] = useState<number | null>(null);
+  // % range inputs (replaces explicit price inputs)
+  const [lowerPct, setLowerPct]           = useState('5');
+  const [upperPct, setUpperPct]           = useState('5');
+  // expand direction when price exits range
+  const [expandDir, setExpandDir]         = useState<'both' | 'lower' | 'upper'>('both');
   const [preview, setPreview]             = useState<any>(null);
   const [loading, setLoading]             = useState(false);
   const [creating, setCreating]           = useState(false);
@@ -52,10 +55,18 @@ function CreateForm({ lang, onCreated }: { lang: Lang; onCreated: () => void }) 
     const inv = parseFloat(investment);
     if (!symbol || inv < 1) { setPreview(null); return; }
     setLoading(true);
-    try { setPreview(await previewGridBot(symbol, inv, gridCountManual ?? undefined)); setError(''); }
+    try {
+      setPreview(await previewGridBot(
+        symbol, inv,
+        gridCountManual ?? undefined,
+        parseFloat(lowerPct) || 5,
+        parseFloat(upperPct) || 5,
+      ));
+      setError('');
+    }
     catch (e: any) { setError(e.message); setPreview(null); }
     finally { setLoading(false); }
-  }, [symbol, investment, gridCountManual]);
+  }, [symbol, investment, gridCountManual, lowerPct, upperPct]);
 
   useEffect(() => { const t = setTimeout(fetchPreview, 700); return () => clearTimeout(t); }, [fetchPreview]);
 
@@ -66,15 +77,24 @@ function CreateForm({ lang, onCreated }: { lang: Lang; onCreated: () => void }) 
   const handleCreate = async () => {
     const invNum = parseFloat(investment);
     if (!symbol || invNum < 1) { setError(ar ? 'أدخل الزوج والمبلغ' : 'Enter symbol and amount'); return; }
-    const low  = priceLow  ? parseFloat(priceLow)  : undefined;
-    const high = priceHigh ? parseFloat(priceHigh) : undefined;
-    if (low !== undefined && high !== undefined && low >= high) {
-      setError(ar ? 'السعر الأدنى يجب أن يكون أقل من الأعلى' : 'Price low must be less than price high');
+    const lp = parseFloat(lowerPct);
+    const up = parseFloat(upperPct);
+    if (isNaN(lp) || lp <= 0 || isNaN(up) || up <= 0) {
+      setError(ar ? 'أدخل نسبة نطاق صحيحة (أكبر من 0)' : 'Enter valid range % (greater than 0)');
       return;
     }
     setCreating(true); setError('');
     try {
-      await createGridBot({ symbol, investment: invNum, mode, use_base_balance: useBaseBalance, grid_count: gridCountManual ?? undefined, price_low: low, price_high: high });
+      await createGridBot({
+        symbol,
+        investment: invNum,
+        mode,
+        use_base_balance: useBaseBalance,
+        grid_count: gridCountManual ?? undefined,
+        lower_pct: lp,
+        upper_pct: mode === 'infinity' ? 0.1 : up,
+        expand_direction: expandDir,
+      });
       onCreated();
     }
     catch (e: any) { setError(e.message); }
@@ -243,51 +263,123 @@ function CreateForm({ lang, onCreated }: { lang: Lang; onCreated: () => void }) 
         )}
       </div>
 
-      {/* Price range */}
+      {/* % Range inputs */}
       <div className="card p-4 space-y-3">
-        <div className="flex items-center justify-between">
-          <div className="label mb-0">{ar ? 'النطاق السعري (اختياري)' : 'Price Range (optional)'}</div>
-          {(priceLow || priceHigh) && (
-            <button onClick={() => { setPriceLow(''); setPriceHigh(''); }}
-              className="text-xs px-2 py-0.5 rounded-lg font-bold"
-              style={{ background: 'rgba(255,82,82,0.1)', color: '#FF5252', border: '1px solid rgba(255,82,82,0.25)' }}>
-              {ar ? 'مسح' : 'Clear'}
-            </button>
-          )}
-        </div>
-        {preview && !priceLow && !priceHigh && (
+        <div className="label mb-0">{ar ? 'نطاق الشبكة (%)' : 'Grid Range (%)'}</div>
+
+        {/* Calculated price preview */}
+        {preview && (
           <div className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs"
             style={{ background: 'rgba(0,212,170,0.06)', border: '1px solid rgba(0,212,170,0.15)' }}>
-            <span style={{ color: 'var(--text-muted)' }}>{ar ? 'تلقائي:' : 'Auto:'}</span>
-            <span className="num font-bold" style={{ color: 'var(--accent)' }}>${preview.price_low?.toFixed(4)}</span>
+            <span style={{ color: 'var(--text-muted)' }}>{ar ? 'النطاق:' : 'Range:'}</span>
+            <span className="num font-bold" style={{ color: '#00E676' }}>${preview.price_low?.toFixed(4)}</span>
             <span style={{ color: 'var(--text-muted)' }}>→</span>
-            <span className="num font-bold" style={{ color: 'var(--accent)' }}>${preview.price_high?.toFixed(4)}</span>
+            <span className="num font-bold" style={{ color: '#FF5252' }}>${preview.price_high?.toFixed(4)}</span>
           </div>
         )}
+
         <div className="grid grid-cols-2 gap-3">
+          {/* Lower % */}
           <div className="space-y-1">
-            <div className="text-[10px] font-semibold" style={{ color: '#00E676' }}>↓ {ar ? 'الحد الأدنى' : 'Price Low'}</div>
-            <input type="number" min={0} step="any" value={priceLow}
-              onChange={e => setPriceLow(e.target.value)}
-              placeholder={preview?.price_low?.toFixed(4) ?? '0.0000'}
-              className="input num text-sm"
-              style={{ borderColor: 'rgba(0,230,118,0.3)', color: '#00E676' }} />
+            <div className="text-[10px] font-semibold" style={{ color: '#00E676' }}>
+              ↓ {ar ? 'نطاق أسفل' : 'Lower Range'}
+            </div>
+            <div className="relative">
+              <input
+                type="number" min={0.1} max={50} step={0.5}
+                value={lowerPct}
+                onChange={e => setLowerPct(e.target.value)}
+                className="input num text-sm w-full pe-7"
+                style={{ borderColor: 'rgba(0,230,118,0.35)', color: '#00E676' }}
+              />
+              <span className="absolute end-2.5 top-1/2 -translate-y-1/2 text-xs font-bold pointer-events-none"
+                style={{ color: '#00E676' }}>%</span>
+            </div>
+            {/* Quick picks */}
+            <div className="flex gap-1">
+              {[2, 5, 10].map(v => (
+                <button key={v} onClick={() => setLowerPct(String(v))}
+                  className="flex-1 py-1 rounded-lg text-[10px] font-bold transition-all"
+                  style={{
+                    background: lowerPct === String(v) ? 'rgba(0,230,118,0.15)' : 'var(--bg-input)',
+                    color: lowerPct === String(v) ? '#00E676' : 'var(--text-muted)',
+                    border: `1px solid ${lowerPct === String(v) ? 'rgba(0,230,118,0.35)' : 'var(--border)'}`,
+                  }}>
+                  {v}%
+                </button>
+              ))}
+            </div>
           </div>
+
+          {/* Upper % */}
           <div className="space-y-1">
-            <div className="text-[10px] font-semibold" style={{ color: '#FF5252' }}>↑ {ar ? 'الحد الأعلى' : 'Price High'}</div>
-            <input type="number" min={0} step="any" value={priceHigh}
-              onChange={e => setPriceHigh(e.target.value)}
-              placeholder={mode === 'infinity' ? '∞' : (preview?.price_high?.toFixed(4) ?? '0.0000')}
-              disabled={mode === 'infinity'}
-              className="input num text-sm"
-              style={{ borderColor: mode === 'infinity' ? 'var(--border)' : 'rgba(255,82,82,0.3)', color: mode === 'infinity' ? 'var(--text-muted)' : '#FF5252' }} />
+            <div className="text-[10px] font-semibold" style={{ color: mode === 'infinity' ? 'var(--text-muted)' : '#FF5252' }}>
+              ↑ {ar ? 'نطاق أعلى' : 'Upper Range'}
+              {mode === 'infinity' && <span className="ms-1 opacity-60">∞</span>}
+            </div>
+            <div className="relative">
+              <input
+                type="number" min={0.1} max={50} step={0.5}
+                value={mode === 'infinity' ? '∞' : upperPct}
+                onChange={e => setUpperPct(e.target.value)}
+                disabled={mode === 'infinity'}
+                className="input num text-sm w-full pe-7"
+                style={{
+                  borderColor: mode === 'infinity' ? 'var(--border)' : 'rgba(255,82,82,0.35)',
+                  color: mode === 'infinity' ? 'var(--text-muted)' : '#FF5252',
+                }}
+              />
+              {mode !== 'infinity' && (
+                <span className="absolute end-2.5 top-1/2 -translate-y-1/2 text-xs font-bold pointer-events-none"
+                  style={{ color: '#FF5252' }}>%</span>
+              )}
+            </div>
+            {mode !== 'infinity' && (
+              <div className="flex gap-1">
+                {[2, 5, 10].map(v => (
+                  <button key={v} onClick={() => setUpperPct(String(v))}
+                    className="flex-1 py-1 rounded-lg text-[10px] font-bold transition-all"
+                    style={{
+                      background: upperPct === String(v) ? 'rgba(255,82,82,0.15)' : 'var(--bg-input)',
+                      color: upperPct === String(v) ? '#FF5252' : 'var(--text-muted)',
+                      border: `1px solid ${upperPct === String(v) ? 'rgba(255,82,82,0.35)' : 'var(--border)'}`,
+                    }}>
+                    {v}%
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </div>
-        {priceLow && priceHigh && parseFloat(priceLow) >= parseFloat(priceHigh) && (
-          <div className="text-xs text-center" style={{ color: '#FF5252' }}>
-            ⚠ {ar ? 'الحد الأدنى يجب أن يكون أقل من الأعلى' : 'Low must be less than high'}
+
+        {/* Expand direction — what happens when price exits the range */}
+        <div className="pt-1 space-y-1.5">
+          <div className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
+            {ar ? 'عند تجاوز النطاق — وسّع:' : 'When price exits range — expand:'}
           </div>
-        )}
+          <div className="grid grid-cols-3 gap-1.5">
+            {([
+              ['both',  ar ? 'الجهتين'  : 'Both sides', '↕'],
+              ['lower', ar ? 'أسفل فقط' : 'Lower only', '↓'],
+              ['upper', ar ? 'أعلى فقط' : 'Upper only', '↑'],
+            ] as const).map(([val, label, icon]) => (
+              <button key={val} onClick={() => setExpandDir(val)}
+                className="flex flex-col items-center gap-0.5 py-2 px-1 rounded-xl transition-all"
+                style={{
+                  background: expandDir === val ? 'rgba(240,185,11,0.12)' : 'var(--bg-input)',
+                  border: `1px solid ${expandDir === val ? 'rgba(240,185,11,0.4)' : 'var(--border)'}`,
+                }}>
+                <span className="text-base leading-none" style={{ color: expandDir === val ? '#F0B90B' : 'var(--text-muted)' }}>{icon}</span>
+                <span className="text-[9px] font-bold" style={{ color: expandDir === val ? '#F0B90B' : 'var(--text-muted)' }}>{label}</span>
+              </button>
+            ))}
+          </div>
+          <div className="text-[9px] px-1" style={{ color: 'var(--text-muted)' }}>
+            {ar
+              ? 'عند خروج السعر من النطاق تتضاعف النسبة المختارة تلقائياً'
+              : 'Selected side(s) double in % each time price exits the range'}
+          </div>
+        </div>
       </div>
 
       {/* Mode selector */}
@@ -347,8 +439,10 @@ function CreateForm({ lang, onCreated }: { lang: Lang; onCreated: () => void }) 
             ))}
           </div>
           <div className="flex justify-between text-xs" style={{ color: 'var(--text-muted)' }}>
-            <span>{ar ? 'نطاق:' : 'Range:'} ${preview.price_low.toFixed(4)}</span>
-            <span>→ ${preview.price_high.toFixed(4)}</span>
+            <span style={{ color: '#00E676' }}>↓ {parseFloat(lowerPct)||5}% · ${preview.price_low.toFixed(4)}</span>
+            <span style={{ color: '#FF5252' }}>
+              {mode === 'infinity' ? '∞' : `↑ ${parseFloat(upperPct)||5}% · $${preview.price_high.toFixed(4)}`}
+            </span>
           </div>
         </div>
       )}

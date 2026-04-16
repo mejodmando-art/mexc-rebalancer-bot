@@ -1517,8 +1517,14 @@ class GridBotCreate(BaseModel):
     symbol: str
     investment: float
     grid_count: int | None = None
+    # Percentage-based range (preferred) — % below/above current price
+    lower_pct: float | None = None
+    upper_pct: float | None = None
+    # Explicit price range (legacy / manual override)
     price_low: float | None = None
     price_high: float | None = None
+    # Which side expands when price exits the range: 'both' | 'lower' | 'upper'
+    expand_direction: str = "both"
     mode: str = "normal"               # 'normal' | 'infinity'
     use_base_balance: bool = False     # include existing base-asset value
 
@@ -1575,8 +1581,11 @@ def api_create_grid_bot(body: GridBotCreate):
             symbol=body.symbol,
             investment=body.investment,
             grid_count=body.grid_count,
+            lower_pct=body.lower_pct,
+            upper_pct=body.upper_pct,
             price_low=body.price_low,
             price_high=body.price_high,
+            expand_direction=body.expand_direction,
             mode=body.mode,
             use_base_balance=body.use_base_balance,
         )
@@ -1586,7 +1595,14 @@ def api_create_grid_bot(body: GridBotCreate):
 
 
 @app.get("/api/grid-bots/preview")
-def api_grid_preview(symbol: str, investment: float, mode: str = "normal", grid_count: int | None = None):
+def api_grid_preview(
+    symbol: str,
+    investment: float,
+    mode: str = "normal",
+    grid_count: int | None = None,
+    lower_pct: float | None = None,
+    upper_pct: float | None = None,
+):
     """Return auto-calculated (or user-specified) range and grid count without creating a bot.
     Also returns free_usdt so the UI can warn when investment exceeds available balance."""
     try:
@@ -1595,7 +1611,12 @@ def api_grid_preview(symbol: str, investment: float, mode: str = "normal", grid_
         if not sym.endswith("USDT"):
             sym += "USDT"
         price = client.get_price(sym)
-        low, high = calculate_grid_range(client, sym)
+        if lower_pct is not None or upper_pct is not None:
+            _l = lower_pct if lower_pct is not None else 5.0
+            _u = upper_pct if upper_pct is not None else 5.0
+            low, high = calculate_grid_range(client, sym, lower_pct=_l, upper_pct=_u)
+        else:
+            low, high = calculate_grid_range(client, sym)
         count = grid_count if (grid_count and grid_count >= 2) else calculate_grid_count(investment, low, high)
         step  = round((high - low) / count, 8)
         profit_per_grid_pct = round(step / low * 100, 4)
