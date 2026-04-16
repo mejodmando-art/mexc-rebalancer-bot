@@ -264,6 +264,10 @@ def _send_discord(webhook_url: str, message: str) -> None:
 
 @asynccontextmanager
 async def lifespan(app):
+    # ── Startup: build frontend in background so uvicorn accepts requests
+    #    immediately even if npm install+build takes 30+ seconds ──
+    threading.Thread(target=_ensure_frontend_built, daemon=True).start()
+
     # ── Startup: resume portfolio loops that were running before restart ──
     try:
         running_ids = get_running_portfolios()
@@ -459,7 +463,8 @@ def _ensure_frontend_built() -> None:
     except subprocess.CalledProcessError as e:
         log.error("Frontend build failed: %s", e)
 
-_ensure_frontend_built()
+# _ensure_frontend_built() is called inside lifespan() so it does not block
+# the import phase (which would delay uvicorn startup in CI / cold starts).
 
 # Next.js hashed assets (_next/static/**) are immutable — cache 1 year.
 # HTML files must never be cached so users always get the latest build.
