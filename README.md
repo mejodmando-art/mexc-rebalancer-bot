@@ -2,7 +2,7 @@
 
 # 🤖 MEXC Smart Portfolio — بوت إعادة التوازن الذكي
 
-بوت Python لإعادة توازن المحفظة تلقائياً على منصة MEXC Spot، مع واجهة ويب عربية/إنجليزية وبوت تليجرام.
+بوت Python لإعادة توازن المحفظة تلقائياً على منصة MEXC Spot، مع واجهة ويب عربية/إنجليزية.
 
 ---
 
@@ -13,7 +13,7 @@
 - [متغيرات البيئة](#متغيرات-البيئة)
 - [تشغيل البوت](#تشغيل-البوت)
 - [واجهة الويب](#واجهة-الويب)
-- [بوت تليجرام](#بوت-تليجرام)
+- [حماية الـ API (مهم)](#حماية-ال-api-مهم)
 - [إشعارات Discord](#إشعارات-discord)
 - [أوضاع إعادة التوازن](#أوضاع-إعادة-التوازن)
 - [هيكل الملفات](#هيكل-الملفات)
@@ -58,12 +58,14 @@ cd ..
 MEXC_API_KEY=your_api_key_here
 MEXC_SECRET_KEY=your_secret_key_here
 
-# اختياري — تفعيل بوت تليجرام
-TELEGRAM_BOT_TOKEN=your_bot_token_here
-TELEGRAM_CHAT_ID=your_chat_id_here   # لتقييد الوصول لمستخدم واحد
-
 # اختياري — وضع تجريبي (لا ينفذ صفقات حقيقية)
 PAPER_TRADING=false
+
+# مهم للإنتاج — حماية API
+API_AUTH_KEY=ضع_مفتاح_سري_طويل_وعشوائي
+
+# مهم للإنتاج — CORS origins مفصولة بفاصلة
+CORS_ALLOW_ORIGINS=https://your-frontend.com
 ```
 
 > **كيف تحصل على مفاتيح MEXC؟**
@@ -112,23 +114,27 @@ uvicorn api.main:app --host 0.0.0.0 --port 8000
 
 ---
 
-## بوت تليجرام
+## حماية الـ API (مهم)
 
-### الأوامر المتاحة
+بشكل افتراضي، endpoints الحساسة لازم تكون محمية بمفتاح API مشترك.
 
-| الأمر | الوظيفة |
-|-------|---------|
-| `/start` | عرض القائمة الرئيسية |
-| `/status` | عرض حالة المحفظة الحالية |
-| `/rebalance` | تنفيذ إعادة توازن يدوي |
-| `/history` | عرض آخر 10 عمليات |
-| `/stats` | إحصائيات الأداء والربح/الخسارة |
-| `/export` | تصدير سجل العمليات CSV |
-| `/settings` | تعديل إعدادات المحفظة |
-| `/stop` | إيقاف البوت |
-| `/help` | عرض المساعدة |
+1. عيّن متغير البيئة:
 
-> **ملاحظة:** البوت يقرأ المفاتيح من متغيرات البيئة فقط — لا يطلبها عبر المحادثة.
+```env
+API_AUTH_KEY=ضع_مفتاح_طويل_وعشوائي
+```
+
+2. أرسل المفتاح من الواجهة الأمامية بأحد الخيارين:
+- `Authorization: Bearer <API_AUTH_KEY>`
+- `X-API-Key: <API_AUTH_KEY>`
+
+3. قفل CORS على دوميناتك فقط:
+
+```env
+CORS_ALLOW_ORIGINS=https://your-frontend.com,https://admin.your-frontend.com
+```
+
+> **ملاحظة:** لو `API_AUTH_KEY` فاضي، الحماية تتعطل (مناسب للتطوير المحلي فقط).
 
 ---
 
@@ -174,7 +180,6 @@ mexc-rebalancer-bot/
 ├── database.py          # SQLite layer
 ├── mexc_client.py       # MEXC REST API client
 ├── smart_portfolio.py   # منطق إعادة التوازن
-├── telegram_bot.py      # بوت تليجرام
 ├── main.py              # نقطة الدخول
 ├── config.json          # إعدادات المحفظة
 └── requirements.txt     # مكتبات Python

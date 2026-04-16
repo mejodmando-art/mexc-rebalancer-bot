@@ -27,6 +27,7 @@ import threading
 import time
 import logging
 import uuid
+import secrets
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Optional
@@ -312,16 +313,34 @@ async def lifespan(app):
 
 app = FastAPI(title="MEXC Portfolio Rebalancer API", version="3.0.1", lifespan=lifespan)
 
+
+def _allowed_origins() -> list[str]:
+    """Resolve allowed CORS origins from env.
+
+    CORS_ALLOW_ORIGINS supports comma-separated origins.
+    Defaults to localhost for safer local development.
+    """
+    raw = os.environ.get("CORS_ALLOW_ORIGINS", "").strip()
+    if not raw:
+        return [
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "http://localhost:8000",
+            "http://127.0.0.1:8000",
+        ]
+    return [o.strip() for o in raw.split(",") if o.strip()]
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_allowed_origins(),
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-API-Key"],
 )
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request as StarletteRequest
-from starlette.responses import Response as StarletteResponse
+from starlette.responses import Response as StarletteResponse, JSONResponse
 
 class NoCacheHtmlMiddleware(BaseHTTPMiddleware):
     """
@@ -341,6 +360,63 @@ class NoCacheHtmlMiddleware(BaseHTTPMiddleware):
         return response
 
 app.add_middleware(NoCacheHtmlMiddleware)
+
+
+class ApiKeyAuthMiddleware(BaseHTTPMiddleware):
+    """Protect sensitive /api/* routes using a shared API key.
+
+    Configure with API_AUTH_KEY environment variable.
+    Client can pass key in either:
+      - Authorization: Bearer <key>
+      - X-API-Key: <key>
+
+    If API_AUTH_KEY is empty, auth is disabled (dev fallback).
+    """
+
+    _PUBLIC_PREFIXES = (
+        "/health",
+        "/docs",
+        "/openapi.json",
+        "/redoc",
+        "/api/status",
+        "/api/history",
+        "/api/snapshots",
+        "/api/config",
+        "/api/rebalance/status/",
+        "/api/mexc/status",
+        "/api/db/status",
+    )
+
+    def _is_public(self, path: str) -> bool:
+        if not path.startswith("/api") and path not in ("/health", "/docs", "/openapi.json", "/redoc"):
+            return True
+        return any(path == p or path.startswith(p) for p in self._PUBLIC_PREFIXES)
+
+    async def dispatch(self, request: StarletteRequest, call_next):
+        key = os.environ.get("API_AUTH_KEY", "").strip()
+        if not key:
+            return await call_next(request)
+
+        path = request.url.path
+        if self._is_public(path):
+            return await call_next(request)
+
+        auth = request.headers.get("authorization", "")
+        x_api = request.headers.get("x-api-key", "")
+
+        provided = ""
+        if auth.lower().startswith("bearer "):
+            provided = auth[7:].strip()
+        elif x_api:
+            provided = x_api.strip()
+
+        if not provided or not secrets.compare_digest(provided, key):
+            return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+
+        return await call_next(request)
+
+
+app.add_middleware(ApiKeyAuthMiddleware)
 
 _static_dir = os.path.join(_root, "static")
 
