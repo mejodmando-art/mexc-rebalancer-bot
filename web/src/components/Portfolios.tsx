@@ -642,8 +642,7 @@ export default function Portfolios({ lang, onActivated }: Props) {
                   <button
                     onClick={() => handleBuyAndActivate(p)}
                     disabled={activating === p.id}
-                    className="w-full py-2 rounded-xl text-sm font-semibold transition-colors disabled:opacity-40"
-                    style={{ background: 'var(--brand)', color: '#000' }}
+                    className="w-full py-2 rounded-xl text-sm font-semibold transition-all disabled:opacity-40 btn-primary"
                   >
                     {activating === p.id ? '⏳' : `🛒 ${tr('buyAndActivate', lang)}`}
                   </button>
