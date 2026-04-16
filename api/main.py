@@ -420,6 +420,40 @@ app.add_middleware(ApiKeyAuthMiddleware)
 
 _static_dir = os.path.join(_root, "static")
 
+# ── Auto-build frontend if static/index.html is missing ──────────────────────
+def _ensure_frontend_built() -> None:
+    """Build the Next.js frontend if the static output is absent.
+
+    This runs once at import time so Railway deployments that skip the
+    nixpacks build phase (e.g. restart-only deploys) still serve the UI.
+    """
+    index = os.path.join(_static_dir, "index.html")
+    if os.path.exists(index):
+        return
+    web_dir = os.path.join(_root, "web")
+    if not os.path.isdir(web_dir):
+        log.warning("web/ directory not found — skipping frontend build")
+        return
+    import subprocess
+    log.info("static/index.html missing — building Next.js frontend…")
+    try:
+        subprocess.run(["npm", "install"], cwd=web_dir, check=True,
+                       capture_output=True)
+        subprocess.run(["npm", "run", "build"], cwd=web_dir, check=True,
+                       capture_output=True)
+        out_dir = os.path.join(web_dir, "out")
+        if os.path.isdir(out_dir):
+            import shutil
+            os.makedirs(_static_dir, exist_ok=True)
+            shutil.copytree(out_dir, _static_dir, dirs_exist_ok=True)
+            log.info("Frontend built and copied to static/")
+        else:
+            log.error("npm run build succeeded but web/out/ not found")
+    except subprocess.CalledProcessError as e:
+        log.error("Frontend build failed: %s", e)
+
+_ensure_frontend_built()
+
 # Next.js hashed assets (_next/static/**) are immutable — cache 1 year.
 # HTML files must never be cached so users always get the latest build.
 _IMMUTABLE = "public, max-age=31536000, immutable"
