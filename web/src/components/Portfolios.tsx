@@ -242,26 +242,31 @@ function StopAndSellModal({ portfolioId, portfolioName, lang, onClose, onDone }:
         )}
 
         {/* Done phase */}
-        {phase === 'done' && (
-          <>
-            <div className="text-sm text-green-400 bg-green-900/20 rounded-xl px-4 py-3">
-              ✅ {tr('stopAndSellSuccess', lang)}
+        {phase === 'done' && (() => {
+          const soldCount = results.filter(r => r.action === 'SOLD').length;
+          return (
+            <div className="flex flex-col items-center gap-5 py-4">
+              <div className="w-16 h-16 rounded-full flex items-center justify-center text-3xl"
+                style={{ background: 'rgba(52,211,153,0.15)', border: '2px solid rgba(52,211,153,0.4)' }}>
+                ✅
+              </div>
+              <div className="text-center space-y-1">
+                <p className="text-lg font-bold" style={{ color: 'var(--text-main)' }}>
+                  {lang === 'ar' ? 'تم البيع بنجاح' : 'Sold Successfully'}
+                </p>
+                <p className="text-2xl font-black" style={{ color: '#34D399' }}>
+                  {lang === 'ar' ? `${soldCount} عملة` : `${soldCount} coin${soldCount !== 1 ? 's' : ''}`}
+                </p>
+                <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                  {lang === 'ar' ? 'تم بيعها بنجاح' : 'sold successfully'}
+                </p>
+              </div>
+              <button onClick={handleClose} className="btn-primary w-full">
+                {lang === 'ar' ? 'حسناً' : 'OK'}
+              </button>
             </div>
-            <div className="space-y-2">
-              {results.map((r) => (
-                <div key={r.symbol} className="flex items-center justify-between text-sm px-3 py-2 rounded-xl" style={{ background: 'var(--bg-input)' }}>
-                  <span className="font-semibold" style={{ color: 'var(--text-main)' }}>{r.symbol}</span>
-                  <span className={r.action === 'SOLD' ? 'text-green-400' : r.action === 'ERROR' ? 'text-red-400' : 'text-gray-500'}>
-                    {r.action === 'SOLD' ? `✅ بيع ${r.qty?.toFixed(6)}` : r.action === 'ERROR' ? `❌ ${r.error}` : '— لا رصيد'}
-                  </span>
-                </div>
-              ))}
-            </div>
-            <button onClick={handleClose} className="btn-primary w-full">
-              {tr('stopAndSellCancel', lang)}
-            </button>
-          </>
-        )}
+          );
+        })()}
       </div>
     </div>
   );
