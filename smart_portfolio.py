@@ -57,6 +57,21 @@ MIN_ASSETS = 1
 MAX_ASSETS = 12
 
 
+def is_paper_trading(cfg: dict) -> bool:
+    """Resolve effective paper-trading mode consistently across the app.
+
+    Priority:
+    1) PAPER_TRADING env var (true/false)
+    2) cfg["paper_trading"] fallback
+    """
+    env_paper = os.environ.get("PAPER_TRADING", "").lower()
+    if env_paper in ("true", "1", "yes"):
+        return True
+    if env_paper in ("false", "0", "no"):
+        return False
+    return bool(cfg.get("paper_trading", False))
+
+
 # ---------------------------------------------------------------------------
 # Config helpers
 # ---------------------------------------------------------------------------
@@ -379,13 +394,7 @@ def execute_rebalance(client: MEXCClient, cfg: dict) -> list:
     The effective total is recalculated after sells so that the USDT freed by
     selling is available for buys.
     """
-    env_paper = os.environ.get("PAPER_TRADING", "").lower()
-    if env_paper in ("true", "1", "yes"):
-        paper = True
-    elif env_paper in ("false", "0", "no"):
-        paper = False
-    else:
-        paper = cfg.get("paper_trading", False)
+    paper = is_paper_trading(cfg)
 
     assets_cfg = cfg["portfolio"]["assets"]
     budget_usdt = cfg["portfolio"].get("total_usdt", 0)
@@ -458,7 +467,7 @@ def execute_rebalance(client: MEXCClient, cfg: dict) -> list:
             continue
         qty = round(s["diff"] / s["price"], 8)
         log.info("%sSELL %.8f %s (~%.2f$)", "[PAPER] " if paper else "", qty, sym, s["diff"])
-        entry["action"] = "SELL"
+        entry["action"] = "PAPER_SELL" if paper else "SELL"
         if not paper:
             try:
                 resp = client.place_market_sell(f"{sym}USDT", qty)
@@ -507,7 +516,7 @@ def execute_rebalance(client: MEXCClient, cfg: dict) -> list:
             continue
 
         log.info("%sBUY %.2f$ of %s", "[PAPER] " if paper else "", spend, sym)
-        entry["action"] = "BUY"
+        entry["action"] = "PAPER_BUY" if paper else "BUY"
         if not paper:
             try:
                 resp = client.place_market_buy(f"{sym}USDT", spend)
@@ -695,7 +704,7 @@ def check_sl_tp(client: MEXCClient, cfg: dict) -> list[dict]:
     if not sl_pct and not tp_pct:
         return []
 
-    paper = cfg.get("paper_trading", False)
+    paper = is_paper_trading(cfg)
     triggered = []
 
     for a in cfg["portfolio"]["assets"]:
@@ -750,17 +759,23 @@ def check_sl_tp(client: MEXCClient, cfg: dict) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def terminate(client: MEXCClient, cfg: dict) -> None:
-    """Stop the bot. If sell_at_termination is True, liquidate all assets to USDT."""
+    """Stop the bot. If sell_at_termination is True, liquidate all assets to USDT.
+
+    In paper mode, liquidation is simulated only (no real sell orders).
+    """
     log.info("Terminating bot '%s'", cfg["bot"]["name"])
+    paper = is_paper_trading(cfg)
     if cfg["termination"]["sell_at_termination"]:
-        log.info("sell_at_termination=True – selling all assets to USDT")
+        log.info("sell_at_termination=True%s", " [PAPER]" if paper else "")
         for a in cfg["portfolio"]["assets"]:
             sym = a["symbol"]
             if sym == "USDT":
                 continue
             balance = client.get_asset_balance(sym)
             if balance > 0:
-                log.info("Selling %.8f %s", balance, sym)
+                log.info("%sSelling %.8f %s", "[PAPER] " if paper else "", balance, sym)
+                if paper:
+                    continue
                 try:
                     resp = client.place_market_sell(f"{sym}USDT", balance)
                     log.info("Sell response: %s", resp)
