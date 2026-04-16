@@ -1526,24 +1526,44 @@ class GridBotCreate(BaseModel):
 @app.get("/api/grid-bots")
 def api_list_grid_bots():
     bots = list_grid_bots()
+    # Fetch live prices once per unique symbol to avoid repeated API calls
+    symbols = list({b["symbol"] for b in bots})
+    prices: dict[str, float] = {}
+    if symbols:
+        try:
+            client = _client()
+            for sym in symbols:
+                try:
+                    prices[sym] = client.get_price(sym)
+                except Exception:
+                    prices[sym] = 0.0
+        except Exception:
+            pass
+
     result = []
     for b in bots:
+        base_qty      = float(b.get("base_qty") or 0)
+        current_price = prices.get(b["symbol"], 0.0)
+        # current_value_usdt = value of base asset held by this grid bot at live price
+        current_value_usdt = round(base_qty * current_price, 4) if current_price > 0 else 0.0
         result.append({
-            "id":              b["id"],
-            "symbol":          b["symbol"],
-            "investment":      b["investment"],
-            "grid_count":      b["grid_count"],
-            "price_low":       b["price_low"],
-            "price_high":      b["price_high"],
-            "mode":            b.get("mode", "normal"),
-            "status":          b["status"],
-            "profit":          round(float(b.get("realised_profit") or 0) + float(b.get("unrealized_pnl") or 0), 4),
-            "unrealized_pnl":  b.get("unrealized_pnl", 0),
-            "realised_profit": b.get("realised_profit", 0),
-            "avg_buy_price":   b.get("avg_buy_price", 0),
-            "base_qty":        b.get("base_qty", 0),
-            "running":         grid_is_running(b["id"]),
-            "ts_created":      b["ts_created"],
+            "id":                  b["id"],
+            "symbol":              b["symbol"],
+            "investment":          b["investment"],
+            "grid_count":          b["grid_count"],
+            "price_low":           b["price_low"],
+            "price_high":          b["price_high"],
+            "mode":                b.get("mode", "normal"),
+            "status":              b["status"],
+            "profit":              round(float(b.get("realised_profit") or 0) + float(b.get("unrealized_pnl") or 0), 4),
+            "unrealized_pnl":      b.get("unrealized_pnl", 0),
+            "realised_profit":     b.get("realised_profit", 0),
+            "avg_buy_price":       b.get("avg_buy_price", 0),
+            "base_qty":            base_qty,
+            "current_price":       current_price,
+            "current_value_usdt":  current_value_usdt,
+            "running":             grid_is_running(b["id"]),
+            "ts_created":          b["ts_created"],
         })
     return result
 
