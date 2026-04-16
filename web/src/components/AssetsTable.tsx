@@ -421,21 +421,14 @@ export default function AssetsTable({ assets, loading, lang, onRefresh }: Props)
                   </div>
                 </div>
 
-                {/* Mini sparkline */}
-                <div className="flex-1 flex justify-center">
-                  <MiniSparkline
-                    data={sparkData}
-                    color={sparkUp ? '#00D4AA' : '#FF7B72'}
-                    w={60} h={24}
-                  />
-                </div>
-
-                {/* Price + change */}
-                <div className="shrink-0 text-end">
-                  <div className="num font-bold text-sm" style={{ color: 'var(--text-main)' }}>
-                    {fmtPrice(a.price_usdt)}
+                {/* Value in USDT */}
+                <div className="flex-1 flex flex-col items-end justify-center gap-0.5">
+                  <div className="num font-black text-lg leading-tight" style={{ color: 'var(--text-main)' }}>
+                    ${(a.value_usdt ?? 0).toFixed(2)}
                   </div>
-                  <DiffBadge diff={a.diff_pct} />
+                  <div className="text-[10px] font-semibold tracking-wide" style={{ color: 'var(--text-muted)' }}>
+                    USDT
+                  </div>
                 </div>
               </button>
 
