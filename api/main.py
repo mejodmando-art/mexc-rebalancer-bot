@@ -879,7 +879,7 @@ def reset_initial_value():
         live_total = portfolio["total_usdt"]
         if live_total <= 0:
             raise HTTPException(status_code=400, detail="القيمة الحالية صفر — تحقق من الرصيد")
-        cfg["portfolio"]["total_usdt"] = round(live_total, 2)
+        # Only reset the P&L baseline — do NOT touch total_usdt (user-defined budget)
         cfg["portfolio"]["initial_value_usdt"] = round(live_total, 2)
         if portfolio_id is not None:
             update_portfolio_config(portfolio_id, cfg)
@@ -1259,14 +1259,16 @@ def api_activate_portfolio(portfolio_id: int):
         validate_allocations(cfg["portfolio"]["assets"])
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    # Snapshot real portfolio value from MEXC and persist to this portfolio's DB record only
+    # Update initial_value_usdt for P&L baseline, but do NOT overwrite total_usdt
+    # (the user-defined budget). Only set initial_value_usdt if not already set.
     try:
         client = _client()
         portfolio = get_portfolio_value(client, cfg["portfolio"]["assets"], budget_usdt=None)
         live_total = portfolio["total_usdt"]
         if live_total > 0:
-            cfg["portfolio"]["total_usdt"] = round(live_total, 2)
-            cfg["portfolio"]["initial_value_usdt"] = round(live_total, 2)
+            if cfg["portfolio"].get("initial_value_usdt", 0) <= 0:
+                cfg["portfolio"]["initial_value_usdt"] = round(live_total, 2)
+            # total_usdt is the user-defined budget — never overwrite it here
             update_portfolio_config(portfolio_id, cfg)
     except Exception as e:
         log.warning("activate: could not fetch live value: %s", e)
@@ -1286,15 +1288,16 @@ def api_start_portfolio(portfolio_id: int):
         raise HTTPException(status_code=400, detail=str(e))
     if _is_portfolio_running(portfolio_id):
         return {"ok": False, "message": "المحفظة شغالة بالفعل"}
-    # Sync real portfolio value before starting — persist to this portfolio's DB record only
+    # Set initial_value_usdt for P&L baseline if not already set.
+    # Do NOT overwrite total_usdt — that is the user-defined budget.
     try:
         client = _client()
         portfolio = get_portfolio_value(client, cfg["portfolio"]["assets"], budget_usdt=None)
         live_total = portfolio["total_usdt"]
         if live_total > 0:
-            cfg["portfolio"]["total_usdt"] = round(live_total, 2)
-            if "initial_value_usdt" not in cfg["portfolio"] or cfg["portfolio"].get("initial_value_usdt", 0) <= 0:
+            if cfg["portfolio"].get("initial_value_usdt", 0) <= 0:
                 cfg["portfolio"]["initial_value_usdt"] = round(live_total, 2)
+            # total_usdt is the user-defined budget — never overwrite it here
             update_portfolio_config(portfolio_id, cfg)
     except Exception as e:
         log.warning("start: could not fetch live value: %s", e)
