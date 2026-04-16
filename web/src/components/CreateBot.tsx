@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { startBot, savePortfolio, activatePortfolio } from '../lib/api';
+import { savePortfolio } from '../lib/api';
 import { Lang, tr } from '../lib/i18n';
 
 interface Asset {
@@ -45,8 +45,7 @@ export default function CreateBot({ lang, onCreated }: Props) {
   const [threshold, setThreshold]       = useState(5);
   const [timedFreq, setTimedFreq]       = useState<TimedFrequency>('daily');
   const [timedHour, setTimedHour]       = useState(10);
-  const [stopLoss, setStopLoss]         = useState<number | ''>('');
-  const [takeProfit, setTakeProfit]     = useState<number | ''>('');
+
 
   const [saving, setSaving]             = useState(false);
   const [error, setError]               = useState('');
@@ -111,10 +110,7 @@ export default function CreateBot({ lang, onCreated }: Props) {
     if (new Set(symbols).size !== symbols.length) return tr('errDuplicate', lang);
     if (Math.abs(totalPct - 100) > 0.1) return tr('errSum', lang);
     if (totalUsdt <= 0) return tr('errAmount', lang);
-    if (stopLoss !== '' && (stopLoss < 1 || stopLoss > 100))
-      return lang === 'ar' ? 'نسبة وقف الخسارة يجب أن تكون بين 1% و 100%' : 'Stop loss must be between 1% and 100%';
-    if (takeProfit !== '' && (takeProfit < 1 || takeProfit > 500))
-      return lang === 'ar' ? 'نسبة جني الربح يجب أن تكون بين 1% و 500%' : 'Take profit must be between 1% and 500%';
+
     return null;
   };
 
@@ -143,18 +139,12 @@ export default function CreateBot({ lang, onCreated }: Props) {
           timed: { frequency: timedFreq, hour: timedHour },
           unbalanced: {},
         },
-        risk: {
-          stop_loss_pct:   stopLoss   === '' ? null : stopLoss,
-          take_profit_pct: takeProfit === '' ? null : takeProfit,
-        },
         termination: { sell_at_termination: false },
         asset_transfer: { enable_asset_transfer: false },
         paper_trading: false,
         last_rebalance: null,
       };
-      const saved = await savePortfolio(fullConfig);
-      await activatePortfolio(saved.id);
-      await startBot().catch(() => {});
+      await savePortfolio(fullConfig);
       setSuccess('✅ ' + tr('successCreated', lang));
       setTimeout(onCreated, 1500);
     } catch (e: any) {
@@ -422,73 +412,7 @@ export default function CreateBot({ lang, onCreated }: Props) {
         )}
       </div>
 
-      {/* ── Risk management (SL / TP) ── */}
-      <div className="card">
-        <div className="label mb-1">{tr('riskSettings', lang)}</div>
-        <p className="text-xs mb-4" style={{ color: 'var(--text-muted)' }}>
-          {lang === 'ar'
-            ? 'يتطلب تعيين سعر الدخول لكل توكن لكي يعمل وقف الخسارة وجني الربح.'
-            : 'Requires entry price per token for stop-loss and take-profit to activate.'}
-        </p>
 
-        <div className="grid grid-cols-2 gap-4">
-          {/* Stop Loss */}
-          <div>
-            <div className="label" style={{ color: '#f87171' }}>{tr('stopLoss', lang)}</div>
-            <p className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>
-              {tr('stopLossDesc', lang)}
-            </p>
-            <div className="relative">
-              <span
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-sm pointer-events-none"
-                style={{ color: 'var(--text-muted)' }}
-              >
-                %
-              </span>
-              <input
-                type="number" min={1} max={100} step={0.5}
-                className="input pr-8"
-                placeholder={tr('disabled', lang)}
-                value={stopLoss}
-                onChange={e => setStopLoss(e.target.value === '' ? '' : parseFloat(e.target.value))}
-              />
-            </div>
-            {stopLoss !== '' && (
-              <p className="text-xs mt-1" style={{ color: '#f87171' }}>
-                {lang === 'ar' ? `بيع عند انخفاض ${stopLoss}%` : `Sell at −${stopLoss}% from entry`}
-              </p>
-            )}
-          </div>
-
-          {/* Take Profit */}
-          <div>
-            <div className="label" style={{ color: '#4ade80' }}>{tr('takeProfit', lang)}</div>
-            <p className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>
-              {tr('takeProfitDesc', lang)}
-            </p>
-            <div className="relative">
-              <span
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-sm pointer-events-none"
-                style={{ color: 'var(--text-muted)' }}
-              >
-                %
-              </span>
-              <input
-                type="number" min={1} max={500} step={1}
-                className="input pr-8"
-                placeholder={tr('disabled', lang)}
-                value={takeProfit}
-                onChange={e => setTakeProfit(e.target.value === '' ? '' : parseFloat(e.target.value))}
-              />
-            </div>
-            {takeProfit !== '' && (
-              <p className="text-xs mt-1" style={{ color: '#4ade80' }}>
-                {lang === 'ar' ? `بيع عند ارتفاع ${takeProfit}%` : `Sell at +${takeProfit}% from entry`}
-              </p>
-            )}
-          </div>
-        </div>
-      </div>
 
 
 
