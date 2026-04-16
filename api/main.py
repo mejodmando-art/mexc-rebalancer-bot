@@ -83,6 +83,18 @@ init_db()
 _portfolio_loops: dict[int, dict] = {}
 _loops_lock = threading.Lock()
 
+# Per-portfolio rebalance mutex: prevents concurrent rebalance calls (loop +
+# manual trigger) from placing duplicate orders on the same portfolio.
+_rebalance_locks: dict[int, threading.Lock] = {}
+_rebalance_locks_lock = threading.Lock()
+
+
+def _get_rebalance_lock(portfolio_id: int) -> threading.Lock:
+    with _rebalance_locks_lock:
+        if portfolio_id not in _rebalance_locks:
+            _rebalance_locks[portfolio_id] = threading.Lock()
+        return _rebalance_locks[portfolio_id]
+
 
 def _make_loop(portfolio_id: int, stop_event: threading.Event) -> None:
     """Rebalancer loop for a single portfolio."""
@@ -119,33 +131,48 @@ def _make_loop(portfolio_id: int, stop_event: threading.Event) -> None:
                     break
 
                 current_mode = cfg["rebalance"]["mode"]
+                rebalance_lock = _get_rebalance_lock(portfolio_id)
 
-                # SL/TP guard runs on every cycle regardless of mode
-                check_sl_tp(client, cfg)
+                # SL/TP guard runs on every cycle regardless of mode.
+                # Track triggered assets so the rebalancer skips them this
+                # cycle and avoids an immediate buy-back after a SL/TP sell.
+                sl_tp_triggered_syms: set[str] = set()
+                sl_tp_results = check_sl_tp(client, cfg)
+                for t in sl_tp_results:
+                    sl_tp_triggered_syms.add(t["symbol"])
 
                 if current_mode == "proportional":
                     interval = cfg["rebalance"]["proportional"]["check_interval_minutes"] * 60
                     if needs_rebalance_proportional(client, cfg):
-                        execute_rebalance(client, cfg)
+                        with rebalance_lock:
+                            # Re-read cfg inside the lock so we have the latest state.
+                            cfg = db_get_portfolio(portfolio_id) or cfg
+                            execute_rebalance(client, cfg, _portfolio_id=portfolio_id)
                     stop_event.wait(interval)
 
                 elif current_mode == "timed":
                     timed_cfg = cfg["rebalance"]["timed"]
                     frequency = timed_cfg["frequency"]
                     target_hour = timed_cfg.get("hour", 0)
-                    # Initialise next_run on first timed cycle or after mode switch
-                    if timed_next_run is None:
+                    # Reset timed_next_run when mode or frequency changes so we
+                    # don't fire immediately on a stale past timestamp.
+                    current_freq_key = (current_mode, frequency, target_hour)
+                    if timed_next_run is None or getattr(timed_next_run, "_freq_key", None) != current_freq_key:
                         timed_next_run = next_run_time(frequency, target_hour=target_hour)
+                        timed_next_run._freq_key = current_freq_key  # type: ignore[attr-defined]
                         log.info("Portfolio %d: next timed rebalance at %s UTC", portfolio_id, timed_next_run.isoformat())
                     if datetime.utcnow() >= timed_next_run:
-                        execute_rebalance(client, cfg)
+                        with rebalance_lock:
+                            cfg = db_get_portfolio(portfolio_id) or cfg
+                            execute_rebalance(client, cfg, _portfolio_id=portfolio_id)
                         timed_next_run = next_run_time(frequency, target_hour=target_hour)
+                        timed_next_run._freq_key = current_freq_key  # type: ignore[attr-defined]
                         log.info("Portfolio %d: next timed rebalance at %s UTC", portfolio_id, timed_next_run.isoformat())
                     short_freq = frequency in TIMED_FREQUENCY_MINUTES and frequency not in ("daily", "weekly", "monthly")
                     stop_event.wait(30 if short_freq else 60)
 
                 else:  # unbalanced — SL/TP only
-                    timed_next_run = None  # reset if mode switches back to timed later
+                    timed_next_run = None  # reset so timed mode starts fresh if switched back
                     stop_event.wait(60)
 
             except Exception as e:
@@ -189,9 +216,16 @@ def _stop_portfolio_loop(portfolio_id: int) -> None:
         entry = _portfolio_loops.get(portfolio_id)
     if entry:
         entry["stop"].set()
-        # Wait up to 5 s for the thread to finish so we don't return before
-        # any in-progress rebalance order is complete.
-        entry["thread"].join(timeout=5)
+        # Wait up to 30 s so any in-progress rebalance can finish placing
+        # orders before we mark the bot as stopped.  5 s was too short for
+        # a rebalance cycle that includes a 3 s settle sleep + API calls.
+        entry["thread"].join(timeout=30)
+        if entry["thread"].is_alive():
+            log.warning(
+                "Portfolio %d loop thread did not stop within 30 s — "
+                "it may still be placing orders. DB state set to stopped.",
+                portfolio_id,
+            )
         # Clean up dead entry so the dict doesn't grow unboundedly.
         with _loops_lock:
             if portfolio_id in _portfolio_loops and not _portfolio_loops[portfolio_id]["thread"].is_alive():
@@ -212,7 +246,7 @@ _pending_rebalances: dict[str, dict] = {}
 _pending_lock = threading.Lock()
 
 
-def _run_rebalance_with_cancel(job_id: str, client: MEXCClient, cfg: dict) -> None:
+def _run_rebalance_with_cancel(job_id: str, client: MEXCClient, cfg: dict, portfolio_id: int | None = None) -> None:
     """Execute rebalance after a 10-second cancel window."""
     entry = _pending_rebalances.get(job_id)
     if not entry:
@@ -223,15 +257,10 @@ def _run_rebalance_with_cancel(job_id: str, client: MEXCClient, cfg: dict) -> No
         entry["done"].set()
         log.info("Rebalance %s cancelled by user", job_id)
         return
+    rebalance_lock = _get_rebalance_lock(portfolio_id) if portfolio_id is not None else threading.Lock()
     try:
-        # Use active portfolio id for history isolation
-        try:
-            from database import list_portfolios as _lp
-            _active = next((p for p in _lp() if p.get("active")), None)
-            _pid = _active["id"] if _active else None
-        except Exception:
-            _pid = None
-        result = execute_rebalance(client, cfg)
+        with rebalance_lock:
+            result = execute_rebalance(client, cfg, _portfolio_id=portfolio_id)
         entry["result"] = result
     except Exception as e:
         entry["result"] = [{"error": str(e)}]
@@ -703,6 +732,9 @@ def update_config(body: ConfigUpdate):
         cfg["rebalance"]["mode"] = body.rebalance_mode
     if body.threshold_pct is not None:
         cfg["rebalance"]["proportional"]["threshold_pct"] = body.threshold_pct
+        # Keep min_deviation_to_execute_pct in sync: it's the value actually
+        # read by needs_rebalance_proportional to decide when to trigger.
+        cfg["rebalance"]["proportional"]["min_deviation_to_execute_pct"] = body.threshold_pct
     if body.frequency is not None:
         cfg["rebalance"]["timed"]["frequency"] = body.frequency
     if body.timed_hour is not None:
@@ -752,6 +784,7 @@ def update_config(body: ConfigUpdate):
                     active_cfg["rebalance"]["mode"] = cfg["rebalance"]["mode"]
                 if body.threshold_pct is not None:
                     active_cfg["rebalance"]["proportional"]["threshold_pct"] = cfg["rebalance"]["proportional"]["threshold_pct"]
+                    active_cfg["rebalance"]["proportional"]["min_deviation_to_execute_pct"] = cfg["rebalance"]["proportional"]["threshold_pct"]
                 if body.frequency is not None:
                     active_cfg["rebalance"]["timed"]["frequency"] = cfg["rebalance"]["timed"]["frequency"]
                 if body.timed_hour is not None:
@@ -879,6 +912,13 @@ def trigger_rebalance():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+    # Resolve active portfolio id for mutex and correct DB save target.
+    try:
+        _active = next((p for p in list_portfolios() if p.get("active")), None)
+        _pid = _active["id"] if _active else None
+    except Exception:
+        _pid = None
+
     job_id = str(uuid.uuid4())
     entry = {
         "cancel": threading.Event(),
@@ -891,6 +931,7 @@ def trigger_rebalance():
     t = threading.Thread(
         target=_run_rebalance_with_cancel,
         args=(job_id, client, cfg),
+        kwargs={"portfolio_id": _pid},
         daemon=True,
     )
     t.start()
@@ -1343,6 +1384,8 @@ def api_rebalance_portfolio(portfolio_id: int, body: PortfolioRebalanceRequest):
     with _pending_lock:
         _pending_rebalances[job_id] = entry
 
+    rebalance_lock = _get_rebalance_lock(portfolio_id)
+
     def _run() -> None:
         cancel_ev: threading.Event = entry["cancel"]
         cancel_ev.wait(10)
@@ -1350,10 +1393,11 @@ def api_rebalance_portfolio(portfolio_id: int, body: PortfolioRebalanceRequest):
             entry["done"].set()
             return
         try:
-            if body.rebalance_type == "equal":
-                result = execute_rebalance_equal(client, cfg)
-            else:
-                result = execute_rebalance(client, cfg)
+            with rebalance_lock:
+                if body.rebalance_type == "equal":
+                    result = execute_rebalance_equal(client, cfg, _portfolio_id=portfolio_id)
+                else:
+                    result = execute_rebalance(client, cfg, _portfolio_id=portfolio_id)
             entry["result"] = result
         except Exception as exc:
             log.error("Portfolio rebalance failed (id=%s): %s", portfolio_id, exc)
