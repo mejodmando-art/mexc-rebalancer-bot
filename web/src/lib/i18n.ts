@@ -185,6 +185,75 @@ export const t: Record<string, Record<Lang, string>> = {
   takeProfitDesc:   { ar: 'بيع تلقائي عند ارتفاع سعر أي توكن بهذه النسبة عن سعر الدخول (1%–500%)', en: 'Auto-sell when any token rises this % above entry price (1%–500%)' },
   disabled:         { ar: 'معطّل',             en: 'Disabled' },
 
+  // Order Block Strategy section
+  strategyTab:          { ar: 'استراتيجية OB',         en: 'OB Strategy' },
+  strategyTitle:        { ar: 'استراتيجية الأوردر بلوك', en: 'Order Block Strategy' },
+  strategySubtitle:     { ar: 'دخول وخروج بدون ستوب — منهجية المال الذكي', en: 'Entry & Exit Without Stop Loss — Smart Money Methodology' },
+
+  // Step labels
+  step1Title:           { ar: 'الفلترة الفنية للأوردر بلوك', en: 'Technical OB Filtering' },
+  step1Desc:            { ar: 'تحقق من جودة المنطقة قبل الدخول', en: 'Verify zone quality before entry' },
+  step2Title:           { ar: 'الاعتبارات النفسية والاتجاه', en: 'Psychology & Trend Alignment' },
+  step2Desc:            { ar: 'تجنب الخداع وتداول مع الاتجاه', en: 'Avoid inducement, trade with the trend' },
+  step3Title:           { ar: 'خطة الدخول التنفيذية', en: 'Execution Entry Plan' },
+  step3Desc:            { ar: 'تأكيد على الفريمات الأصغر', en: 'Confirmation on lower timeframes' },
+  step4Title:           { ar: 'إدارة الصفقة والخروج', en: 'Trade Management & Exit' },
+  step4Desc:            { ar: 'أهداف الربح وإدارة المركز', en: 'Profit targets and position management' },
+
+  // Technical conditions
+  condMomentum:         { ar: 'الزخم والفجوات السعرية (FFG)', en: 'Momentum & Price Gaps (FFG)' },
+  condMomentumDesc:     { ar: 'يجب أن تتبع المنطقة حركة سعرية قوية تترك فجوة (Imbalance). كلما كانت الشمعة أقوى وأكبر، كانت المنطقة أكثر موثوقية.', en: 'The zone must be followed by a strong move leaving an imbalance (FVG). The stronger and larger the candle, the more reliable the zone.' },
+  condBOS:              { ar: 'كسر الهيكل (BOS / CHoCH)', en: 'Structure Break (BOS / CHoCH)' },
+  condBOSDesc:          { ar: 'يجب أن تؤدي المنطقة إلى كسر حقيقي وواضح لهيكل السوق. BOS يؤكد استمرار الاتجاه، CHoCH يؤكد انعكاسه.', en: 'The zone must cause a clear market structure break. BOS confirms trend continuation, CHoCH confirms reversal.' },
+  condFresh:            { ar: 'منطقة طازجة (Unmitigated)', en: 'Fresh Zone (Unmitigated)' },
+  condFreshDesc:        { ar: 'الأولوية دائماً للمناطق التي لم يلمسها السعر من قبل. كل زيارة للمنطقة تستهلك جزءاً من قوتها.', en: 'Always prioritize zones the price has never revisited. Each visit to the zone consumes part of its strength.' },
+  condSweep:            { ar: 'سحب السيولة (Liquidity Sweep)', en: 'Liquidity Sweep' },
+  condSweepDesc:        { ar: 'المنطقة الأقوى هي التي تسبقها عملية ضرب للسيولة (قنص الستوبات). هذا يؤكد أن صناع السوق جمعوا مراكزهم.', en: 'The strongest zone is preceded by a liquidity sweep (stop hunt). This confirms market makers have accumulated their positions.' },
+
+  // Psychology conditions
+  condTrend:            { ar: 'التداول مع الاتجاه العام', en: 'Trade With the Trend' },
+  condTrendDesc:        { ar: 'على الفريم الكبير (4H / يومي): حدد الاتجاه السائد. تداول OB صاعد فقط في اتجاه صاعد، وهابط في اتجاه هابط. التداول عكس الاتجاه يتطلب تأكيداً مضاعفاً.', en: 'On the higher timeframe (4H / Daily): identify the prevailing trend. Trade bullish OB only in uptrends, bearish in downtrends. Counter-trend trades require double confirmation.' },
+  condInducement:       { ar: 'تجنب مناطق الخداع (Inducement)', en: 'Avoid Inducement Zones' },
+  condInducementDesc:   { ar: 'صناع السوق يضعون مناطق وهمية لجذب المبتدئين. علامات الخداع: منطقة واضحة جداً للجميع، أو تقع مباشرة عند مستوى دعم/مقاومة مشهور، أو لم يسبقها سحب سيولة.', en: 'Market makers place fake zones to trap beginners. Inducement signs: zone is too obvious, sits exactly at a well-known S/R level, or was not preceded by a liquidity sweep.' },
+  condTime:             { ar: 'توقيت الجلسات', en: 'Session Timing' },
+  condTimeDesc:         { ar: 'أفضل الإشارات تأتي في جلسة لندن (08:00–12:00 UTC) وبداية نيويورك (13:00–17:00 UTC). تجنب الدخول في أوقات السيولة المنخفضة (آسيا المتأخرة).', en: 'Best signals come during London session (08:00–12:00 UTC) and NY open (13:00–17:00 UTC). Avoid entries during low-liquidity periods (late Asia).' },
+
+  // Entry plan
+  entryStep1:           { ar: '١. تحديد المنطقة على الفريم الكبير', en: '1. Identify Zone on Higher TF' },
+  entryStep1Desc:       { ar: 'ابدأ من فريم 4H أو اليومي. حدد آخر OB قبل BOS/CHoCH مع وجود FFG واضح. تأكد أن المنطقة طازجة وسبقها سحب سيولة.', en: 'Start from 4H or Daily. Identify the last OB before BOS/CHoCH with a clear FFG. Confirm the zone is fresh and was preceded by a liquidity sweep.' },
+  entryStep2:           { ar: '٢. النزول للفريم الأصغر', en: '2. Drop to Lower Timeframe' },
+  entryStep2Desc:       { ar: 'عند وصول السعر للمنطقة، انزل لفريم 15 دقيقة أو 5 دقائق. انتظر CHoCH واضح على هذا الفريم يؤكد رفض السعر للمنطقة.', en: 'When price reaches the zone, drop to 15m or 5m. Wait for a clear CHoCH on this timeframe confirming price rejection of the zone.' },
+  entryStep3:           { ar: '٣. تأكيد فيبوناتشي', en: '3. Fibonacci Confirmation' },
+  entryStep3Desc:       { ar: 'ارسم فيبوناتشي على آخر حركة صاعدة/هابطة قبل الدخول. أفضل نقطة دخول عند 0.618–0.786 (Golden Pocket). هذا يعطيك نسبة مخاطرة/عائد ممتازة.', en: 'Draw Fibonacci on the last impulse move before entry. Best entry at 0.618–0.786 (Golden Pocket). This gives you an excellent risk/reward ratio.' },
+  entryStep4:           { ar: '٤. نقطة الدخول النهائية', en: '4. Final Entry Point' },
+  entryStep4Desc:       { ar: 'الدخول عند: تقاطع OB + Golden Pocket + CHoCH على الفريم الصغير. لا تدخل بدون ثلاثة تأكيدات على الأقل.', en: 'Enter at: OB intersection + Golden Pocket + CHoCH on lower TF. Never enter without at least three confirmations.' },
+
+  // Exit plan
+  exitNoSL:             { ar: 'الخروج بدون ستوب — المنهجية', en: 'Exit Without Stop Loss — The Method' },
+  exitNoSLDesc:         { ar: 'بدلاً من ستوب ثابت، يُستخدم حجم مركز صغير (1-2% من رأس المال) مع خروج يدوي عند كسر هيكل المنطقة. إذا أغلق السعر شمعة كاملة داخل المنطقة، يُعاد تقييم الصفقة.', en: 'Instead of a fixed stop, use a small position size (1-2% of capital) with manual exit when the zone structure breaks. If price closes a full candle inside the zone, re-evaluate the trade.' },
+  exitTP1:              { ar: 'الهدف الأول (TP1)', en: 'First Target (TP1)' },
+  exitTP1Desc:          { ar: 'أقرب منطقة سيولة أو OB معاكس. أغلق 50% من المركز هنا وحرك نقطة التعادل.', en: 'Nearest liquidity zone or opposing OB. Close 50% of position here and move to breakeven.' },
+  exitTP2:              { ar: 'الهدف الثاني (TP2)', en: 'Second Target (TP2)' },
+  exitTP2Desc:          { ar: 'القمة/القاع السابق أو منطقة OB التالية. أغلق 30% إضافية هنا.', en: 'Previous high/low or next OB zone. Close an additional 30% here.' },
+  exitTP3:              { ar: 'الهدف الثالث (TP3)', en: 'Third Target (TP3)' },
+  exitTP3Desc:          { ar: 'الـ 20% المتبقية تُترك تجري مع الاتجاه حتى ظهور CHoCH معاكس على الفريم الكبير.', en: 'The remaining 20% runs with the trend until an opposing CHoCH appears on the higher timeframe.' },
+
+  // Checklist
+  checklistTitle:       { ar: 'قائمة التحقق قبل الدخول', en: 'Pre-Entry Checklist' },
+  checkFresh:           { ar: 'المنطقة طازجة (لم يلمسها السعر)', en: 'Zone is fresh (price never revisited)' },
+  checkFFG:             { ar: 'يوجد FFG / Imbalance بعد المنطقة', en: 'FFG / Imbalance exists after the zone' },
+  checkBOS:             { ar: 'حدث BOS أو CHoCH واضح', en: 'Clear BOS or CHoCH occurred' },
+  checkSweep:           { ar: 'سبق المنطقة سحب سيولة', en: 'Zone was preceded by a liquidity sweep' },
+  checkTrend:           { ar: 'الاتجاه العام مؤيد للصفقة', en: 'Overall trend supports the trade' },
+  checkNoInducement:    { ar: 'لا توجد علامات خداع واضحة', en: 'No obvious inducement signs' },
+  checkSession:         { ar: 'الوقت مناسب (لندن / نيويورك)', en: 'Timing is right (London / NY session)' },
+  checkLTFConfirm:      { ar: 'CHoCH مؤكد على الفريم الأصغر', en: 'CHoCH confirmed on lower timeframe' },
+  checkFib:             { ar: 'السعر عند Golden Pocket (0.618–0.786)', en: 'Price at Golden Pocket (0.618–0.786)' },
+
+  // Risk note
+  riskNote:             { ar: 'ملاحظة المخاطر', en: 'Risk Note' },
+  riskNoteDesc:         { ar: 'هذه الاستراتيجية تعتمد على إدارة الحجم بدلاً من الستوب. لا تخاطر بأكثر من 1-2% من رأس المال في أي صفقة. الانضباط في التنفيذ أهم من دقة التحليل.', en: 'This strategy relies on position sizing instead of a stop loss. Never risk more than 1-2% of capital per trade. Execution discipline matters more than analytical precision.' },
+
   // Timed intervals
   interval30m:      { ar: '30 دقيقة',          en: '30 min' },
   interval1h:       { ar: 'ساعة',              en: '1 Hour' },
