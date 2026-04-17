@@ -916,3 +916,240 @@ def get_should_run_grid_bots() -> list[int]:
     except Exception as e:
         log.error("get_should_run_grid_bots failed: %s", e)
         return []
+
+
+# ---------------------------------------------------------------------------
+# OB Scanner — schema migration
+# ---------------------------------------------------------------------------
+
+def _init_ob_scanner_tables() -> None:
+    """Create ob_scanners and ob_trades tables if they don't exist."""
+    if _USE_POSTGRES:
+        stmts = [
+            """
+            CREATE TABLE IF NOT EXISTS ob_scanners (
+                id              SERIAL PRIMARY KEY,
+                ts_created      TEXT    NOT NULL,
+                symbol          TEXT    NOT NULL,
+                timeframe       TEXT    NOT NULL DEFAULT '15m',
+                entry_usdt      REAL    NOT NULL DEFAULT 15.0,
+                tp1_pct         REAL    NOT NULL DEFAULT 5.0,
+                tp2_pct         REAL    NOT NULL DEFAULT 5.0,
+                status          TEXT    NOT NULL DEFAULT 'scanning',
+                should_run      INTEGER NOT NULL DEFAULT 1,
+                entry_price     REAL    NOT NULL DEFAULT 0,
+                base_qty        REAL    NOT NULL DEFAULT 0,
+                tp1_hit         INTEGER NOT NULL DEFAULT 0,
+                realised_pnl    REAL    NOT NULL DEFAULT 0,
+                conditions_json TEXT    NOT NULL DEFAULT '{}'
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS ob_trades (
+                id          SERIAL PRIMARY KEY,
+                scanner_id  INTEGER NOT NULL,
+                ts          TEXT    NOT NULL,
+                side        TEXT    NOT NULL,
+                price       REAL    NOT NULL,
+                qty         REAL    NOT NULL,
+                usdt_value  REAL    NOT NULL DEFAULT 0,
+                pnl         REAL    NOT NULL DEFAULT 0,
+                label       TEXT    NOT NULL DEFAULT ''
+            )
+            """,
+        ]
+        with _conn() as conn:
+            cur = conn.cursor()
+            for stmt in stmts:
+                cur.execute(stmt)
+    else:
+        with _conn() as conn:
+            conn.executescript("""
+                CREATE TABLE IF NOT EXISTS ob_scanners (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ts_created      TEXT    NOT NULL,
+                    symbol          TEXT    NOT NULL,
+                    timeframe       TEXT    NOT NULL DEFAULT '15m',
+                    entry_usdt      REAL    NOT NULL DEFAULT 15.0,
+                    tp1_pct         REAL    NOT NULL DEFAULT 5.0,
+                    tp2_pct         REAL    NOT NULL DEFAULT 5.0,
+                    status          TEXT    NOT NULL DEFAULT 'scanning',
+                    should_run      INTEGER NOT NULL DEFAULT 1,
+                    entry_price     REAL    NOT NULL DEFAULT 0,
+                    base_qty        REAL    NOT NULL DEFAULT 0,
+                    tp1_hit         INTEGER NOT NULL DEFAULT 0,
+                    realised_pnl    REAL    NOT NULL DEFAULT 0,
+                    conditions_json TEXT    NOT NULL DEFAULT '{}'
+                );
+                CREATE TABLE IF NOT EXISTS ob_trades (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    scanner_id  INTEGER NOT NULL,
+                    ts          TEXT    NOT NULL,
+                    side        TEXT    NOT NULL,
+                    price       REAL    NOT NULL,
+                    qty         REAL    NOT NULL,
+                    usdt_value  REAL    NOT NULL DEFAULT 0,
+                    pnl         REAL    NOT NULL DEFAULT 0,
+                    label       TEXT    NOT NULL DEFAULT ''
+                );
+            """)
+
+
+# ---------------------------------------------------------------------------
+# OB Scanner — CRUD
+# ---------------------------------------------------------------------------
+
+def create_ob_scanner(symbol: str, timeframe: str = "15m",
+                       entry_usdt: float = 15.0,
+                       tp1_pct: float = 5.0,
+                       tp2_pct: float = 5.0) -> int:
+    _init_ob_scanner_tables()
+    ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    with _conn() as conn:
+        cur = conn.cursor()
+        if _USE_POSTGRES:
+            cur.execute(
+                "INSERT INTO ob_scanners (ts_created,symbol,timeframe,entry_usdt,tp1_pct,tp2_pct) "
+                "VALUES (%s,%s,%s,%s,%s,%s) RETURNING id",
+                (ts, symbol.upper(), timeframe, entry_usdt, tp1_pct, tp2_pct),
+            )
+            return cur.fetchone()[0]
+        else:
+            cur.execute(
+                "INSERT INTO ob_scanners (ts_created,symbol,timeframe,entry_usdt,tp1_pct,tp2_pct) "
+                "VALUES (?,?,?,?,?,?)",
+                (ts, symbol.upper(), timeframe, entry_usdt, tp1_pct, tp2_pct),
+            )
+            return cur.lastrowid
+
+
+def list_ob_scanners() -> list:
+    _init_ob_scanner_tables()
+    try:
+        with _conn() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT * FROM ob_scanners ORDER BY id DESC")
+            rows = _rows_to_dicts(cur.fetchall(), cur)
+        for r in rows:
+            try:
+                r["conditions"] = json.loads(r.get("conditions_json") or "{}")
+            except Exception:
+                r["conditions"] = {}
+        return rows
+    except Exception as e:
+        log.error("list_ob_scanners failed: %s", e)
+        return []
+
+
+def get_ob_scanner(scanner_id: int) -> dict | None:
+    _init_ob_scanner_tables()
+    try:
+        with _conn() as conn:
+            cur = conn.cursor()
+            cur.execute(_q("SELECT * FROM ob_scanners WHERE id=?"), (scanner_id,))
+            rows = _rows_to_dicts(cur.fetchall(), cur)
+        if rows:
+            r = rows[0]
+            try:
+                r["conditions"] = json.loads(r.get("conditions_json") or "{}")
+            except Exception:
+                r["conditions"] = {}
+            return r
+        return None
+    except Exception as e:
+        log.error("get_ob_scanner failed: %s", e)
+        return None
+
+
+def update_ob_scanner_status(scanner_id: int, status: str) -> None:
+    try:
+        with _conn() as conn:
+            cur = conn.cursor()
+            cur.execute(_q("UPDATE ob_scanners SET status=? WHERE id=?"), (status, scanner_id))
+    except Exception as e:
+        log.error("update_ob_scanner_status failed: %s", e)
+
+
+def update_ob_position(scanner_id: int, entry_price: float, base_qty: float,
+                        tp1_hit: bool, realised_pnl: float,
+                        conditions: dict | None = None) -> None:
+    try:
+        with _conn() as conn:
+            cur = conn.cursor()
+            cj = json.dumps(conditions) if conditions is not None else None
+            if cj is not None:
+                cur.execute(
+                    _q("UPDATE ob_scanners SET entry_price=?,base_qty=?,tp1_hit=?,realised_pnl=?,conditions_json=? WHERE id=?"),
+                    (entry_price, base_qty, int(tp1_hit), realised_pnl, cj, scanner_id),
+                )
+            else:
+                cur.execute(
+                    _q("UPDATE ob_scanners SET entry_price=?,base_qty=?,tp1_hit=?,realised_pnl=? WHERE id=?"),
+                    (entry_price, base_qty, int(tp1_hit), realised_pnl, scanner_id),
+                )
+    except Exception as e:
+        log.error("update_ob_position failed: %s", e)
+
+
+def record_ob_trade(scanner_id: int, side: str, price: float,
+                     qty: float, usdt_value: float,
+                     pnl: float = 0.0, label: str = "") -> None:
+    try:
+        _init_ob_scanner_tables()
+        ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        with _conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                _q("INSERT INTO ob_trades (scanner_id,ts,side,price,qty,usdt_value,pnl,label) VALUES (?,?,?,?,?,?,?,?)"),
+                (scanner_id, ts, side, price, qty, usdt_value, pnl, label),
+            )
+    except Exception as e:
+        log.error("record_ob_trade failed: %s", e)
+
+
+def get_ob_trades(scanner_id: int) -> list:
+    _init_ob_scanner_tables()
+    try:
+        with _conn() as conn:
+            cur = conn.cursor()
+            cur.execute(_q("SELECT * FROM ob_trades WHERE scanner_id=? ORDER BY id DESC"), (scanner_id,))
+            return _rows_to_dicts(cur.fetchall(), cur)
+    except Exception as e:
+        log.error("get_ob_trades failed: %s", e)
+        return []
+
+
+def set_ob_should_run(scanner_id: int, should_run: bool) -> None:
+    try:
+        with _conn() as conn:
+            cur = conn.cursor()
+            cur.execute(_q("UPDATE ob_scanners SET should_run=? WHERE id=?"),
+                        (1 if should_run else 0, scanner_id))
+    except Exception as e:
+        log.error("set_ob_should_run failed: %s", e)
+
+
+def get_should_run_ob_scanners() -> list[int]:
+    """Return IDs of OB scanners that should auto-resume on startup."""
+    _init_ob_scanner_tables()
+    try:
+        with _conn() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT id FROM ob_scanners WHERE should_run=1 AND status != 'deleted'")
+            rows = cur.fetchall()
+        if _USE_POSTGRES:
+            return [row[0] for row in rows]
+        return [row["id"] for row in rows]
+    except Exception as e:
+        log.error("get_should_run_ob_scanners failed: %s", e)
+        return []
+
+
+def delete_ob_scanner(scanner_id: int) -> None:
+    try:
+        with _conn() as conn:
+            cur = conn.cursor()
+            cur.execute(_q("DELETE FROM ob_scanners WHERE id=?"), (scanner_id,))
+            cur.execute(_q("DELETE FROM ob_trades WHERE scanner_id=?"), (scanner_id,))
+    except Exception as e:
+        log.error("delete_ob_scanner failed: %s", e)

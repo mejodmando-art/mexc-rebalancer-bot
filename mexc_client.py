@@ -208,3 +208,22 @@ class MEXCClient:
             {"symbol": symbol, "orderId": order_id},
             signed=True,
         )
+
+    def get_klines(self, symbol: str, interval: str = "15m", limit: int = 100) -> list[dict]:
+        """Return OHLCV candles for symbol.
+
+        interval: 1m, 5m, 15m, 30m, 1h, 4h, 1d
+        Returns list of dicts with keys: open_time, open, high, low, close, volume.
+        """
+        raw = self._get("/api/v3/klines", {"symbol": symbol, "interval": interval, "limit": limit})
+        candles = []
+        for c in raw:
+            candles.append({
+                "open_time": int(c[0]),
+                "open":      float(c[1]),
+                "high":      float(c[2]),
+                "low":       float(c[3]),
+                "close":     float(c[4]),
+                "volume":    float(c[5]),
+            })
+        return candles
