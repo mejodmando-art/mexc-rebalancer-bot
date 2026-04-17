@@ -1,9 +1,9 @@
 'use client';
 
-import { Moon, Sun, BarChart2, Wallet, Bot } from 'lucide-react';
+import { Moon, Sun, BarChart2, Wallet, Bot, BookOpen } from 'lucide-react';
 import { Lang, tr } from '../lib/i18n';
 
-type Tab = 'dashboard' | 'portfolios' | 'create' | 'grid';
+type Tab = 'dashboard' | 'portfolios' | 'create' | 'grid' | 'strategy';
 
 interface NavbarProps {
   active: Tab;
@@ -16,6 +16,7 @@ interface NavbarProps {
 }
 
 const TABS: { key: Tab; icon: React.ElementType; labelKey: string; color: string; glow: string }[] = [
+  { key: 'strategy',   icon: BookOpen,  labelKey: 'strategyTab',  color: '#F472B6', glow: 'rgba(244,114,182,0.45)' },
   { key: 'grid',       icon: Bot,       labelKey: 'gridBot',      color: '#818CF8', glow: 'rgba(129,140,248,0.45)' },
   { key: 'portfolios', icon: Wallet,    labelKey: 'myPortfolios', color: '#60A5FA', glow: 'rgba(96,165,250,0.45)' },
   { key: 'dashboard',  icon: BarChart2, labelKey: 'dashboard',    color: '#34D399', glow: 'rgba(52,211,153,0.45)' },

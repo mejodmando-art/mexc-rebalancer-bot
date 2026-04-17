@@ -8,12 +8,13 @@ import Portfolios from '../components/Portfolios';
 import CreateBot from '../components/CreateBot';
 import GridBot from '../components/GridBot';
 import MobileGridBot from '../components/MobileGridBot';
+import OrderBlockStrategy from '../components/OrderBlockStrategy';
 import { ToastProvider } from '../components/Toast';
 import { getBotStatus } from '../lib/api';
 import { Lang } from '../lib/i18n';
 import ErrorBoundary from '../components/ErrorBoundary';
 
-type Tab = 'dashboard' | 'portfolios' | 'create' | 'grid';
+type Tab = 'dashboard' | 'portfolios' | 'create' | 'grid' | 'strategy';
 
 export default function App() {
   const [tab,              setTab]              = useState<Tab>('dashboard');
@@ -86,6 +87,7 @@ export default function App() {
                   <div className="block lg:hidden -mx-4 sm:-mx-6"><MobileGridBot lang={lang} onNavigate={setTab} /></div>
                 </>
               )}
+              {tab === 'strategy'  && <OrderBlockStrategy lang={lang} />}
             </div>
           </main>
         </div>
