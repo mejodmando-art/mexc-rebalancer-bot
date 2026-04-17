@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Lang } from '../lib/i18n';
 import {
-  listGridBots, stopGridBot, resumeGridBot, deleteGridBot, getGridOrders, createGridBot, previewGridBot,
+  listGridBots, stopGridBot, resumeGridBot, deleteGridBot, getGridOrders, createGridBot, previewGridBot, getSymbols,
 } from '../lib/api';
 
 interface Props { lang: Lang; onNavigate?: (tab: any) => void; }
@@ -198,6 +198,7 @@ function CreateGridBotModal({ ar, onClose, onCreated }: {
   const [symbol,           setSymbol]           = useState('BTC');
   const [symbolSearch,     setSymbolSearch]     = useState('');
   const [showSymbolPicker, setShowSymbolPicker] = useState(false);
+  const [allSymbols,       setAllSymbols]       = useState<string[]>([]);
   const [investment,       setInvestment]       = useState('');
   const [mode,             setMode]             = useState<'normal' | 'infinity'>('normal');
   const [gridCountManual,  setGridCountManual]  = useState<number | null>(null);
@@ -209,11 +210,14 @@ function CreateGridBotModal({ ar, onClose, onCreated }: {
   const [creating,         setCreating]         = useState(false);
   const [error,            setError]            = useState('');
 
-  // Reset scroll to top on mount
+  const FALLBACK = ['BTC','ETH','SOL','BNB','XRP','TAO','AIA','FET','DOGE','ADA','AVAX','DOT','LINK','UNI','MATIC','LTC','ATOM','NEAR','APT','ARB'];
+
+  // Reset scroll to top on mount + fetch all symbols
   useEffect(() => {
     requestAnimationFrame(() => {
       if (scrollRef.current) scrollRef.current.scrollTop = 0;
     });
+    getSymbols().then(setAllSymbols).catch(() => setAllSymbols(FALLBACK));
   }, []);
 
   useEffect(() => {
@@ -269,11 +273,10 @@ function CreateGridBotModal({ ar, onClose, onCreated }: {
     finally { setCreating(false); }
   };
 
-  const POPULAR = ['BTC','ETH','SOL','BNB','XRP','TAO','AIA','FET','DOGE','ADA','AVAX','DOT','LINK','UNI','MATIC','LTC','ATOM','NEAR','APT','ARB'];
-
+  const symbols = allSymbols.length > 0 ? allSymbols : FALLBACK;
   const filteredSymbols = symbolSearch.trim()
-    ? POPULAR.filter(s => s.includes(symbolSearch.toUpperCase()))
-    : POPULAR;
+    ? symbols.filter(s => s.includes(symbolSearch.toUpperCase()))
+    : symbols.slice(0, 60);
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col justify-end" style={{ background: 'rgba(0,0,0,0.8)' }} onClick={onClose}>

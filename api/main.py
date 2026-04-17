@@ -1594,6 +1594,28 @@ def api_create_grid_bot(body: GridBotCreate):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/symbols")
+def api_symbols():
+    """Return all USDT spot symbols available on MEXC, sorted by quote volume."""
+    try:
+        client = MEXCClient()
+        data = client._get("/api/v3/ticker/24hr", {})
+        symbols = [
+            {
+                "symbol": t["symbol"].replace("USDT", ""),
+                "volume": float(t.get("quoteVolume") or 0),
+            }
+            for t in data
+            if isinstance(t, dict)
+            and t.get("symbol", "").endswith("USDT")
+            and not t.get("symbol", "").startswith("USDT")
+        ]
+        symbols.sort(key=lambda x: x["volume"], reverse=True)
+        return [s["symbol"] for s in symbols]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/grid-bots/preview")
 def api_grid_preview(
     symbol: str,

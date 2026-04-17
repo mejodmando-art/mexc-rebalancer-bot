@@ -123,6 +123,8 @@ export const previewGridBot  = (
   );
 };
 
+export const getSymbols = () => req<string[]>('/api/symbols');
+
 export const getPortfolioAssets  = (id: number) => req<{
   portfolio_id: number; portfolio_name: string; total_usdt: number;
   mode: string; running: boolean; assets: any[];

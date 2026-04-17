@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Grid3x3, TrendingUp, Zap, Info, Plus, Square, Play, Trash2, RefreshCw } from 'lucide-react';
 import { Lang } from '../lib/i18n';
-import { listGridBots, createGridBot, stopGridBot, resumeGridBot, deleteGridBot, previewGridBot, getGridOrders } from '../lib/api';
+import { listGridBots, createGridBot, stopGridBot, resumeGridBot, deleteGridBot, previewGridBot, getGridOrders, getSymbols } from '../lib/api';
 
 interface Props { lang: Lang; }
 
@@ -37,19 +37,24 @@ function CreateForm({ lang, onCreated }: { lang: Lang; onCreated: () => void }) 
   const [symbol, setSymbol]               = useState('BTC');
   const [symbolSearch, setSymbolSearch]   = useState('');
   const [showSymbolPicker, setShowSymbolPicker] = useState(false);
+  const [allSymbols, setAllSymbols]       = useState<string[]>([]);
   const [investment, setInvestment]       = useState('');
   const [mode, setMode]                   = useState<'normal' | 'infinity'>('normal');
   const [useBaseBalance, setUseBaseBalance] = useState(false);
   const [gridCountManual, setGridCountManual] = useState<number | null>(null);
-  // % range inputs (replaces explicit price inputs)
   const [lowerPct, setLowerPct]           = useState('5');
   const [upperPct, setUpperPct]           = useState('5');
-  // expand direction when price exits range
   const [expandDir, setExpandDir]         = useState<'both' | 'lower' | 'upper'>('both');
   const [preview, setPreview]             = useState<any>(null);
   const [loading, setLoading]             = useState(false);
   const [creating, setCreating]           = useState(false);
   const [error, setError]                 = useState('');
+
+  const FALLBACK = ['BTC','ETH','SOL','BNB','XRP','ADA','DOGE','AVAX','DOT','LINK','UNI','MATIC','LTC','ATOM','NEAR','APT','ARB','TAO','FET','AIA'];
+
+  useEffect(() => {
+    getSymbols().then(setAllSymbols).catch(() => setAllSymbols(FALLBACK));
+  }, []);
 
   const fetchPreview = useCallback(async () => {
     const inv = parseFloat(investment);
@@ -101,8 +106,10 @@ function CreateForm({ lang, onCreated }: { lang: Lang; onCreated: () => void }) 
     finally { setCreating(false); }
   };
 
-  const POPULAR = ['BTC','ETH','SOL','BNB','XRP','ADA','DOGE','AVAX','DOT','LINK','UNI','MATIC','LTC','ATOM','NEAR','APT','ARB','TAO','FET','AIA'];
-  const filteredSymbols = symbolSearch.trim() ? POPULAR.filter(s => s.includes(symbolSearch.toUpperCase())) : POPULAR;
+  const symbols = allSymbols.length > 0 ? allSymbols : FALLBACK;
+  const filteredSymbols = symbolSearch.trim()
+    ? symbols.filter(s => s.includes(symbolSearch.toUpperCase()))
+    : symbols.slice(0, 60); // show top 60 by default
 
   return (
     <div className="space-y-4">
