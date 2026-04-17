@@ -201,6 +201,31 @@ class MEXCClient:
         }
         return self._post("/api/v3/order", params)
 
+    def place_stop_loss_limit_order(
+        self,
+        symbol:    str,
+        quantity:  float,
+        stop_price: float,
+        qty_precision: int = 8,
+    ) -> dict:
+        """Place a STOP_LOSS_LIMIT sell order.
+
+        stop_price: the trigger price at which the limit sell activates.
+        The limit price is set 0.1% below stop_price to ensure fill.
+        quantity: base asset amount to sell.
+        """
+        limit_price = round(stop_price * 0.999, qty_precision)
+        params = {
+            "symbol":       symbol,
+            "side":         "SELL",
+            "type":         "STOP_LOSS_LIMIT",
+            "quantity":     str(round(quantity, qty_precision)),
+            "price":        str(limit_price),
+            "stopPrice":    str(round(stop_price, qty_precision)),
+            "timeInForce":  "GTC",
+        }
+        return self._post("/api/v3/order", params)
+
     def get_order(self, symbol: str, order_id: str) -> dict:
         """Fetch order details by orderId."""
         return self._get(
@@ -208,6 +233,19 @@ class MEXCClient:
             {"symbol": symbol, "orderId": order_id},
             signed=True,
         )
+
+    def get_all_usdt_symbols(self) -> list[str]:
+        """Return all active USDT spot pair symbols from MEXC exchangeInfo.
+
+        Filters for status == '1' (trading enabled). Used by market-wide scanners
+        to avoid per-symbol exchangeInfo calls.
+        """
+        data = self._get("/api/v3/exchangeInfo")
+        return [
+            s["symbol"]
+            for s in data.get("symbols", [])
+            if s["symbol"].endswith("USDT") and s.get("status") == "1"
+        ]
 
     def get_klines(self, symbol: str, interval: str = "15m", limit: int = 100) -> list[dict]:
         """Return OHLCV candles for symbol.

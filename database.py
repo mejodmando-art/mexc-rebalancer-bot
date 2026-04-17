@@ -1153,3 +1153,285 @@ def delete_ob_scanner(scanner_id: int) -> None:
             cur.execute(_q("DELETE FROM ob_trades WHERE scanner_id=?"), (scanner_id,))
     except Exception as e:
         log.error("delete_ob_scanner failed: %s", e)
+
+
+# ---------------------------------------------------------------------------
+# OB Detector — schema + CRUD
+# ---------------------------------------------------------------------------
+
+def _init_ob_detector_tables() -> None:
+    """Create ob_detectors and ob_detector_trades tables if they don't exist."""
+    if _USE_POSTGRES:
+        stmts = [
+            """
+            CREATE TABLE IF NOT EXISTS ob_detectors (
+                id              SERIAL PRIMARY KEY,
+                ts_created      TEXT    NOT NULL,
+                symbol          TEXT    NOT NULL DEFAULT 'MARKET',
+                timeframe       TEXT    NOT NULL DEFAULT '5m',
+                entry_usdt      REAL    NOT NULL DEFAULT 15.0,
+                tp1_pct         REAL    NOT NULL DEFAULT 1.0,
+                tp2_pct         REAL    NOT NULL DEFAULT 2.0,
+                use_stop_loss   INTEGER NOT NULL DEFAULT 1,
+                status          TEXT    NOT NULL DEFAULT 'stopped',
+                should_run      INTEGER NOT NULL DEFAULT 0,
+                entry_price     REAL    NOT NULL DEFAULT 0,
+                sl_price        REAL    NOT NULL DEFAULT 0,
+                base_qty        REAL    NOT NULL DEFAULT 0,
+                tp1_hit         INTEGER NOT NULL DEFAULT 0,
+                realised_pnl    REAL    NOT NULL DEFAULT 0,
+                conditions_json TEXT    NOT NULL DEFAULT '{}'
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS ob_detector_trades (
+                id          SERIAL PRIMARY KEY,
+                detector_id INTEGER NOT NULL,
+                ts          TEXT    NOT NULL,
+                side        TEXT    NOT NULL,
+                price       REAL    NOT NULL,
+                qty         REAL    NOT NULL,
+                usdt_value  REAL    NOT NULL DEFAULT 0,
+                pnl         REAL    NOT NULL DEFAULT 0,
+                label       TEXT    NOT NULL DEFAULT ''
+            )
+            """,
+        ]
+        with _conn() as conn:
+            cur = conn.cursor()
+            for stmt in stmts:
+                cur.execute(stmt)
+    else:
+        with _conn() as conn:
+            conn.executescript("""
+                CREATE TABLE IF NOT EXISTS ob_detectors (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ts_created      TEXT    NOT NULL,
+                    symbol          TEXT    NOT NULL DEFAULT 'MARKET',
+                    timeframe       TEXT    NOT NULL DEFAULT '5m',
+                    entry_usdt      REAL    NOT NULL DEFAULT 15.0,
+                    tp1_pct         REAL    NOT NULL DEFAULT 1.0,
+                    tp2_pct         REAL    NOT NULL DEFAULT 2.0,
+                    use_stop_loss   INTEGER NOT NULL DEFAULT 1,
+                    status          TEXT    NOT NULL DEFAULT 'stopped',
+                    should_run      INTEGER NOT NULL DEFAULT 0,
+                    entry_price     REAL    NOT NULL DEFAULT 0,
+                    sl_price        REAL    NOT NULL DEFAULT 0,
+                    base_qty        REAL    NOT NULL DEFAULT 0,
+                    tp1_hit         INTEGER NOT NULL DEFAULT 0,
+                    realised_pnl    REAL    NOT NULL DEFAULT 0,
+                    conditions_json TEXT    NOT NULL DEFAULT '{}'
+                );
+                CREATE TABLE IF NOT EXISTS ob_detector_trades (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    detector_id INTEGER NOT NULL,
+                    ts          TEXT    NOT NULL,
+                    side        TEXT    NOT NULL,
+                    price       REAL    NOT NULL,
+                    qty         REAL    NOT NULL,
+                    usdt_value  REAL    NOT NULL DEFAULT 0,
+                    pnl         REAL    NOT NULL DEFAULT 0,
+                    label       TEXT    NOT NULL DEFAULT ''
+                );
+            """)
+
+
+def create_ob_detector(
+    timeframe:     str   = "5m",
+    entry_usdt:    float = 15.0,
+    tp1_pct:       float = 1.0,
+    tp2_pct:       float = 2.0,
+    use_stop_loss: bool  = True,
+) -> int:
+    """Insert a new OB detector row and return its id."""
+    _init_ob_detector_tables()
+    ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        with _conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                _q(
+                    "INSERT INTO ob_detectors "
+                    "(ts_created,symbol,timeframe,entry_usdt,tp1_pct,tp2_pct,use_stop_loss) "
+                    "VALUES (?,?,?,?,?,?,?)"
+                ),
+                (ts, "MARKET", timeframe, entry_usdt, tp1_pct, tp2_pct, int(use_stop_loss)),
+            )
+            if _USE_POSTGRES:
+                cur.execute("SELECT lastval()")
+            else:
+                cur.execute("SELECT last_insert_rowid()")
+            return cur.fetchone()[0]
+    except Exception as e:
+        log.error("create_ob_detector failed: %s", e)
+        return -1
+
+
+def list_ob_detectors() -> list:
+    _init_ob_detector_tables()
+    try:
+        with _conn() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT * FROM ob_detectors ORDER BY id DESC")
+            return _rows_to_dicts(cur.fetchall(), cur)
+    except Exception as e:
+        log.error("list_ob_detectors failed: %s", e)
+        return []
+
+
+def get_ob_detector(detector_id: int) -> dict | None:
+    _init_ob_detector_tables()
+    try:
+        with _conn() as conn:
+            cur = conn.cursor()
+            cur.execute(_q("SELECT * FROM ob_detectors WHERE id=?"), (detector_id,))
+            rows = _rows_to_dicts(cur.fetchall(), cur)
+            if not rows:
+                return None
+            row = rows[0]
+            try:
+                row["conditions"] = json.loads(row.get("conditions_json") or "{}")
+            except Exception:
+                row["conditions"] = {}
+            return row
+    except Exception as e:
+        log.error("get_ob_detector failed: %s", e)
+        return None
+
+
+def update_ob_detector_status(detector_id: int, status: str) -> None:
+    try:
+        with _conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                _q("UPDATE ob_detectors SET status=? WHERE id=?"),
+                (status, detector_id),
+            )
+    except Exception as e:
+        log.error("update_ob_detector_status failed: %s", e)
+
+
+def update_ob_detector_position(
+    detector_id: int,
+    entry_price: float,
+    base_qty:    float,
+    tp1_hit:     bool,
+    realised_pnl: float,
+    conditions:  dict | None = None,
+    sl_price:    float = 0.0,
+    symbol:      str   = "",
+) -> None:
+    try:
+        with _conn() as conn:
+            cur = conn.cursor()
+            if conditions is not None:
+                cj = json.dumps(conditions)
+                if symbol:
+                    cur.execute(
+                        _q(
+                            "UPDATE ob_detectors "
+                            "SET entry_price=?,base_qty=?,tp1_hit=?,realised_pnl=?,"
+                            "conditions_json=?,sl_price=?,symbol=? WHERE id=?"
+                        ),
+                        (entry_price, base_qty, int(tp1_hit), realised_pnl,
+                         cj, sl_price, symbol, detector_id),
+                    )
+                else:
+                    cur.execute(
+                        _q(
+                            "UPDATE ob_detectors "
+                            "SET entry_price=?,base_qty=?,tp1_hit=?,realised_pnl=?,"
+                            "conditions_json=?,sl_price=? WHERE id=?"
+                        ),
+                        (entry_price, base_qty, int(tp1_hit), realised_pnl,
+                         cj, sl_price, detector_id),
+                    )
+            else:
+                cur.execute(
+                    _q(
+                        "UPDATE ob_detectors "
+                        "SET entry_price=?,base_qty=?,tp1_hit=?,realised_pnl=? WHERE id=?"
+                    ),
+                    (entry_price, base_qty, int(tp1_hit), realised_pnl, detector_id),
+                )
+    except Exception as e:
+        log.error("update_ob_detector_position failed: %s", e)
+
+
+def record_ob_detector_trade(
+    detector_id: int,
+    side:        str,
+    price:       float,
+    qty:         float,
+    usdt_value:  float,
+    pnl:         float = 0.0,
+    label:       str   = "",
+) -> None:
+    try:
+        _init_ob_detector_tables()
+        ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        with _conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                _q(
+                    "INSERT INTO ob_detector_trades "
+                    "(detector_id,ts,side,price,qty,usdt_value,pnl,label) "
+                    "VALUES (?,?,?,?,?,?,?,?)"
+                ),
+                (detector_id, ts, side, price, qty, usdt_value, pnl, label),
+            )
+    except Exception as e:
+        log.error("record_ob_detector_trade failed: %s", e)
+
+
+def get_ob_detector_trades(detector_id: int) -> list:
+    _init_ob_detector_tables()
+    try:
+        with _conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                _q("SELECT * FROM ob_detector_trades WHERE detector_id=? ORDER BY id DESC"),
+                (detector_id,),
+            )
+            return _rows_to_dicts(cur.fetchall(), cur)
+    except Exception as e:
+        log.error("get_ob_detector_trades failed: %s", e)
+        return []
+
+
+def set_ob_detector_should_run(detector_id: int, should_run: bool) -> None:
+    try:
+        with _conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                _q("UPDATE ob_detectors SET should_run=? WHERE id=?"),
+                (int(should_run), detector_id),
+            )
+    except Exception as e:
+        log.error("set_ob_detector_should_run failed: %s", e)
+
+
+def get_should_run_ob_detectors() -> list[int]:
+    _init_ob_detector_tables()
+    try:
+        with _conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT id FROM ob_detectors WHERE should_run=1 AND status != 'deleted'"
+            )
+            return [r[0] for r in cur.fetchall()]
+    except Exception as e:
+        log.error("get_should_run_ob_detectors failed: %s", e)
+        return []
+
+
+def delete_ob_detector(detector_id: int) -> None:
+    try:
+        with _conn() as conn:
+            cur = conn.cursor()
+            cur.execute(_q("DELETE FROM ob_detectors WHERE id=?"), (detector_id,))
+            cur.execute(
+                _q("DELETE FROM ob_detector_trades WHERE detector_id=?"), (detector_id,)
+            )
+    except Exception as e:
+        log.error("delete_ob_detector failed: %s", e)
