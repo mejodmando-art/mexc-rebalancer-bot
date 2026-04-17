@@ -1735,7 +1735,7 @@ def api_delete_grid_bot(bot_id: int):
 # ---------------------------------------------------------------------------
 
 class OBScannerCreate(BaseModel):
-    symbol: str
+    # symbol is ignored — scanner always sweeps the full market
     timeframe: Optional[str] = "15m"
     entry_usdt: Optional[float] = 15.0
     tp1_pct: Optional[float] = 5.0
@@ -1747,6 +1747,10 @@ def api_list_ob_scanners():
     scanners = list_ob_scanners()
     for s in scanners:
         s["running"] = ob_is_running(s["id"])
+        status = get_ob_scanner_status(s["id"])
+        s["last_symbol"]    = status.get("last_symbol", "")
+        s["scanned"]        = status.get("scanned", 0)
+        s["open_positions"] = status.get("open_positions", 0)
     return scanners
 
 
@@ -1754,7 +1758,7 @@ def api_list_ob_scanners():
 def api_create_ob_scanner(body: OBScannerCreate):
     try:
         scanner_id = create_ob_scanner(
-            symbol=body.symbol.upper(),
+            symbol="MARKET",          # market-wide — no single symbol
             timeframe=body.timeframe or "15m",
             entry_usdt=body.entry_usdt or 15.0,
             tp1_pct=body.tp1_pct or 5.0,
@@ -1772,7 +1776,8 @@ def api_get_ob_scanner(scanner_id: int):
     if not status or status.get("error") == "not found":
         raise HTTPException(status_code=404, detail="Scanner not found")
     trades = get_ob_trades(scanner_id)
-    status["trades"] = trades
+    status["trades"]  = trades
+    status["running"] = ob_is_running(scanner_id)
     return status
 
 
