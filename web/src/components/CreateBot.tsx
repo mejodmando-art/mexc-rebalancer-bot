@@ -70,7 +70,7 @@ export default function CreateBot({ lang, onCreated }: Props) {
   // ── Asset CRUD ──────────────────────────────────────────────────────────
 
   const addAsset = () => {
-    if (assets.length >= 12) return;
+    if (assets.length >= 20) return;
     const next = [...assets, { symbol: '', allocation_pct: 0, entry_price_usdt: null }];
     setAssets(allocMode === 'equal' ? applyEqualAlloc(next) : next);
   };
@@ -104,7 +104,7 @@ export default function CreateBot({ lang, onCreated }: Props) {
 
   const validate = (): string | null => {
     if (!botName.trim()) return tr('errBotName', lang);
-    if (assets.length < 1 || assets.length > 12) return tr('errAssetCount', lang);
+    if (assets.length < 1 || assets.length > 20) return tr('errAssetCount', lang);
     const symbols = assets.map(a => a.symbol.trim().toUpperCase());
     if (symbols.some(s => !s)) return tr('errSymbol', lang);
     if (new Set(symbols).size !== symbols.length) return tr('errDuplicate', lang);
@@ -181,10 +181,10 @@ export default function CreateBot({ lang, onCreated }: Props) {
       {/* ── Token allocation ── */}
       <div className="card">
         <div className="flex items-center justify-between mb-3">
-          <div className="label mb-0">{tr('assetsAndAlloc', lang)} ({assets.length}/12)</div>
+          <div className="label mb-0">{tr('assetsAndAlloc', lang)} ({assets.length}/20)</div>
           <button
             onClick={addAsset}
-            disabled={assets.length >= 12}
+            disabled={assets.length >= 20}
             className="btn-primary text-xs px-3 py-1"
           >
             + {tr('addAsset', lang)}
