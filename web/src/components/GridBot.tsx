@@ -404,8 +404,9 @@ function CreateForm({ lang, onCreated }: { lang: Lang; onCreated: () => void }) 
   }, []);
 
   const fetchPreview = useCallback(async () => {
-    const inv = parseFloat(investment);
-    if (!symbol || inv < 1) { setPreview(null); return; }
+    if (!symbol) { setPreview(null); return; }
+    // Use entered investment or fall back to 100 so the chart always renders
+    const inv = Math.max(parseFloat(investment) || 100, 1);
     setLoading(true);
     try {
       setPreview(await previewGridBot(
@@ -460,6 +461,36 @@ function CreateForm({ lang, onCreated }: { lang: Lang; onCreated: () => void }) 
 
   return (
     <div className="space-y-4">
+
+      {/* ── Interactive Grid Chart — always visible ── */}
+      <div className="card p-3">
+        {preview ? (
+          <GridControlChart
+            low={preview.price_low}
+            high={preview.price_high}
+            current={preview.current_price}
+            gridCount={gridCountManual ?? preview.grid_count ?? 10}
+            lowerPct={parseFloat(lowerPct) || 5}
+            upperPct={parseFloat(upperPct) || 5}
+            mode={mode}
+            lang={lang}
+            onDrag={(nl, nu) => {
+              setLowerPct(nl.toFixed(1));
+              if (mode !== 'infinity') setUpperPct(nu.toFixed(1));
+            }}
+            onCommit={(nl, nu) => {
+              setLowerPct(nl.toFixed(1));
+              if (mode !== 'infinity') setUpperPct(nu.toFixed(1));
+            }}
+          />
+        ) : (
+          <div className="flex items-center justify-center rounded-2xl animate-pulse"
+            style={{ height: 200, background: 'var(--bg-input)', color: 'var(--text-muted)', fontSize: 12 }}>
+            {loading ? (ar ? 'جاري تحميل الشارت...' : 'Loading chart...') : (ar ? 'اختر عملة لعرض الشارت' : 'Select a symbol to load chart')}
+          </div>
+        )}
+      </div>
+
       {/* اختيار العملة */}
       <div className="card p-4 space-y-3">
         <div className="label">{ar ? 'العملة' : 'Symbol'}</div>
@@ -778,25 +809,6 @@ function CreateForm({ lang, onCreated }: { lang: Lang; onCreated: () => void }) 
 
       {preview && !loading && (
         <div className="card p-4 space-y-3 animate-fade-up">
-          {/* ── Interactive Grid Control Chart ── */}
-          <GridControlChart
-            low={preview.price_low}
-            high={preview.price_high}
-            current={preview.current_price}
-            gridCount={gridCountManual ?? preview.grid_count ?? 10}
-            lowerPct={parseFloat(lowerPct) || 5}
-            upperPct={parseFloat(upperPct) || 5}
-            mode={mode}
-            lang={lang}
-            onDrag={(nl, nu) => {
-              setLowerPct(nl.toFixed(1));
-              if (mode !== 'infinity') setUpperPct(nu.toFixed(1));
-            }}
-            onCommit={(nl, nu) => {
-              setLowerPct(nl.toFixed(1));
-              if (mode !== 'infinity') setUpperPct(nu.toFixed(1));
-            }}
-          />
           <div className="grid grid-cols-2 gap-2">
             {[
               { label: ar ? 'السعر الحالي' : 'Current Price',   value: `$${preview.current_price.toFixed(4)}`,    color: '#F0B90B' },
