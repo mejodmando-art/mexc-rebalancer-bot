@@ -253,7 +253,8 @@ def _place_initial_orders(client: MEXCClient, bot_id: int, symbol: str,
 
 def _rebuild_grid(client: MEXCClient, bot_id: int, symbol: str,
                    investment: float, mode: str, qty_prec: int,
-                   stop_event: Optional[threading.Event] = None) -> tuple[float, float, float, int, list[float]]:
+                   stop_event: Optional[threading.Event] = None,
+                   base_qty: float = 0.0) -> tuple[float, float, float, int, list[float]]:
     """
     Cancel all open orders, shift grid to current price, and expand the range.
 
@@ -304,7 +305,7 @@ def _rebuild_grid(client: MEXCClient, bot_id: int, symbol: str,
     # initial market buy — no new market buy needed; SELL orders use usdt_per_grid sizing.
     _place_initial_orders(client, bot_id, symbol, levels, current_price,
                            usdt_per_grid, qty_prec, mode, stop_event,
-                           initial_buy_qty=0.0)
+                           initial_buy_qty=base_qty)
     return price_low, price_high, current_price, grid_count, levels
 
 
@@ -387,7 +388,7 @@ def _grid_loop(bot_id: int, stop_event: threading.Event) -> None:
                 )
                 if out_of_range:
                     price_low, price_high, current_price, grid_count, levels = \
-                        _rebuild_grid(client, bot_id, symbol, investment, mode, qty_prec, stop_event)
+                        _rebuild_grid(client, bot_id, symbol, investment, mode, qty_prec, stop_event, base_qty=base_qty)
                     usdt_per_grid = investment / grid_count
                     stop_event.wait(POLL_INTERVAL)
                     continue
