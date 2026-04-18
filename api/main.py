@@ -1552,6 +1552,12 @@ def api_list_grid_bots():
         current_price = prices.get(b["symbol"], 0.0)
         # current_value_usdt = value of base asset held by this grid bot at live price
         current_value_usdt = round(base_qty * current_price, 4) if current_price > 0 else 0.0
+        shift_count = int(b.get("shift_count") or 0)
+        lower_pct   = float(b.get("lower_pct") or 5.0)
+        upper_pct   = float(b.get("upper_pct") or 5.0)
+        # Current effective range % after all doublings
+        effective_lower = lower_pct * (2 ** shift_count)
+        effective_upper = upper_pct * (2 ** shift_count)
         result.append({
             "id":                  b["id"],
             "symbol":              b["symbol"],
@@ -1570,6 +1576,11 @@ def api_list_grid_bots():
             "current_value_usdt":  current_value_usdt,
             "running":             grid_is_running(b["id"]),
             "ts_created":          b["ts_created"],
+            "shift_count":         shift_count,
+            "lower_pct":           lower_pct,
+            "upper_pct":           upper_pct,
+            "effective_lower_pct": round(effective_lower, 2),
+            "effective_upper_pct": round(effective_upper, 2),
         })
     return result
 
