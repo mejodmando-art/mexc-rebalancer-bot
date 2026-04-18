@@ -1,358 +1,13 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Grid3x3, TrendingUp, Zap, Info, Plus, Square, Play, Trash2, RefreshCw } from 'lucide-react';
+import { Grid3x3, TrendingUp, Zap, Info, Plus, Square, Play, Trash2, RefreshCw, ExternalLink } from 'lucide-react';
 import { Lang } from '../lib/i18n';
 import { listGridBots, createGridBot, stopGridBot, resumeGridBot, deleteGridBot, previewGridBot, getGridOrders, getSymbols } from '../lib/api';
+import GridControlChart from './GridControlChart';
+import GridBotDetail from './GridBotDetail';
 
 interface Props { lang: Lang; }
-
-// ─── Draggable Grid Control Chart ────────────────────────────────────────────
-interface GridControlChartProps {
-  low: number;
-  high: number;
-  current: number;
-  gridCount: number;
-  lowerPct: number;
-  upperPct: number;
-  mode?: 'normal' | 'infinity';
-  lang?: Lang;
-  /** Called while dragging — live preview updates */
-  onDrag?: (newLower: number, newUpper: number) => void;
-  /** Called on drag end — commit the values */
-  onCommit?: (newLower: number, newUpper: number) => void;
-  readOnly?: boolean;
-}
-
-function GridControlChart({
-  low, high, current, gridCount,
-  lowerPct, upperPct, mode = 'normal', lang = 'en',
-  onDrag, onCommit, readOnly = false,
-}: GridControlChartProps) {
-  const ar = lang === 'ar';
-  const svgRef = useRef<SVGSVGElement>(null);
-
-  // Drag state
-  const dragging = useRef(false);
-  const dragStart = useRef({ x: 0, y: 0, lp: lowerPct, up: upperPct });
-  const [isDragging, setIsDragging] = useState(false);
-  const [dragDelta, setDragDelta] = useState({ dx: 0, dy: 0 });
-  const [liveLower, setLiveLower] = useState(lowerPct);
-  const [liveUpper, setLiveUpper] = useState(upperPct);
-
-  // Sync live values when props change (e.g. from parent input fields)
-  useEffect(() => { if (!dragging.current) { setLiveLower(lowerPct); setLiveUpper(upperPct); } }, [lowerPct, upperPct]);
-
-  // SVG coordinate system
-  const W = 360, H = 200;
-  const PAD = { t: 18, b: 18, l: 10, r: 10 };
-  const innerH = H - PAD.t - PAD.b;
-
-  const py = (price: number) => {
-    if (high <= low) return H / 2;
-    return PAD.t + ((high - price) / (high - low)) * innerH;
-  };
-
-  const yHigh = py(high);
-  const yLow  = py(low);
-  const yCur  = Math.min(Math.max(py(current), PAD.t + 2), H - PAD.b - 2);
-
-  // Grid level lines
-  const levels: number[] = [];
-  if (gridCount > 1 && high > low) {
-    const step = (high - low) / (gridCount - 1);
-    for (let i = 0; i < gridCount; i++) levels.push(low + i * step);
-  }
-
-  // Control circle position — sits at the midpoint of the range, horizontally centred
-  const circleCX = W / 2;
-  const circleCY = (yHigh + yLow) / 2;
-
-  // Percentage label to show while dragging
-  const spreadPct = ((liveUpper + liveLower) / 2).toFixed(1);
-  const shiftPct  = ((liveUpper - upperPct + liveLower - lowerPct) / 2).toFixed(1);
-
-  // ── Pointer event handlers ──────────────────────────────────────────────────
-  const getSVGPoint = (clientX: number, clientY: number) => {
-    const svg = svgRef.current;
-    if (!svg) return { x: 0, y: 0 };
-    const rect = svg.getBoundingClientRect();
-    return {
-      x: ((clientX - rect.left) / rect.width)  * W,
-      y: ((clientY - rect.top)  / rect.height) * H,
-    };
-  };
-
-  const onPointerDown = (e: React.PointerEvent<SVGCircleElement>) => {
-    if (readOnly) return;
-    e.preventDefault();
-    (e.target as Element).setPointerCapture(e.pointerId);
-    const pt = getSVGPoint(e.clientX, e.clientY);
-    dragging.current = true;
-    dragStart.current = { x: pt.x, y: pt.y, lp: lowerPct, up: upperPct };
-    setIsDragging(true);
-    setDragDelta({ dx: 0, dy: 0 });
-  };
-
-  const onPointerMove = (e: React.PointerEvent<SVGCircleElement>) => {
-    if (!dragging.current) return;
-    e.preventDefault();
-    const pt = getSVGPoint(e.clientX, e.clientY);
-    const dx = pt.x - dragStart.current.x;  // px in SVG space
-    const dy = pt.y - dragStart.current.y;  // px in SVG space (positive = down)
-
-    setDragDelta({ dx, dy });
-
-    // dy < 0 → dragged up → expand (increase both pcts)
-    // dy > 0 → dragged down → shrink (decrease both pcts)
-    const sensitivity = 0.08; // % per SVG-px
-    const spreadDelta = -dy * sensitivity;  // up = positive = expand
-
-    // dx > 0 → dragged right → shift grid up (increase upper, decrease lower)
-    // dx < 0 → dragged left  → shift grid down
-    const shiftSensitivity = 0.06;
-    const shiftDelta = dx * shiftSensitivity;
-
-    const newLower = Math.max(0.5, dragStart.current.lp + spreadDelta - shiftDelta);
-    const newUpper = mode === 'infinity'
-      ? dragStart.current.up
-      : Math.max(0.5, dragStart.current.up + spreadDelta + shiftDelta);
-
-    setLiveLower(newLower);
-    setLiveUpper(newUpper);
-    onDrag?.(newLower, newUpper);
-  };
-
-  const onPointerUp = (e: React.PointerEvent<SVGCircleElement>) => {
-    if (!dragging.current) return;
-    dragging.current = false;
-    setIsDragging(false);
-    onCommit?.(liveLower, liveUpper);
-  };
-
-  // Recompute displayed range based on live pcts
-  const dispHigh = current > 0 ? current * (1 + liveUpper / 100) : high;
-  const dispLow  = current > 0 ? current * (1 - liveLower / 100) : low;
-
-  const dispPyHigh = current > 0 ? py(dispHigh) : yHigh;
-  const dispPyLow  = current > 0 ? py(dispLow)  : yLow;
-  const dispCircleCY = (dispPyHigh + dispPyLow) / 2;
-
-  // Grid levels for live display
-  const liveGridCount = gridCount || 10;
-  const liveStep = (dispHigh - dispLow) / Math.max(liveGridCount - 1, 1);
-  const liveLevels: number[] = [];
-  for (let i = 0; i < liveGridCount; i++) liveLevels.push(dispLow + i * liveStep);
-
-  // Percentage badge text
-  const totalSpread = liveUpper + liveLower;
-  const origSpread  = upperPct + lowerPct;
-  const spreadChange = totalSpread - origSpread;
-  const badgeText = isDragging
-    ? (spreadChange >= 0 ? `+${spreadChange.toFixed(1)}%` : `${spreadChange.toFixed(1)}%`)
-    : null;
-
-  return (
-    <div
-      className="relative w-full rounded-2xl overflow-hidden select-none"
-      style={{ background: 'var(--bg-input)', height: 200 }}
-    >
-      <svg
-        ref={svgRef}
-        viewBox={`0 0 ${W} ${H}`}
-        className="w-full h-full"
-        preserveAspectRatio="none"
-        style={{ touchAction: 'none' }}
-      >
-        <defs>
-          {/* Gradient fill between range lines */}
-          <linearGradient id="gcg-fill" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#FF7B72" stopOpacity="0.12" />
-            <stop offset="100%" stopColor="#00D4AA" stopOpacity="0.12" />
-          </linearGradient>
-          {/* Glow filter for control circle */}
-          <filter id="gcg-glow" x="-50%" y="-50%" width="200%" height="200%">
-            <feGaussianBlur stdDeviation="3" result="blur" />
-            <feMerge>
-              <feMergeNode in="blur" />
-              <feMergeNode in="SourceGraphic" />
-            </feMerge>
-          </filter>
-          {/* Glass circle gradient */}
-          <radialGradient id="gcg-glass" cx="35%" cy="30%" r="65%">
-            <stop offset="0%"   stopColor="rgba(255,255,255,0.55)" />
-            <stop offset="40%"  stopColor="rgba(255,255,255,0.15)" />
-            <stop offset="100%" stopColor="rgba(255,255,255,0.04)" />
-          </radialGradient>
-          {/* Pulse animation ring */}
-          <filter id="gcg-pulse">
-            <feGaussianBlur stdDeviation={isDragging ? '5' : '2'} result="blur" />
-            <feMerge>
-              <feMergeNode in="blur" />
-              <feMergeNode in="SourceGraphic" />
-            </feMerge>
-          </filter>
-        </defs>
-
-        {/* ── Range fill band ── */}
-        <rect
-          x={PAD.l} y={dispPyHigh}
-          width={W - PAD.l - PAD.r} height={Math.max(0, dispPyLow - dispPyHigh)}
-          fill="url(#gcg-fill)"
-          rx="4"
-          style={{ transition: isDragging ? 'none' : 'all 0.25s ease' }}
-        />
-
-        {/* ── Grid level lines ── */}
-        {liveLevels.map((price, i) => {
-          const yp = PAD.t + ((dispHigh - price) / Math.max(dispHigh - dispLow, 0.0001)) * innerH;
-          const isBuy  = price < (current || (dispHigh + dispLow) / 2);
-          const isSell = price > (current || (dispHigh + dispLow) / 2);
-          return (
-            <line
-              key={i}
-              x1={PAD.l + 4} y1={yp}
-              x2={W - PAD.r - 4} y2={yp}
-              stroke={isBuy ? '#00D4AA' : isSell ? '#FF7B72' : '#F0B90B'}
-              strokeWidth={price === current ? 1.5 : 0.8}
-              strokeDasharray={price === current ? '0' : '3,4'}
-              opacity={isDragging ? 0.9 : 0.55}
-              style={{ transition: isDragging ? 'none' : 'all 0.25s ease' }}
-            />
-          );
-        })}
-
-        {/* ── High boundary line ── */}
-        <line
-          x1={PAD.l} y1={dispPyHigh} x2={W - PAD.r} y2={dispPyHigh}
-          stroke="#FF7B72" strokeWidth="1.5" strokeDasharray="5,3" opacity="0.85"
-          style={{ transition: isDragging ? 'none' : 'all 0.25s ease' }}
-        />
-        {/* ── Low boundary line ── */}
-        <line
-          x1={PAD.l} y1={dispPyLow} x2={W - PAD.r} y2={dispPyLow}
-          stroke="#00D4AA" strokeWidth="1.5" strokeDasharray="5,3" opacity="0.85"
-          style={{ transition: isDragging ? 'none' : 'all 0.25s ease' }}
-        />
-
-        {/* ── Current price line ── */}
-        {current > 0 && (
-          <line
-            x1={PAD.l} y1={yCur} x2={W - PAD.r} y2={yCur}
-            stroke="#F0B90B" strokeWidth="1" opacity="0.5"
-          />
-        )}
-
-        {/* ── Price labels ── */}
-        <text x={PAD.l + 4} y={dispPyHigh - 4} fontSize="7.5" fill="#FF7B72" fontWeight="700" opacity="0.9">
-          H: {dispHigh > 0 ? dispHigh.toFixed(4) : '—'}
-        </text>
-        <text x={PAD.l + 4} y={dispPyLow + 10} fontSize="7.5" fill="#00D4AA" fontWeight="700" opacity="0.9">
-          L: {dispLow > 0 ? dispLow.toFixed(4) : '—'}
-        </text>
-        {current > 0 && (
-          <text x={W / 2} y={yCur - 4} fontSize="7.5" fill="#F0B90B" fontWeight="800" textAnchor="middle" opacity="0.9">
-            ● {current.toFixed(4)}
-          </text>
-        )}
-
-        {/* ── Drag hint arrows (shown when not dragging) ── */}
-        {!isDragging && !readOnly && (
-          <>
-            {/* Up arrow */}
-            <text x={circleCX} y={dispCircleCY - 22} fontSize="9" fill="rgba(255,255,255,0.25)" textAnchor="middle">▲</text>
-            {/* Down arrow */}
-            <text x={circleCX} y={dispCircleCY + 30} fontSize="9" fill="rgba(255,255,255,0.25)" textAnchor="middle">▼</text>
-            {/* Left arrow */}
-            <text x={circleCX - 26} y={dispCircleCY + 4} fontSize="9" fill="rgba(255,255,255,0.25)" textAnchor="middle">◀</text>
-            {/* Right arrow */}
-            <text x={circleCX + 26} y={dispCircleCY + 4} fontSize="9" fill="rgba(255,255,255,0.25)" textAnchor="middle">▶</text>
-          </>
-        )}
-
-        {/* ── Control circle (glass effect) ── */}
-        {!readOnly && (
-          <g
-            style={{ cursor: isDragging ? 'grabbing' : 'grab', transition: isDragging ? 'none' : 'transform 0.25s ease' }}
-            transform={`translate(${circleCX}, ${dispCircleCY})`}
-          >
-            {/* Outer glow ring */}
-            <circle
-              r={isDragging ? 20 : 16}
-              fill="none"
-              stroke={isDragging ? 'rgba(240,185,11,0.6)' : 'rgba(240,185,11,0.25)'}
-              strokeWidth={isDragging ? 2 : 1.5}
-              filter="url(#gcg-pulse)"
-              style={{ transition: 'all 0.2s ease' }}
-            />
-            {/* Main glass circle */}
-            <circle
-              r={14}
-              fill="rgba(15,21,32,0.65)"
-              stroke={isDragging ? 'rgba(240,185,11,0.9)' : 'rgba(240,185,11,0.5)'}
-              strokeWidth={isDragging ? 2 : 1.5}
-              style={{ transition: 'all 0.2s ease' }}
-            />
-            {/* Glass highlight */}
-            <circle
-              r={14}
-              fill="url(#gcg-glass)"
-            />
-            {/* Inner icon — grid symbol */}
-            <g opacity={isDragging ? 1 : 0.8}>
-              {[-4, 0, 4].map(gy => (
-                <line key={gy} x1={-5} y1={gy} x2={5} y2={gy}
-                  stroke={isDragging ? '#F0B90B' : 'rgba(240,185,11,0.8)'}
-                  strokeWidth="1.2" strokeLinecap="round" />
-              ))}
-            </g>
-            {/* Invisible large hit area for easier touch */}
-            <circle
-              r={22}
-              fill="transparent"
-              onPointerDown={onPointerDown}
-              onPointerMove={onPointerMove}
-              onPointerUp={onPointerUp}
-              onPointerCancel={onPointerUp}
-            />
-          </g>
-        )}
-
-        {/* ── Percentage badge (shown while dragging) ── */}
-        {isDragging && badgeText && (
-          <g transform={`translate(${circleCX + 28}, ${dispCircleCY - 8})`}>
-            <rect x={-2} y={-10} width={badgeText.length * 6 + 8} height={14} rx={4}
-              fill={spreadChange >= 0 ? 'rgba(0,212,170,0.85)' : 'rgba(255,123,114,0.85)'}
-            />
-            <text x={(badgeText.length * 6 + 4) / 2} y={0}
-              fontSize="8.5" fill="#000" fontWeight="800" textAnchor="middle">
-              {badgeText}
-            </text>
-          </g>
-        )}
-
-        {/* ── Drag direction hint text (shown while dragging) ── */}
-        {isDragging && (
-          <text x={W / 2} y={H - 4} fontSize="7" fill="rgba(255,255,255,0.4)" textAnchor="middle">
-            {ar
-              ? `↕ توسيع/تضييق  ↔ تحريك`
-              : `↕ expand/shrink  ↔ shift`}
-          </text>
-        )}
-      </svg>
-
-      {/* ── Static hint label (not dragging) ── */}
-      {!isDragging && !readOnly && (
-        <div
-          className="absolute bottom-1.5 left-0 right-0 text-center pointer-events-none"
-          style={{ fontSize: 9, color: 'rgba(255,255,255,0.3)', letterSpacing: '0.04em' }}
-        >
-          {ar ? 'اسحب الدائرة للتحكم في الشبكة' : 'Drag the circle to control the grid'}
-        </div>
-      )}
-    </div>
-  );
-}
 
 function WaveChart({ low, high, current }: { low: number; high: number; current: number }) {
   const pct = high > low ? ((current - low) / (high - low)) * 100 : 50;
@@ -851,7 +506,7 @@ function CreateForm({ lang, onCreated }: { lang: Lang; onCreated: () => void }) 
   );
 }
 
-function BotCard({ bot, lang, onRefresh }: { bot: any; lang: Lang; onRefresh: () => void }) {
+function BotCard({ bot, lang, onRefresh, onOpen }: { bot: any; lang: Lang; onRefresh: () => void; onOpen: () => void }) {
   const ar = lang === 'ar';
   const [stopping, setStopping]     = useState(false);
   const [deleting, setDeleting]     = useState(false);
@@ -1002,6 +657,15 @@ function BotCard({ bot, lang, onRefresh }: { bot: any; lang: Lang; onRefresh: ()
         </div>
       )}
 
+      {/* Live detail button */}
+      <button onClick={onOpen}
+        className="w-full flex items-center justify-center gap-2 py-2.5 rounded-2xl text-sm font-bold transition-all"
+        style={{ background: 'rgba(240,185,11,0.08)', color: '#F0B90B', border: '1px solid rgba(240,185,11,0.3)' }}>
+        <Zap size={13} />
+        {ar ? 'تحكم لايف في الشبكة' : 'Live Grid Control'}
+        <ExternalLink size={11} />
+      </button>
+
       <div className="flex gap-2 pt-1">
         {bot.running ? (
           <button onClick={handleStop} disabled={stopping}
@@ -1043,9 +707,22 @@ function BotCard({ bot, lang, onRefresh }: { bot: any; lang: Lang; onRefresh: ()
 
 export default function GridBot({ lang }: Props) {
   const ar = lang === 'ar';
-  const [view, setView]       = useState<'list' | 'create'>('list');
-  const [bots, setBots]       = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [view, setView]           = useState<'list' | 'create'>('list');
+  const [selectedBotId, setSelectedBotId] = useState<number | null>(null);
+  const [bots, setBots]           = useState<any[]>([]);
+  const [loading, setLoading]     = useState(true);
+
+  // ── Detail view ──
+  if (selectedBotId !== null) {
+    return (
+      <GridBotDetail
+        botId={selectedBotId}
+        lang={lang}
+        onBack={() => setSelectedBotId(null)}
+        onDeleted={() => { setSelectedBotId(null); load(); }}
+      />
+    );
+  }
 
   const load = useCallback(async () => {
     try { setBots(await listGridBots()); } catch {}
@@ -1152,7 +829,7 @@ export default function GridBot({ lang }: Props) {
                 <RefreshCw size={12} /> {ar ? 'تحديث' : 'Refresh'}
               </button>
             </div>
-            {bots.map(b => <BotCard key={b.id} bot={b} lang={lang} onRefresh={load} />)}
+            {bots.map(b => <BotCard key={b.id} bot={b} lang={lang} onRefresh={load} onOpen={() => setSelectedBotId(b.id)} />)}
           </div>
         )}
       </div>

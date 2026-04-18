@@ -5,6 +5,8 @@ import { Lang } from '../lib/i18n';
 import {
   listGridBots, stopGridBot, resumeGridBot, deleteGridBot, getGridOrders, createGridBot, previewGridBot, getSymbols,
 } from '../lib/api';
+import GridControlChart from './GridControlChart';
+import GridBotDetail from './GridBotDetail';
 
 interface Props { lang: Lang; onNavigate?: (tab: any) => void; }
 
@@ -221,8 +223,9 @@ function CreateGridBotModal({ ar, onClose, onCreated }: {
   }, []);
 
   useEffect(() => {
-    const inv = parseFloat(investment);
-    if (!symbol || inv < 1) { setPreview(null); return; }
+    if (!symbol) { setPreview(null); return; }
+    // Fall back to 100 so the chart renders immediately without requiring an amount
+    const inv = Math.max(parseFloat(investment) || 100, 1);
     const t = setTimeout(async () => {
       setLoading(true);
       try {
@@ -289,6 +292,35 @@ function CreateGridBotModal({ ar, onClose, onCreated }: {
             {ar ? 'إنشاء بوت شبكي جديد' : 'New Grid Bot'}
           </h3>
           <button onClick={onClose} style={{ color: 'rgba(255,255,255,0.4)', fontSize: 20 }}>✕</button>
+        </div>
+
+        {/* ── Interactive Grid Control Chart ── */}
+        <div style={{ borderRadius: 16, overflow: 'hidden' }}>
+          {preview ? (
+            <GridControlChart
+              low={preview.price_low}
+              high={preview.price_high}
+              current={preview.current_price}
+              gridCount={gridCountManual ?? preview.grid_count ?? 10}
+              lowerPct={parseFloat(lowerPct) || 5}
+              upperPct={parseFloat(upperPct) || 5}
+              mode={mode}
+              lang={ar ? 'ar' : 'en'}
+              onDrag={(nl, nu) => {
+                setLowerPct(nl.toFixed(1));
+                if (mode !== 'infinity') setUpperPct(nu.toFixed(1));
+              }}
+              onCommit={(nl, nu) => {
+                setLowerPct(nl.toFixed(1));
+                if (mode !== 'infinity') setUpperPct(nu.toFixed(1));
+              }}
+            />
+          ) : (
+            <div className="flex items-center justify-center rounded-2xl"
+              style={{ height: 200, background: 'rgba(255,255,255,0.04)', color: 'rgba(255,255,255,0.3)', fontSize: 12 }}>
+              {loading ? (ar ? 'جاري تحميل الشارت...' : 'Loading chart...') : (ar ? 'جاري التحميل...' : 'Loading...')}
+            </div>
+          )}
         </div>
 
         {/* العملة */}
@@ -717,7 +749,7 @@ function SettingsModal({ bot, ar, onClose, onSave }: {
   );
 }
 
-function BotCard({ bot, lang, onRefresh }: { bot: any; lang: Lang; onRefresh: () => void }) {
+function BotCard({ bot, lang, onRefresh, onOpen }: { bot: any; lang: Lang; onRefresh: () => void; onOpen: () => void }) {
   const ar = lang === 'ar';
   const [orders, setOrders]           = useState<any[]>([]);
   const [stopping, setStopping]       = useState(false);
@@ -862,8 +894,21 @@ function BotCard({ bot, lang, onRefresh }: { bot: any; lang: Lang; onRefresh: ()
       </button>
       {showOrders && <OrdersTable orders={orders} ar={ar} />}
 
+      {/* ── Live control button ── */}
+      <button
+        onClick={onOpen}
+        style={{
+          width: '100%', marginTop: 12, padding: '10px 0',
+          borderRadius: 14, border: '1px solid rgba(240,185,11,0.35)',
+          background: 'rgba(240,185,11,0.08)', color: '#F0B90B',
+          fontWeight: 700, fontSize: 13, display: 'flex',
+          alignItems: 'center', justifyContent: 'center', gap: 6,
+        }}>
+        ⚡ {ar ? 'تحكم لايف في الشبكة' : 'Live Grid Control'}
+      </button>
+
       {/* ── 4 buttons 2×2 ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 12 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 8 }}>
         {/* إيقاف / تشغيل */}
         {isRunning ? (
           <button className="mgb-btn mgb-btn-stop" onClick={handleStop} disabled={stopping}>
@@ -908,10 +953,11 @@ function BotCard({ bot, lang, onRefresh }: { bot: any; lang: Lang; onRefresh: ()
 // ── Main export ───────────────────────────────────────────────────────────────
 export default function MobileGridBot({ lang, onNavigate }: Props) {
   const ar = lang === 'ar';
-  const [bots, setBots]             = useState<any[]>([]);
-  const [loading, setLoading]       = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [showCreate, setShowCreate] = useState(false);
+  const [bots, setBots]               = useState<any[]>([]);
+  const [loading, setLoading]         = useState(true);
+  const [refreshing, setRefreshing]   = useState(false);
+  const [showCreate, setShowCreate]   = useState(false);
+  const [selectedBotId, setSelectedBotId] = useState<number | null>(null);
 
   const load = useCallback(async (showSpinner = false) => {
     if (showSpinner) setRefreshing(true);
@@ -929,6 +975,20 @@ export default function MobileGridBot({ lang, onNavigate }: Props) {
     const t = setInterval(() => load(), 15000);
     return () => clearInterval(t);
   }, [load]);
+
+  // ── Detail view ──
+  if (selectedBotId !== null) {
+    return (
+      <div className="mgb-root" dir={ar ? 'rtl' : 'ltr'} style={{ padding: '12px 16px', overflowY: 'auto' }}>
+        <GridBotDetail
+          botId={selectedBotId}
+          lang={lang}
+          onBack={() => setSelectedBotId(null)}
+          onDeleted={() => { setSelectedBotId(null); load(); }}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="mgb-root" dir={ar ? 'rtl' : 'ltr'}>
@@ -995,7 +1055,7 @@ export default function MobileGridBot({ lang, onNavigate }: Props) {
           <span>{ar ? 'لا توجد بوتات شبكة نشطة' : 'No active grid bots'}</span>
         </div>
       ) : (
-        bots.map(b => <BotCard key={b.id} bot={b} lang={lang} onRefresh={() => load()} />)
+        bots.map(b => <BotCard key={b.id} bot={b} lang={lang} onRefresh={() => load()} onOpen={() => setSelectedBotId(b.id)} />)
       )}
     </div>
   );

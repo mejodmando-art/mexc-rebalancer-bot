@@ -38,7 +38,7 @@ if _root not in sys.path:
 
 log = logging.getLogger("api")
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -1719,6 +1719,55 @@ def api_delete_grid_bot(bot_id: int):
         return {"ok": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+class GridRebuildBody(BaseModel):
+    price_low: float
+    price_high: float
+
+
+@app.post("/api/grid-bots/{bot_id}/rebuild")
+def api_rebuild_grid_bot(bot_id: int, body: GridRebuildBody):
+    """Stop the bot, wipe open orders, restart with new price_low/price_high."""
+    try:
+        bot = get_grid_bot(bot_id)
+        if not bot:
+            raise HTTPException(status_code=404, detail="Bot not found")
+        stop_grid_bot(bot_id)
+        new_id = start_grid_bot(
+            symbol=bot["symbol"].replace("USDT", ""),
+            investment=float(bot.get("investment") or bot.get("invested_usdt") or 100),
+            price_low=body.price_low,
+            price_high=body.price_high,
+            expand_direction=bot.get("expand_direction", "both"),
+            mode=bot.get("mode", "normal"),
+        )
+        return {"ok": True, "bot_id": new_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.websocket("/ws/price/{symbol}")
+async def ws_price(websocket: WebSocket, symbol: str):
+    """Stream live price for a symbol via MEXC REST polling (1 s interval)."""
+    import asyncio
+    await websocket.accept()
+    sym = symbol.upper()
+    if not sym.endswith("USDT"):
+        sym += "USDT"
+    client = MEXCClient()
+    try:
+        while True:
+            try:
+                price = client.get_price(sym)
+                await websocket.send_json({"symbol": sym, "price": price})
+            except Exception as e:
+                await websocket.send_json({"error": str(e)})
+            await asyncio.sleep(1)
+    except WebSocketDisconnect:
+        pass
 
 
 # ---------------------------------------------------------------------------

@@ -118,6 +118,12 @@ export const createGridBot   = (body: {
 export const stopGridBot     = (id: number)          => req<{ ok: boolean }>(`/api/grid-bots/${id}/stop`,   { method: 'POST' });
 export const resumeGridBot   = (id: number)          => req<{ ok: boolean }>(`/api/grid-bots/${id}/resume`, { method: 'POST' });
 export const deleteGridBot   = (id: number)          => req<{ ok: boolean }>(`/api/grid-bots/${id}`,        { method: 'DELETE' });
+export const rebuildGridBot  = (id: number, price_low: number, price_high: number) =>
+  req<{ ok: boolean; bot_id: number }>(`/api/grid-bots/${id}/rebuild`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ price_low, price_high }),
+  });
 export const previewGridBot  = (
   symbol: string,
   investment: number,
