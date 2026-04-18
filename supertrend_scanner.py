@@ -238,7 +238,13 @@ class _PositionManager:
         self._realised  = 0.0
 
     def add(self, symbol: str, entry_price: float,
-            base_qty: float, qty_prec: int) -> None:
+            base_qty: float, qty_prec: int,
+            entry_usdt: float = 0.0) -> None:
+        # Use single-exit mode when the entry is too small to split safely.
+        # MEXC minimum order is ~$5; splitting $5 into 50%/30%/20% gives
+        # $2.5 / $1.5 / $1.0 — all below the minimum and will be rejected.
+        # Threshold: entry < $20 → sell 100% at TP1.
+        single_exit = entry_usdt > 0 and entry_usdt < 20.0
         with self._lock:
             self._positions[symbol] = {
                 "entry_price": entry_price,
@@ -246,6 +252,7 @@ class _PositionManager:
                 "qty_prec":    qty_prec,
                 "tp1_hit":     False,
                 "tp2_hit":     False,
+                "single_exit": single_exit,
             }
 
     def has(self, symbol: str) -> bool:
@@ -278,12 +285,36 @@ class _PositionManager:
         if not pos:
             return
 
-        price    = self.client.get_price(symbol)
-        entry    = pos["entry_price"]
-        qty      = pos["base_qty"]
-        qty_prec = pos["qty_prec"]
-        tp1_hit  = pos["tp1_hit"]
-        tp2_hit  = pos["tp2_hit"]
+        price       = self.client.get_price(symbol)
+        entry       = pos["entry_price"]
+        qty         = pos["base_qty"]
+        qty_prec    = pos["qty_prec"]
+        tp1_hit     = pos["tp1_hit"]
+        tp2_hit     = pos["tp2_hit"]
+        single_exit = pos.get("single_exit", False)
+
+        # ── Single-exit mode (entry < $20) ──────────────────────────────────
+        # Sell 100% at TP1 to avoid MEXC minimum-order rejections on splits.
+        if single_exit:
+            if not tp1_hit and price >= entry * (1 + self.tp1_pct / 100):
+                sell_qty = round(qty, qty_prec)
+                if sell_qty > 0:
+                    try:
+                        self.client.place_market_sell(symbol, sell_qty, qty_prec)
+                        pnl = (price - entry) * sell_qty
+                        self._realised += pnl
+                        with self._lock:
+                            self._positions.pop(symbol, None)
+                        record_supertrend_trade(self.scanner_id, "SELL", price, sell_qty,
+                                                price * sell_qty, pnl=pnl, label=f"TP1_full:{symbol}")
+                        log.info("[ST#%d] TP1-full %s @ %.6f pnl=%.4f",
+                                 self.scanner_id, symbol, price, pnl)
+                        self._persist()
+                    except Exception as e:
+                        log.error("[ST#%d] TP1-full sell failed %s: %s", self.scanner_id, symbol, e)
+            return
+
+        # ── Split-exit mode (entry ≥ $20) ───────────────────────────────────
 
         # TP1: +1% → sell 50%
         if not tp1_hit and price >= entry * (1 + self.tp1_pct / 100):
@@ -393,7 +424,8 @@ def _st_loop(scanner_id: int, stop_event: threading.Event) -> None:
         if float(row.get("entry_price", 0)) > 0 and float(row.get("base_qty", 0)) > 0:
             sym      = row.get("symbol", "")
             qty_prec = client.get_lot_size_precision(sym) if sym else 8
-            pm.add(sym, float(row["entry_price"]), float(row["base_qty"]), qty_prec)
+            pm.add(sym, float(row["entry_price"]), float(row["base_qty"]),
+                   qty_prec, entry_usdt=entry_usdt)
             log.info("[ST#%d] restored open position: %s", scanner_id, sym)
 
         pm_thread = threading.Thread(target=pm.run, daemon=True,
@@ -450,7 +482,8 @@ def _st_loop(scanner_id: int, stop_event: threading.Event) -> None:
                                            if filled_qty > 0
                                            else client.get_price(symbol))
                             qty_prec    = client.get_lot_size_precision(symbol)
-                            pm.add(symbol, entry_price, filled_qty, qty_prec)
+                            pm.add(symbol, entry_price, filled_qty, qty_prec,
+                                   entry_usdt=entry_usdt)
                             update_supertrend_position(
                                 scanner_id, entry_price, filled_qty,
                                 False, False, pm.realised_pnl(),
