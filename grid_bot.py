@@ -277,18 +277,18 @@ def _rebuild_grid(client: MEXCClient, bot_id: int, symbol: str,
     multiplier = 2 ** new_shift_count
 
     if direction == "lower":
-        new_lower = min(lower_pct_init * multiplier, 50.0)
+        new_lower = lower_pct_init * multiplier
         new_upper = upper_pct_init
     elif direction == "upper":
         new_lower = lower_pct_init
-        new_upper = min(upper_pct_init * multiplier, 50.0)
+        new_upper = upper_pct_init * multiplier
     else:  # both
-        new_lower = min(lower_pct_init * multiplier, 50.0)
-        new_upper = min(upper_pct_init * multiplier, 50.0)
+        new_lower = lower_pct_init * multiplier
+        new_upper = upper_pct_init * multiplier
 
     log.info(
-        "[Grid %d] shift #%d dir=%s — lower=%.1f%% upper=%.1f%%",
-        bot_id, new_shift_count, direction, new_lower, new_upper,
+        "[Grid %d] shift #%d dir=%s — lower=%.2f%% upper=%.2f%% (x%d from initial)",
+        bot_id, new_shift_count, direction, new_lower, new_upper, multiplier,
     )
 
     price_low, price_high = calculate_grid_range(
@@ -655,24 +655,33 @@ def get_grid_bot_status(bot_id: int) -> dict:
     realised        = float(bot.get("realised_profit") or 0)
     total_profit    = round(realised + unrealized_pnl, 4)
 
+    shift_count = int(bot.get("shift_count") or 0)
+    lower_pct   = float(bot.get("lower_pct") or 5.0)
+    upper_pct   = float(bot.get("upper_pct") or 5.0)
+
     return {
-        "id":              bot["id"],
-        "symbol":          bot["symbol"],
-        "investment":      bot["investment"],
-        "grid_count":      bot["grid_count"],
-        "price_low":       bot["price_low"],
-        "price_high":      bot["price_high"],
-        "mode":            bot.get("mode", "normal"),
-        "status":          bot["status"],
+        "id":                  bot["id"],
+        "symbol":              bot["symbol"],
+        "investment":          bot["investment"],
+        "grid_count":          bot["grid_count"],
+        "price_low":           bot["price_low"],
+        "price_high":          bot["price_high"],
+        "mode":                bot.get("mode", "normal"),
+        "status":              bot["status"],
         # Profit breakdown matching the spec
-        "profit":          total_profit,       # realised + unrealized
-        "realised_profit": realised,
-        "unrealized_pnl":  unrealized_pnl,
-        "avg_buy_price":   avg_buy_price,
-        "base_qty":        base_qty,
-        "running":         is_running(bot_id),
-        "error":           get_error(bot_id),
-        "open_orders":     open_count,
-        "filled_orders":   filled_count,
-        "ts_created":      bot["ts_created"],
+        "profit":              total_profit,       # realised + unrealized
+        "realised_profit":     realised,
+        "unrealized_pnl":      unrealized_pnl,
+        "avg_buy_price":       avg_buy_price,
+        "base_qty":            base_qty,
+        "running":             is_running(bot_id),
+        "error":               get_error(bot_id),
+        "open_orders":         open_count,
+        "filled_orders":       filled_count,
+        "ts_created":          bot["ts_created"],
+        "shift_count":         shift_count,
+        "lower_pct":           lower_pct,
+        "upper_pct":           upper_pct,
+        "effective_lower_pct": round(lower_pct * (2 ** shift_count), 2),
+        "effective_upper_pct": round(upper_pct * (2 ** shift_count), 2),
     }

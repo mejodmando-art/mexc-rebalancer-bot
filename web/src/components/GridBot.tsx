@@ -572,6 +572,21 @@ function BotCard({ bot, lang, onRefresh }: { bot: any; lang: Lang; onRefresh: ()
         <span>{bot.mode === 'infinity' ? '∞' : `↑ $${(bot.price_high||0).toFixed(4)}`}</span>
       </div>
 
+      {/* Range % + shift count */}
+      <div className="flex justify-between items-center text-xs px-1">
+        <span style={{ color: 'var(--text-muted)' }}>
+          ↓ {(bot.effective_lower_pct ?? bot.lower_pct ?? 5).toFixed(1)}%
+          {' · '}
+          {bot.mode === 'infinity' ? '∞' : `↑ ${(bot.effective_upper_pct ?? bot.upper_pct ?? 5).toFixed(1)}%`}
+        </span>
+        {(bot.shift_count ?? 0) > 0 && (
+          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold"
+            style={{ background: 'rgba(251,191,36,0.15)', color: '#FBBF24', border: '1px solid rgba(251,191,36,0.3)' }}>
+            ×{Math.pow(2, bot.shift_count ?? 0)} {ar ? 'تضعيف' : 'expand'}
+          </span>
+        )}
+      </div>
+
       <button onClick={() => { setShowOrders(!showOrders); if (!showOrders) loadOrders(); }}
         className="w-full text-xs py-2 rounded-xl transition-all"
         style={{ background: 'var(--bg-input)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}>

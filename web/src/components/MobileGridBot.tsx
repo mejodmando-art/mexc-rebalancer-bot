@@ -821,6 +821,40 @@ function BotCard({ bot, lang, onRefresh }: { bot: any; lang: Lang; onRefresh: ()
         </div>
       </div>
 
+      {/* ── Range info + shift badge ── */}
+      {(() => {
+        const shiftCount    = Number(bot.shift_count    ?? 0);
+        const effLower      = Number(bot.effective_lower_pct ?? bot.lower_pct ?? 5);
+        const effUpper      = Number(bot.effective_upper_pct ?? bot.upper_pct ?? 5);
+        const multiplier    = Math.pow(2, shiftCount);
+        return (
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '6px 10px', borderRadius: 10, marginBottom: 8,
+            background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)',
+          }}>
+            <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)' }}>
+              ↓ {effLower.toFixed(1)}%
+              {' · '}
+              {bot.mode === 'infinity' ? '∞' : `↑ ${effUpper.toFixed(1)}%`}
+            </span>
+            {shiftCount > 0 ? (
+              <span style={{
+                fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 20,
+                background: 'rgba(251,191,36,0.15)', color: '#FBBF24',
+                border: '1px solid rgba(251,191,36,0.3)',
+              }}>
+                ×{multiplier} {ar ? 'تضعيف' : 'expand'}
+              </span>
+            ) : (
+              <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.25)' }}>
+                {ar ? 'نطاق أصلي' : 'initial range'}
+              </span>
+            )}
+          </div>
+        );
+      })()}
+
       {/* ── Orders toggle ── */}
       <button className="mgb-orders-toggle" onClick={() => setShowOrders(v => !v)}>
         <span>{ar ? 'الأوامر النشطة' : 'Active Orders'}</span>
