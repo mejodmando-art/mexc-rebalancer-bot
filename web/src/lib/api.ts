@@ -6,10 +6,20 @@ export const API_BASE =
     ? (process.env.NEXT_PUBLIC_API_URL ?? '')
     : (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000');
 
+// Optional API auth key — set NEXT_PUBLIC_API_AUTH_KEY on Railway so the
+// frontend can reach protected /api/* endpoints when API_AUTH_KEY is enabled.
+const _AUTH_KEY = process.env.NEXT_PUBLIC_API_AUTH_KEY ?? '';
+
+function _headers(extra?: HeadersInit): HeadersInit {
+  const h: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (_AUTH_KEY) h['X-API-Key'] = _AUTH_KEY;
+  return { ...h, ...(extra as Record<string, string> | undefined) };
+}
+
 async function req<T>(path: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
     ...opts,
+    headers: _headers(opts?.headers),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
@@ -87,6 +97,7 @@ export const stopAndSellPortfolio = (id: number) =>
 export const startPortfolio      = (id: number) => req<{ ok: boolean; message: string }>(`/api/portfolios/${id}/start`, { method: 'POST' });
 export const stopPortfolio       = (id: number) => req<{ ok: boolean; message: string }>(`/api/portfolios/${id}/stop`,  { method: 'POST' });
 export const getPortfolioStatus  = (id: number) => req<{ portfolio_id: number; running: boolean; started_at: string | null; error: string | null }>(`/api/portfolios/${id}/status`);
+
 // ── Grid Bot ─────────────────────────────────────────────────────────────────
 export const listGridBots    = ()                    => req<any[]>('/api/grid-bots');
 export const getGridBot      = (id: number)          => req<any>(`/api/grid-bots/${id}`);
