@@ -130,20 +130,6 @@ export const getPortfolioAssets  = (id: number) => req<{
   mode: string; running: boolean; assets: any[];
 }>(`/api/portfolios/${id}/assets`);
 
-// ── OB Scanner ───────────────────────────────────────────────────────────────
-export const listOBScanners  = ()           => req<any[]>('/api/ob-scanners');
-export const getOBScanner    = (id: number) => req<any>(`/api/ob-scanners/${id}`);
-export const createOBScanner = (body: {
-  symbol: string;
-  timeframe?: string;
-  entry_usdt?: number;
-  tp1_pct?: number;
-  tp2_pct?: number;
-}) => req<{ ok: boolean; id: number }>('/api/ob-scanners', { method: 'POST', body: JSON.stringify(body) });
-export const stopOBScanner   = (id: number) => req<{ ok: boolean }>(`/api/ob-scanners/${id}/stop`,   { method: 'POST' });
-export const resumeOBScanner = (id: number) => req<{ ok: boolean }>(`/api/ob-scanners/${id}/resume`, { method: 'POST' });
-export const deleteOBScanner = (id: number) => req<{ ok: boolean }>(`/api/ob-scanners/${id}`,        { method: 'DELETE' });
-
 // ── Supertrend Scanner ───────────────────────────────────────────────────────
 export const listSupertrendScanners  = ()           => req<any[]>('/api/supertrend-scanners');
 export const getSupertrendScanner    = (id: number) => req<any>(`/api/supertrend-scanners/${id}`);

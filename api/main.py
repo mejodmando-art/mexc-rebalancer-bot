@@ -51,10 +51,6 @@ from database import (
     set_bot_running, get_running_portfolios,
     list_grid_bots, get_grid_bot, delete_grid_bot, get_grid_orders,
     get_should_run_grid_bots,
-    create_ob_scanner, list_ob_scanners, get_ob_scanner,
-    delete_ob_scanner, get_ob_trades, get_should_run_ob_scanners,
-    create_ob_detector, list_ob_detectors, get_ob_detector,
-    delete_ob_detector, get_ob_detector_trades, get_should_run_ob_detectors,
     create_supertrend_scanner, list_supertrend_scanners, get_supertrend_scanner,
     delete_supertrend_scanner, get_supertrend_trades, get_should_run_supertrend_scanners,
 )
@@ -62,14 +58,6 @@ from grid_bot import (
     start_grid_bot, stop_grid_bot, resume_grid_bot,
     get_grid_bot_status, is_running as grid_is_running,
     calculate_grid_range, calculate_grid_count,
-)
-from ob_scanner import (
-    start_ob_scanner, stop_ob_scanner, resume_ob_scanner,
-    get_ob_scanner_status, is_running as ob_is_running,
-)
-from order_block_detector import (
-    start_ob_detector, stop_ob_detector, resume_ob_detector,
-    get_ob_detector_status, is_ob_detector_running,
 )
 from supertrend_scanner import (
     start_supertrend_scanner, stop_supertrend_scanner, resume_supertrend_scanner,
@@ -352,34 +340,6 @@ async def lifespan(app):
             log.info("No grid bots flagged for auto-resume")
     except Exception as e:
         log.error("Lifespan startup error (grid bots): %s", e)
-
-    # ── Startup: resume OB scanners that were running before restart ──
-    try:
-        ob_ids = get_should_run_ob_scanners()
-        if ob_ids:
-            log.info("Auto-resuming %d OB scanner(s) after restart: %s", len(ob_ids), ob_ids)
-            for oid in ob_ids:
-                try:
-                    resume_ob_scanner(oid)
-                    log.info("Auto-resumed OB scanner %d", oid)
-                except Exception as e:
-                    log.error("Auto-resume failed for OB scanner %d: %s", oid, e)
-    except Exception as e:
-        log.error("Lifespan startup error (OB scanners): %s", e)
-
-    # ── Startup: resume OB detectors that were running before restart ──
-    try:
-        obd_ids = get_should_run_ob_detectors()
-        if obd_ids:
-            log.info("Auto-resuming %d OB detector(s) after restart: %s", len(obd_ids), obd_ids)
-            for did in obd_ids:
-                try:
-                    resume_ob_detector(did)
-                    log.info("Auto-resumed OB detector %d", did)
-                except Exception as e:
-                    log.error("Auto-resume failed for OB detector %d: %s", did, e)
-    except Exception as e:
-        log.error("Lifespan startup error (OB detectors): %s", e)
 
     # ── Startup: resume Supertrend scanners that were running before restart ──
     try:
@@ -1765,151 +1725,6 @@ def api_delete_grid_bot(bot_id: int):
     try:
         stop_grid_bot(bot_id)
         delete_grid_bot(bot_id)
-        return {"ok": True}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ---------------------------------------------------------------------------
-# OB Scanner endpoints
-# ---------------------------------------------------------------------------
-
-class OBScannerCreate(BaseModel):
-    # symbol is ignored — scanner always sweeps the full market
-    timeframe: Optional[str] = "15m"
-    entry_usdt: Optional[float] = 15.0
-    tp1_pct: Optional[float] = 5.0
-    tp2_pct: Optional[float] = 5.0
-
-
-@app.get("/api/ob-scanners")
-def api_list_ob_scanners():
-    scanners = list_ob_scanners()
-    for s in scanners:
-        s["running"] = ob_is_running(s["id"])
-        status = get_ob_scanner_status(s["id"])
-        s["last_symbol"]    = status.get("last_symbol", "")
-        s["scanned"]        = status.get("scanned", 0)
-        s["open_positions"] = status.get("open_positions", 0)
-    return scanners
-
-
-@app.post("/api/ob-scanners")
-def api_create_ob_scanner(body: OBScannerCreate):
-    try:
-        scanner_id = create_ob_scanner(
-            symbol="MARKET",          # market-wide — no single symbol
-            timeframe=body.timeframe or "15m",
-            entry_usdt=body.entry_usdt or 15.0,
-            tp1_pct=body.tp1_pct or 5.0,
-            tp2_pct=body.tp2_pct or 5.0,
-        )
-        start_ob_scanner(scanner_id)
-        return {"id": scanner_id, "ok": True}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/ob-scanners/{scanner_id}")
-def api_get_ob_scanner(scanner_id: int):
-    status = get_ob_scanner_status(scanner_id)
-    if not status or status.get("error") == "not found":
-        raise HTTPException(status_code=404, detail="Scanner not found")
-    trades = get_ob_trades(scanner_id)
-    status["trades"]  = trades
-    status["running"] = ob_is_running(scanner_id)
-    return status
-
-
-@app.post("/api/ob-scanners/{scanner_id}/stop")
-def api_stop_ob_scanner(scanner_id: int):
-    stop_ob_scanner(scanner_id)
-    return {"ok": True}
-
-
-@app.post("/api/ob-scanners/{scanner_id}/resume")
-def api_resume_ob_scanner(scanner_id: int):
-    ok = resume_ob_scanner(scanner_id)
-    return {"ok": ok}
-
-
-@app.delete("/api/ob-scanners/{scanner_id}")
-def api_delete_ob_scanner(scanner_id: int):
-    try:
-        stop_ob_scanner(scanner_id)
-        delete_ob_scanner(scanner_id)
-        return {"ok": True}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ---------------------------------------------------------------------------
-# OB Detector — ICT/SMC Order Block engine (5-min market-wide sweep)
-# ---------------------------------------------------------------------------
-
-class OBDetectorCreate(BaseModel):
-    timeframe:     Optional[str]   = "5m"
-    entry_usdt:    Optional[float] = 15.0
-    tp1_pct:       Optional[float] = 1.0
-    tp2_pct:       Optional[float] = 2.0
-    use_stop_loss: Optional[bool]  = True
-
-
-@app.get("/api/ob-detectors")
-def api_list_ob_detectors():
-    detectors = list_ob_detectors()
-    for d in detectors:
-        d["running"]        = is_ob_detector_running(d["id"])
-        status              = get_ob_detector_status(d["id"])
-        d["last_symbol"]    = status.get("last_symbol", "")
-        d["scanned"]        = status.get("scanned", 0)
-        d["open_positions"] = status.get("open_positions", 0)
-    return detectors
-
-
-@app.post("/api/ob-detectors")
-def api_create_ob_detector(body: OBDetectorCreate):
-    try:
-        detector_id = create_ob_detector(
-            timeframe=body.timeframe or "5m",
-            entry_usdt=body.entry_usdt or 15.0,
-            tp1_pct=body.tp1_pct or 1.0,
-            tp2_pct=body.tp2_pct or 2.0,
-            use_stop_loss=body.use_stop_loss if body.use_stop_loss is not None else True,
-        )
-        start_ob_detector(detector_id)
-        return {"id": detector_id, "ok": True}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/ob-detectors/{detector_id}")
-def api_get_ob_detector(detector_id: int):
-    status = get_ob_detector_status(detector_id)
-    if not status or status.get("error") == "not found":
-        raise HTTPException(status_code=404, detail="Detector not found")
-    status["trades"]  = get_ob_detector_trades(detector_id)
-    status["running"] = is_ob_detector_running(detector_id)
-    return status
-
-
-@app.post("/api/ob-detectors/{detector_id}/stop")
-def api_stop_ob_detector(detector_id: int):
-    stop_ob_detector(detector_id)
-    return {"ok": True}
-
-
-@app.post("/api/ob-detectors/{detector_id}/resume")
-def api_resume_ob_detector(detector_id: int):
-    ok = resume_ob_detector(detector_id)
-    return {"ok": ok}
-
-
-@app.delete("/api/ob-detectors/{detector_id}")
-def api_delete_ob_detector(detector_id: int):
-    try:
-        stop_ob_detector(detector_id)
-        delete_ob_detector(detector_id)
         return {"ok": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

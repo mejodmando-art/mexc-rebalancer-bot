@@ -255,18 +255,9 @@ export const t: Record<string, Record<Lang, string>> = {
   riskNoteDesc:         { ar: 'هذه الاستراتيجية تعتمد على إدارة الحجم بدلاً من الستوب. لا تخاطر بأكثر من 1-2% من رأس المال في أي صفقة. الانضباط في التنفيذ أهم من دقة التحليل.', en: 'This strategy relies on position sizing instead of a stop loss. Never risk more than 1-2% of capital per trade. Execution discipline matters more than analytical precision.' },
 
   // OB Scanner live panel
-  obScannerTitle:     { ar: 'سكانر السوق الكامل',        en: 'Full Market Scanner' },
-  obScannerDesc:      { ar: 'يمسح كل عملات USDT ويدخل تلقائياً عند تحقق شروط الأوردر بلوك', en: 'Scans all USDT pairs and enters automatically when OB conditions align' },
   newScanner:         { ar: '+ سكانر جديد',              en: '+ New Scanner' },
-  scannerTimeframe:   { ar: 'الفريم الزمني',             en: 'Timeframe' },
-  scannerEntry:       { ar: 'مبلغ الدخول (USDT)',        en: 'Entry Amount (USDT)' },
   scannerTP1:         { ar: 'هدف 1 (%)',                 en: 'Target 1 (%)' },
   scannerTP2:         { ar: 'هدف 2 (%)',                 en: 'Target 2 (%)' },
-  scannerCreate:      { ar: 'تشغيل السكانر',             en: 'Start Scanner' },
-  scannerScanning:    { ar: 'يمسح السوق...',             en: 'Scanning market...' },
-  scannerInPosition:  { ar: 'في صفقة',                   en: 'In Position' },
-  scannerStopped:     { ar: 'متوقف',                     en: 'Stopped' },
-  scannerEntry2:      { ar: 'سعر الدخول',                en: 'Entry Price' },
   scannerQty:         { ar: 'الكمية',                    en: 'Quantity' },
   scannerPnl:         { ar: 'الربح المحقق',              en: 'Realised PnL' },
   scannerTP1Hit:      { ar: 'هدف 1 ✅',                  en: 'TP1 ✅' },
@@ -281,8 +272,6 @@ export const t: Record<string, Record<Lang, string>> = {
   condBOSShort:       { ar: 'BOS/CHoCH',                 en: 'BOS/CHoCH' },
   condFreshShort:     { ar: 'OB طازج',                   en: 'Fresh OB' },
   condFFGShort:       { ar: 'FFG',                       en: 'FFG' },
-  noScanners:         { ar: 'لا توجد سكانرات بعد',       en: 'No scanners yet' },
-  noScannersDesc:     { ar: 'أنشئ سكانراً لمسح كل السوق تلقائياً', en: 'Create a scanner to sweep the entire market automatically' },
 
   stScannerTitle:     { ar: 'سكانر Supertrend',           en: 'Supertrend Scanner' },
   stScannerDesc:      { ar: 'سكالبينج 5 دقائق — Supertrend + EMA + RSI + Volume', en: '5-min scalping — Supertrend + EMA + RSI + Volume' },
@@ -297,7 +286,6 @@ export const t: Record<string, Record<Lang, string>> = {
   scannerScannedCount:{ ar: 'عملات فُحصت',              en: 'pairs scanned' },
   scannerOpenPos:     { ar: 'صفقات مفتوحة',             en: 'open positions' },
   scannerMarket:      { ar: 'كل السوق',                  en: 'Full Market' },
-  scannerEntryOptional:{ ar: 'مبلغ الدخول (افتراضي $15)', en: 'Entry amount (default $15)' },
 
   // Timed intervals
   interval30m:      { ar: '30 دقيقة',          en: '30 min' },
