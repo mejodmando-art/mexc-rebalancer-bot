@@ -54,7 +54,7 @@ TIMED_FREQUENCY_MINUTES: dict[str, int] = {
 }
 VALID_ALLOCATION_MODES = {"ai_balance", "equal", "market_cap"}
 MIN_ASSETS = 1
-MAX_ASSETS = 12
+MAX_ASSETS = 20
 
 
 def is_paper_trading(cfg: dict) -> bool:
