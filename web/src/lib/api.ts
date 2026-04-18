@@ -141,15 +141,3 @@ export const getPortfolioAssets  = (id: number) => req<{
   mode: string; running: boolean; assets: any[];
 }>(`/api/portfolios/${id}/assets`);
 
-// ── Supertrend Scanner ───────────────────────────────────────────────────────
-export const listSupertrendScanners  = ()           => req<any[]>('/api/supertrend-scanners');
-export const getSupertrendScanner    = (id: number) => req<any>(`/api/supertrend-scanners/${id}`);
-export const createSupertrendScanner = (body: {
-  entry_usdt?: number;
-  tp1_pct?: number;
-  tp2_pct?: number;
-  tp3_pct?: number;
-}) => req<{ ok: boolean; id: number }>('/api/supertrend-scanners', { method: 'POST', body: JSON.stringify(body) });
-export const stopSupertrendScanner   = (id: number) => req<{ ok: boolean }>(`/api/supertrend-scanners/${id}/stop`,   { method: 'POST' });
-export const resumeSupertrendScanner = (id: number) => req<{ ok: boolean }>(`/api/supertrend-scanners/${id}/resume`, { method: 'POST' });
-export const deleteSupertrendScanner = (id: number) => req<{ ok: boolean }>(`/api/supertrend-scanners/${id}`,        { method: 'DELETE' });

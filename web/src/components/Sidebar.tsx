@@ -1,9 +1,9 @@
 'use client';
 
-import { TrendingUp, ChevronRight, LayoutDashboard, Briefcase, PlusCircle, Grid3x3, BookOpen } from 'lucide-react';
+import { TrendingUp, ChevronRight, LayoutDashboard, Briefcase, PlusCircle, Grid3x3 } from 'lucide-react';
 import { Lang, tr } from '../lib/i18n';
 
-type Tab = 'dashboard' | 'portfolios' | 'create' | 'grid' | 'strategy';
+type Tab = 'dashboard' | 'portfolios' | 'create' | 'grid';
 
 interface SidebarProps {
   active: Tab;
@@ -17,7 +17,6 @@ const TABS: { key: Tab; icon: React.ElementType; labelKey: string; color: string
   { key: 'portfolios', icon: Briefcase,        labelKey: 'myPortfolios', color: '#60A5FA', glow: 'rgba(96,165,250,0.4)' },
   { key: 'create',     icon: PlusCircle,       labelKey: 'createBot',    color: '#A78BFA', glow: 'rgba(167,139,250,0.4)' },
   { key: 'grid',       icon: Grid3x3,          labelKey: 'gridBot',      color: '#F0B90B', glow: 'rgba(240,185,11,0.4)' },
-  { key: 'strategy',   icon: BookOpen,         labelKey: 'strategyTab',  color: '#F472B6', glow: 'rgba(244,114,182,0.4)' },
 ];
 
 export default function Sidebar({ active, onNav, botRunning, lang }: SidebarProps) {
