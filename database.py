@@ -225,7 +225,8 @@ def init_db() -> None:
                 ts_created  TEXT    NOT NULL,
                 name        TEXT    NOT NULL,
                 config_json TEXT    NOT NULL,
-                active      INTEGER NOT NULL DEFAULT 0
+                active      INTEGER NOT NULL DEFAULT 0,
+                running     INTEGER NOT NULL DEFAULT 0
             )
             """,
             """
@@ -289,6 +290,7 @@ def init_db() -> None:
                 "ALTER TABLE portfolio_snapshots ADD COLUMN IF NOT EXISTS assets_json TEXT NOT NULL DEFAULT '[]'",
                 "ALTER TABLE portfolio_snapshots ADD COLUMN IF NOT EXISTS portfolio_id INTEGER NOT NULL DEFAULT 1",
                 "ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS bot_running INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS running INTEGER NOT NULL DEFAULT 0",
                 "ALTER TABLE grid_bots ADD COLUMN IF NOT EXISTS should_run INTEGER NOT NULL DEFAULT 0",
                 "ALTER TABLE grid_bots ADD COLUMN IF NOT EXISTS mode TEXT NOT NULL DEFAULT 'normal'",
                 "ALTER TABLE grid_bots ADD COLUMN IF NOT EXISTS avg_buy_price REAL NOT NULL DEFAULT 0",
@@ -331,7 +333,8 @@ def init_db() -> None:
                     ts_created  TEXT    NOT NULL,
                     name        TEXT    NOT NULL,
                     config_json TEXT    NOT NULL,
-                    active      INTEGER NOT NULL DEFAULT 0
+                    active      INTEGER NOT NULL DEFAULT 0,
+                    running     INTEGER NOT NULL DEFAULT 0
                 );
                 CREATE TABLE IF NOT EXISTS grid_bots (
                     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -364,66 +367,26 @@ def init_db() -> None:
                 );
             """)
         # SQLite doesn't support IF NOT EXISTS in ALTER TABLE, so we try/except
-        try:
-            with _conn() as conn:
-                conn.execute("ALTER TABLE portfolios ADD COLUMN bot_running INTEGER NOT NULL DEFAULT 0")
-        except Exception:
-            pass  # column already exists
-        try:
-            with _conn() as conn:
-                conn.execute("ALTER TABLE grid_bots ADD COLUMN should_run INTEGER NOT NULL DEFAULT 0")
-        except Exception:
-            pass
-        try:
-            with _conn() as conn:
-                conn.execute("ALTER TABLE grid_bots ADD COLUMN mode TEXT NOT NULL DEFAULT 'normal'")
-        except Exception:
-            pass
-        try:
-            with _conn() as conn:
-                conn.execute("ALTER TABLE grid_bots ADD COLUMN avg_buy_price REAL NOT NULL DEFAULT 0")
-        except Exception:
-            pass
-        try:
-            with _conn() as conn:
-                conn.execute("ALTER TABLE grid_bots ADD COLUMN base_qty REAL NOT NULL DEFAULT 0")
-        except Exception:
-            pass
-        try:
-            with _conn() as conn:
-                conn.execute("ALTER TABLE grid_bots ADD COLUMN unrealized_pnl REAL NOT NULL DEFAULT 0")
-        except Exception:
-            pass
-        try:
-            with _conn() as conn:
-                conn.execute("ALTER TABLE grid_bots ADD COLUMN realised_profit REAL NOT NULL DEFAULT 0")
-        except Exception:
-            pass
-        try:
-            with _conn() as conn:
-                conn.execute("ALTER TABLE grid_bots ADD COLUMN shift_count INTEGER NOT NULL DEFAULT 0")
-        except Exception:
-            pass
-        try:
-            with _conn() as conn:
-                conn.execute("ALTER TABLE grid_bots ADD COLUMN initial_range_pct REAL NOT NULL DEFAULT 5.0")
-        except Exception:
-            pass
-        try:
-            with _conn() as conn:
-                conn.execute("ALTER TABLE grid_bots ADD COLUMN lower_pct REAL NOT NULL DEFAULT 5.0")
-        except Exception:
-            pass
-        try:
-            with _conn() as conn:
-                conn.execute("ALTER TABLE grid_bots ADD COLUMN upper_pct REAL NOT NULL DEFAULT 5.0")
-        except Exception:
-            pass
-        try:
-            with _conn() as conn:
-                conn.execute("ALTER TABLE grid_bots ADD COLUMN expand_direction TEXT NOT NULL DEFAULT 'both'")
-        except Exception:
-            pass
+        for _col_sql in [
+            "ALTER TABLE portfolios ADD COLUMN bot_running INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE portfolios ADD COLUMN running INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE grid_bots ADD COLUMN should_run INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE grid_bots ADD COLUMN mode TEXT NOT NULL DEFAULT 'normal'",
+            "ALTER TABLE grid_bots ADD COLUMN avg_buy_price REAL NOT NULL DEFAULT 0",
+            "ALTER TABLE grid_bots ADD COLUMN base_qty REAL NOT NULL DEFAULT 0",
+            "ALTER TABLE grid_bots ADD COLUMN unrealized_pnl REAL NOT NULL DEFAULT 0",
+            "ALTER TABLE grid_bots ADD COLUMN realised_profit REAL NOT NULL DEFAULT 0",
+            "ALTER TABLE grid_bots ADD COLUMN shift_count INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE grid_bots ADD COLUMN initial_range_pct REAL NOT NULL DEFAULT 5.0",
+            "ALTER TABLE grid_bots ADD COLUMN lower_pct REAL NOT NULL DEFAULT 5.0",
+            "ALTER TABLE grid_bots ADD COLUMN upper_pct REAL NOT NULL DEFAULT 5.0",
+            "ALTER TABLE grid_bots ADD COLUMN expand_direction TEXT NOT NULL DEFAULT 'both'",
+        ]:
+            try:
+                with _conn() as conn:
+                    conn.execute(_col_sql)
+            except Exception:
+                pass  # column already exists
         log.info("SQLite tables ready: %s", _SQLITE_PATH)
 
 
@@ -438,7 +401,8 @@ def record_rebalance(mode: str, total_usdt: float, details: list,
             cur = conn.cursor()
             cur.execute(
                 _q("INSERT INTO rebalance_history (ts, mode, total_usdt, details, paper, portfolio_id) VALUES (?,?,?,?,?,?)"),
-                (datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"), mode, total_usdt, json.dumps(details), int(paper), portfolio_id),
+                (datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"), mode, total_usdt,
+                 json.dumps(details), int(paper), portfolio_id),
             )
     except Exception as e:
         log.error("record_rebalance failed: %s", e)
@@ -566,6 +530,36 @@ def set_active_portfolio(portfolio_id: int) -> None:
             cur.execute(_q("UPDATE portfolios SET active=1 WHERE id=?"), (portfolio_id,))
     except Exception as e:
         log.error("set_active_portfolio failed: %s", e)
+
+
+def set_bot_running(portfolio_id: int, running: bool) -> None:
+    """Persist the running state of a portfolio's bot loop so it can be
+    resumed automatically after a Railway restart."""
+    try:
+        with _conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                _q("UPDATE portfolios SET running=? WHERE id=?"),
+                (1 if running else 0, portfolio_id),
+            )
+    except Exception as e:
+        log.error("set_bot_running failed: %s", e)
+
+
+def get_running_portfolios() -> list:
+    """Return list of portfolio IDs whose bot loop was running before the
+    last shutdown (used by the lifespan handler for auto-resume)."""
+    try:
+        with _conn() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT id FROM portfolios WHERE running=1")
+            rows = cur.fetchall()
+        if _USE_POSTGRES:
+            return [r[0] for r in rows]
+        return [r["id"] for r in rows]
+    except Exception as e:
+        log.error("get_running_portfolios failed: %s", e)
+        return []
 
 
 def delete_portfolio(portfolio_id: int) -> None:
