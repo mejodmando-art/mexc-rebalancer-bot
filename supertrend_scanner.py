@@ -37,6 +37,8 @@ SCAN_INTERVAL   = 300   # seconds between full market sweeps (5 min = one 5m can
 INTER_SYMBOL    = 0.35  # rate-limit guard between symbols
 CANDLE_LIMIT    = 120   # candles per symbol (enough for all indicators)
 POSITION_POLL   = 15    # seconds between TP checks
+MAX_HOLD_HOURS  = 4     # force-close position after 4 hours (no-SL guard)
+MAX_SYMBOLS     = 300   # only scan top-300 USDT pairs by 24h volume
 
 # Supertrend parameters
 ST_PERIOD    = 10
@@ -253,6 +255,7 @@ class _PositionManager:
                 "tp1_hit":     False,
                 "tp2_hit":     False,
                 "single_exit": single_exit,
+                "entry_time":  datetime.utcnow(),
             }
 
     def has(self, symbol: str) -> bool:
@@ -283,6 +286,27 @@ class _PositionManager:
         with self._lock:
             pos = self._positions.get(symbol)
         if not pos:
+            return
+
+        # ── Max hold time guard (no-SL fallback) ─────────────────────────────
+        entry_time = pos.get("entry_time")
+        if entry_time and (datetime.utcnow() - entry_time).total_seconds() > MAX_HOLD_HOURS * 3600:
+            price    = self.client.get_price(symbol)
+            sell_qty = round(pos["base_qty"], pos["qty_prec"])
+            if sell_qty > 0:
+                try:
+                    self.client.place_market_sell(symbol, sell_qty, pos["qty_prec"])
+                    pnl = (price - pos["entry_price"]) * sell_qty
+                    self._realised += pnl
+                    with self._lock:
+                        self._positions.pop(symbol, None)
+                    record_supertrend_trade(self.scanner_id, "SELL", price, sell_qty,
+                                            price * sell_qty, pnl=pnl, label=f"MAX_HOLD:{symbol}")
+                    log.info("[ST#%d] MAX_HOLD exit %s @ %.6f pnl=%.4f",
+                             self.scanner_id, symbol, price, pnl)
+                    self._persist()
+                except Exception as e:
+                    log.error("[ST#%d] MAX_HOLD sell failed %s: %s", self.scanner_id, symbol, e)
             return
 
         price       = self.client.get_price(symbol)
@@ -391,13 +415,25 @@ class _PositionManager:
 # ---------------------------------------------------------------------------
 
 def _fetch_all_usdt_symbols(client: MEXCClient) -> list[str]:
+    """Return top MAX_SYMBOLS USDT pairs sorted by 24h quote volume.
+
+    Fetching only high-volume pairs dramatically reduces sweep time
+    (300 × 0.35 s ≈ 105 s vs 1500 × 0.35 s ≈ 525 s) and keeps the
+    scanner focused on liquid coins where signals are actionable.
+    """
     try:
-        data = client._get("/api/v3/exchangeInfo")
-        return [
-            s["symbol"]
-            for s in data.get("symbols", [])
-            if s["symbol"].endswith("USDT") and s.get("status") == "1"
+        tickers = client._get("/api/v3/ticker/24hr")
+        usdt_pairs = [
+            t for t in tickers
+            if isinstance(t, dict)
+            and t.get("symbol", "").endswith("USDT")
+            and float(t.get("quoteVolume", 0)) > 0
         ]
+        usdt_pairs.sort(key=lambda t: float(t.get("quoteVolume", 0)), reverse=True)
+        symbols = [t["symbol"] for t in usdt_pairs[:MAX_SYMBOLS]]
+        log.info("[ST] Scanning top %d USDT pairs by volume (of %d total)",
+                 len(symbols), len(usdt_pairs))
+        return symbols
     except Exception as e:
         log.error("[ST] Failed to fetch symbol list: %s", e)
         return []
