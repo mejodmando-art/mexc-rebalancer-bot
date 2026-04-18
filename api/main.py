@@ -55,6 +55,8 @@ from database import (
     delete_ob_scanner, get_ob_trades, get_should_run_ob_scanners,
     create_ob_detector, list_ob_detectors, get_ob_detector,
     delete_ob_detector, get_ob_detector_trades, get_should_run_ob_detectors,
+    create_supertrend_scanner, list_supertrend_scanners, get_supertrend_scanner,
+    delete_supertrend_scanner, get_supertrend_trades, get_should_run_supertrend_scanners,
 )
 from grid_bot import (
     start_grid_bot, stop_grid_bot, resume_grid_bot,
@@ -68,6 +70,10 @@ from ob_scanner import (
 from order_block_detector import (
     start_ob_detector, stop_ob_detector, resume_ob_detector,
     get_ob_detector_status, is_ob_detector_running,
+)
+from supertrend_scanner import (
+    start_supertrend_scanner, stop_supertrend_scanner, resume_supertrend_scanner,
+    get_supertrend_scanner_status, is_supertrend_running,
 )
 from mexc_client import MEXCClient
 from smart_portfolio import (
@@ -374,6 +380,20 @@ async def lifespan(app):
                     log.error("Auto-resume failed for OB detector %d: %s", did, e)
     except Exception as e:
         log.error("Lifespan startup error (OB detectors): %s", e)
+
+    # ── Startup: resume Supertrend scanners that were running before restart ──
+    try:
+        st_ids = get_should_run_supertrend_scanners()
+        if st_ids:
+            log.info("Auto-resuming %d Supertrend scanner(s): %s", len(st_ids), st_ids)
+            for sid in st_ids:
+                try:
+                    resume_supertrend_scanner(sid)
+                    log.info("Auto-resumed Supertrend scanner %d", sid)
+                except Exception as e:
+                    log.error("Auto-resume failed for Supertrend scanner %d: %s", sid, e)
+    except Exception as e:
+        log.error("Lifespan startup error (Supertrend scanners): %s", e)
 
     yield
     # ── Shutdown: signal all loops to stop (Railway sends SIGTERM) ──
@@ -1890,6 +1910,76 @@ def api_delete_ob_detector(detector_id: int):
     try:
         stop_ob_detector(detector_id)
         delete_ob_detector(detector_id)
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# Supertrend Scanner — 5-min scalping (EMA + RSI + Volume + Supertrend)
+# ---------------------------------------------------------------------------
+
+class SupertrendScannerCreate(BaseModel):
+    entry_usdt: Optional[float] = 5.0
+    tp1_pct:    Optional[float] = 1.0
+    tp2_pct:    Optional[float] = 1.5
+    tp3_pct:    Optional[float] = 2.5
+
+
+@app.get("/api/supertrend-scanners")
+def api_list_supertrend_scanners():
+    scanners = list_supertrend_scanners()
+    for s in scanners:
+        s["running"] = is_supertrend_running(s["id"])
+        status = get_supertrend_scanner_status(s["id"])
+        s["last_symbol"]    = status.get("last_symbol", "")
+        s["scanned"]        = status.get("scanned", 0)
+        s["open_positions"] = status.get("open_positions", 0)
+    return scanners
+
+
+@app.post("/api/supertrend-scanners")
+def api_create_supertrend_scanner(body: SupertrendScannerCreate):
+    try:
+        scanner_id = create_supertrend_scanner(
+            entry_usdt=body.entry_usdt or 5.0,
+            tp1_pct=body.tp1_pct or 1.0,
+            tp2_pct=body.tp2_pct or 1.5,
+            tp3_pct=body.tp3_pct or 2.5,
+        )
+        start_supertrend_scanner(scanner_id)
+        return {"id": scanner_id, "ok": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/supertrend-scanners/{scanner_id}")
+def api_get_supertrend_scanner(scanner_id: int):
+    status = get_supertrend_scanner_status(scanner_id)
+    if not status or status.get("error") == "not found":
+        raise HTTPException(status_code=404, detail="Scanner not found")
+    status["trades"]  = get_supertrend_trades(scanner_id)
+    status["running"] = is_supertrend_running(scanner_id)
+    return status
+
+
+@app.post("/api/supertrend-scanners/{scanner_id}/stop")
+def api_stop_supertrend_scanner(scanner_id: int):
+    stop_supertrend_scanner(scanner_id)
+    return {"ok": True}
+
+
+@app.post("/api/supertrend-scanners/{scanner_id}/resume")
+def api_resume_supertrend_scanner(scanner_id: int):
+    ok = resume_supertrend_scanner(scanner_id)
+    return {"ok": ok}
+
+
+@app.delete("/api/supertrend-scanners/{scanner_id}")
+def api_delete_supertrend_scanner(scanner_id: int):
+    try:
+        stop_supertrend_scanner(scanner_id)
+        delete_supertrend_scanner(scanner_id)
         return {"ok": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

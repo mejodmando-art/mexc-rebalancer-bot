@@ -1435,3 +1435,283 @@ def delete_ob_detector(detector_id: int) -> None:
             )
     except Exception as e:
         log.error("delete_ob_detector failed: %s", e)
+
+
+# ---------------------------------------------------------------------------
+# Supertrend Scanner — DB helpers
+# ---------------------------------------------------------------------------
+
+def _init_supertrend_tables() -> None:
+    """Create supertrend_scanners and supertrend_trades tables if they don't exist."""
+    try:
+        with _conn() as conn:
+            cur = conn.cursor()
+            if _USE_POSTGRES:
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS supertrend_scanners (
+                        id            SERIAL PRIMARY KEY,
+                        ts_created    TEXT,
+                        status        TEXT    DEFAULT 'stopped',
+                        should_run    INTEGER DEFAULT 0,
+                        entry_usdt    REAL    DEFAULT 5.0,
+                        tp1_pct       REAL    DEFAULT 1.0,
+                        tp2_pct       REAL    DEFAULT 1.5,
+                        tp3_pct       REAL    DEFAULT 2.5,
+                        symbol        TEXT    DEFAULT '',
+                        entry_price   REAL    DEFAULT 0,
+                        base_qty      REAL    DEFAULT 0,
+                        tp1_hit       INTEGER DEFAULT 0,
+                        tp2_hit       INTEGER DEFAULT 0,
+                        realised_pnl  REAL    DEFAULT 0,
+                        conditions_json TEXT  DEFAULT '{}'
+                    )
+                """)
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS supertrend_trades (
+                        id          SERIAL PRIMARY KEY,
+                        scanner_id  INTEGER,
+                        ts          TEXT,
+                        side        TEXT,
+                        price       REAL,
+                        qty         REAL,
+                        usdt_value  REAL,
+                        pnl         REAL DEFAULT 0,
+                        label       TEXT DEFAULT ''
+                    )
+                """)
+            else:
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS supertrend_scanners (
+                        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                        ts_created    TEXT,
+                        status        TEXT    DEFAULT 'stopped',
+                        should_run    INTEGER DEFAULT 0,
+                        entry_usdt    REAL    DEFAULT 5.0,
+                        tp1_pct       REAL    DEFAULT 1.0,
+                        tp2_pct       REAL    DEFAULT 1.5,
+                        tp3_pct       REAL    DEFAULT 2.5,
+                        symbol        TEXT    DEFAULT '',
+                        entry_price   REAL    DEFAULT 0,
+                        base_qty      REAL    DEFAULT 0,
+                        tp1_hit       INTEGER DEFAULT 0,
+                        tp2_hit       INTEGER DEFAULT 0,
+                        realised_pnl  REAL    DEFAULT 0,
+                        conditions_json TEXT  DEFAULT '{}'
+                    )
+                """)
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS supertrend_trades (
+                        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                        scanner_id  INTEGER,
+                        ts          TEXT,
+                        side        TEXT,
+                        price       REAL,
+                        qty         REAL,
+                        usdt_value  REAL,
+                        pnl         REAL DEFAULT 0,
+                        label       TEXT DEFAULT ''
+                    )
+                """)
+    except Exception as e:
+        log.error("_init_supertrend_tables failed: %s", e)
+
+
+def create_supertrend_scanner(
+    entry_usdt: float = 5.0,
+    tp1_pct:    float = 1.0,
+    tp2_pct:    float = 1.5,
+    tp3_pct:    float = 2.5,
+) -> int:
+    _init_supertrend_tables()
+    ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        with _conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                _q(
+                    "INSERT INTO supertrend_scanners "
+                    "(ts_created,entry_usdt,tp1_pct,tp2_pct,tp3_pct) "
+                    "VALUES (?,?,?,?,?)"
+                ),
+                (ts, entry_usdt, tp1_pct, tp2_pct, tp3_pct),
+            )
+            if _USE_POSTGRES:
+                cur.execute("SELECT lastval()")
+            else:
+                cur.execute("SELECT last_insert_rowid()")
+            return cur.fetchone()[0]
+    except Exception as e:
+        log.error("create_supertrend_scanner failed: %s", e)
+        return -1
+
+
+def list_supertrend_scanners() -> list:
+    _init_supertrend_tables()
+    try:
+        with _conn() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT * FROM supertrend_scanners ORDER BY id DESC")
+            return _rows_to_dicts(cur.fetchall(), cur)
+    except Exception as e:
+        log.error("list_supertrend_scanners failed: %s", e)
+        return []
+
+
+def get_supertrend_scanner(scanner_id: int) -> dict | None:
+    _init_supertrend_tables()
+    try:
+        with _conn() as conn:
+            cur = conn.cursor()
+            cur.execute(_q("SELECT * FROM supertrend_scanners WHERE id=?"), (scanner_id,))
+            rows = _rows_to_dicts(cur.fetchall(), cur)
+            if not rows:
+                return None
+            row = rows[0]
+            try:
+                row["conditions"] = json.loads(row.get("conditions_json") or "{}")
+            except Exception:
+                row["conditions"] = {}
+            return row
+    except Exception as e:
+        log.error("get_supertrend_scanner failed: %s", e)
+        return None
+
+
+def update_supertrend_scanner_status(scanner_id: int, status: str) -> None:
+    try:
+        with _conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                _q("UPDATE supertrend_scanners SET status=? WHERE id=?"),
+                (status, scanner_id),
+            )
+    except Exception as e:
+        log.error("update_supertrend_scanner_status failed: %s", e)
+
+
+def update_supertrend_position(
+    scanner_id:   int,
+    entry_price:  float,
+    base_qty:     float,
+    tp1_hit:      bool,
+    tp2_hit:      bool,
+    realised_pnl: float,
+    conditions:   dict | None = None,
+    symbol:       str = "",
+) -> None:
+    try:
+        with _conn() as conn:
+            cur = conn.cursor()
+            if conditions is not None:
+                cj = json.dumps(conditions)
+                if symbol:
+                    cur.execute(
+                        _q(
+                            "UPDATE supertrend_scanners "
+                            "SET entry_price=?,base_qty=?,tp1_hit=?,tp2_hit=?,"
+                            "realised_pnl=?,conditions_json=?,symbol=? WHERE id=?"
+                        ),
+                        (entry_price, base_qty, int(tp1_hit), int(tp2_hit),
+                         realised_pnl, cj, symbol, scanner_id),
+                    )
+                else:
+                    cur.execute(
+                        _q(
+                            "UPDATE supertrend_scanners "
+                            "SET entry_price=?,base_qty=?,tp1_hit=?,tp2_hit=?,"
+                            "realised_pnl=?,conditions_json=? WHERE id=?"
+                        ),
+                        (entry_price, base_qty, int(tp1_hit), int(tp2_hit),
+                         realised_pnl, cj, scanner_id),
+                    )
+            else:
+                cur.execute(
+                    _q(
+                        "UPDATE supertrend_scanners "
+                        "SET entry_price=?,base_qty=?,tp1_hit=?,tp2_hit=?,"
+                        "realised_pnl=? WHERE id=?"
+                    ),
+                    (entry_price, base_qty, int(tp1_hit), int(tp2_hit),
+                     realised_pnl, scanner_id),
+                )
+    except Exception as e:
+        log.error("update_supertrend_position failed: %s", e)
+
+
+def record_supertrend_trade(
+    scanner_id: int,
+    side:       str,
+    price:      float,
+    qty:        float,
+    usdt_value: float,
+    pnl:        float = 0.0,
+    label:      str   = "",
+) -> None:
+    try:
+        _init_supertrend_tables()
+        ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        with _conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                _q(
+                    "INSERT INTO supertrend_trades "
+                    "(scanner_id,ts,side,price,qty,usdt_value,pnl,label) "
+                    "VALUES (?,?,?,?,?,?,?,?)"
+                ),
+                (scanner_id, ts, side, price, qty, usdt_value, pnl, label),
+            )
+    except Exception as e:
+        log.error("record_supertrend_trade failed: %s", e)
+
+
+def get_supertrend_trades(scanner_id: int) -> list:
+    _init_supertrend_tables()
+    try:
+        with _conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                _q("SELECT * FROM supertrend_trades WHERE scanner_id=? ORDER BY id DESC"),
+                (scanner_id,),
+            )
+            return _rows_to_dicts(cur.fetchall(), cur)
+    except Exception as e:
+        log.error("get_supertrend_trades failed: %s", e)
+        return []
+
+
+def set_supertrend_should_run(scanner_id: int, should_run: bool) -> None:
+    try:
+        with _conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                _q("UPDATE supertrend_scanners SET should_run=? WHERE id=?"),
+                (int(should_run), scanner_id),
+            )
+    except Exception as e:
+        log.error("set_supertrend_should_run failed: %s", e)
+
+
+def get_should_run_supertrend_scanners() -> list[int]:
+    _init_supertrend_tables()
+    try:
+        with _conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT id FROM supertrend_scanners WHERE should_run=1 AND status != 'deleted'"
+            )
+            return [r[0] for r in cur.fetchall()]
+    except Exception as e:
+        log.error("get_should_run_supertrend_scanners failed: %s", e)
+        return []
+
+
+def delete_supertrend_scanner(scanner_id: int) -> None:
+    try:
+        with _conn() as conn:
+            cur = conn.cursor()
+            cur.execute(_q("DELETE FROM supertrend_scanners WHERE id=?"), (scanner_id,))
+            cur.execute(
+                _q("DELETE FROM supertrend_trades WHERE scanner_id=?"), (scanner_id,)
+            )
+    except Exception as e:
+        log.error("delete_supertrend_scanner failed: %s", e)

@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { Lang, tr } from '../lib/i18n';
 import OBScannerPanel from './OBScannerPanel';
+import SupertrendPanel from './SupertrendPanel';
 
 interface Props { lang: Lang; }
 
@@ -271,7 +272,12 @@ export default function OrderBlockStrategy({ lang }: Props) {
   return (
     <div className="flex flex-col gap-6 animate-fade-up" dir={ar ? 'rtl' : 'ltr'}>
 
-      {/* Live scanner panel */}
+      {/* Supertrend Scanner panel */}
+      <div className="card p-5 sm:p-6" style={{ borderColor: 'rgba(245,158,11,0.25)' }}>
+        <SupertrendPanel lang={lang} />
+      </div>
+
+      {/* OB Live scanner panel */}
       <div className="card p-5 sm:p-6" style={{ borderColor: 'rgba(244,114,182,0.25)' }}>
         <OBScannerPanel lang={lang} />
       </div>
