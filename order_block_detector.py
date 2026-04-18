@@ -46,7 +46,7 @@ SCAN_INTERVAL_SECONDS = 300   # 5 minutes between full market sweeps
 INTER_SYMBOL_SLEEP    = 0.35  # rate-limit guard between symbols
 CANDLE_LIMIT          = 100   # candles fetched per symbol (enough for swing detection)
 SWING_LOOKBACK        = 5     # bars each side to confirm a swing pivot
-MIN_VOLUME_MULTIPLIER = 1.5   # mother candle volume must be ≥ 1.5× average
+MIN_VOLUME_MULTIPLIER = 1.2   # mother candle volume must be ≥ 1.2× average
 POSITION_POLL         = 20    # seconds between TP/SL checks for open positions
 
 # Registry: detector_id -> {thread, stop_event, last_symbol, scanned, open_positions, error}
@@ -92,9 +92,12 @@ def _detect_bos_choch(
 ) -> tuple[bool, str, float]:
     """Detect Break of Structure (BoS) or Change of Character (ChoCh).
 
-    Bullish BoS: latest close breaks above the most recent swing high.
-    Bullish ChoCh: after a downtrend, price breaks above a prior swing high
-                   that was lower than the previous swing high (trend reversal).
+    Bullish BoS: latest close breaks above any swing high in the recent window.
+    Bullish ChoCh: price breaks above a swing high that was lower than the
+                   previous swing high (lower-high structure = downtrend reversal).
+
+    Checks the last 5 swing highs so a break of any recent structure level
+    qualifies, not only the absolute highest peak in the window.
 
     Returns (confirmed, signal_type, broken_level).
     signal_type: 'BoS_bullish', 'ChoCh_bullish', or ''.
@@ -104,17 +107,19 @@ def _detect_bos_choch(
 
     last_close = candles[-1]["close"]
 
-    # Most recent swing high level
-    last_sh_idx = swing_highs[-1]
-    last_sh_lvl = candles[last_sh_idx]["high"]
+    # Walk recent swing highs from newest to oldest; fire on the first break.
+    recent_shs = swing_highs[-5:]  # up to 5 most recent swing highs
+    for i in range(len(recent_shs) - 1, -1, -1):
+        sh_idx = recent_shs[i]
+        sh_lvl = candles[sh_idx]["high"]
 
-    if last_close > last_sh_lvl:
-        # Determine BoS vs ChoCh
-        if len(swing_highs) >= 2:
-            prev_sh_lvl = candles[swing_highs[-2]]["high"]
-            if last_sh_lvl < prev_sh_lvl:
-                return True, "ChoCh_bullish", last_sh_lvl
-        return True, "BoS_bullish", last_sh_lvl
+        if last_close > sh_lvl:
+            # ChoCh: this swing high is lower than the one before it
+            if i > 0:
+                prev_lvl = candles[recent_shs[i - 1]]["high"]
+                if sh_lvl < prev_lvl:
+                    return True, "ChoCh_bullish", sh_lvl
+            return True, "BoS_bullish", sh_lvl
 
     return False, "", 0.0
 
@@ -124,33 +129,35 @@ def _find_mother_candle(
     swing_lows: list[int],
     bos_level:  float,
 ) -> tuple[bool, dict]:
-    """Find the last strong bearish impulse candle before the BoS.
+    """Find the last strong bearish impulse candle near the most recent swing low.
 
-    The mother candle is the largest-body bearish candle in the 20 bars
-    preceding the most recent swing low. It represents the last institutional
-    selling push before the reversal.
+    Searches a 30-bar window centred on the swing low (20 bars before + 5 bars
+    after) to account for OBs that form at or just past the swing low itself.
+    Falls back to the second-most-recent swing low if the first yields nothing.
 
     Returns (found, candle_dict).
     """
     if not swing_lows:
         return False, {}
 
-    last_sl_idx = swing_lows[-1]
-    # Search window: up to 20 bars before the swing low
-    search_start = max(0, last_sl_idx - 20)
-    window = candles[search_start:last_sl_idx + 1]
+    # Try the most recent swing low first, then the previous one as fallback.
+    candidates = swing_lows[-2:] if len(swing_lows) >= 2 else swing_lows[-1:]
+    for sl_idx in reversed(candidates):
+        search_start = max(0, sl_idx - 30)
+        search_end   = min(len(candles), sl_idx + 6)   # 5 bars past the low
+        window = candles[search_start:search_end]
 
-    if not window:
-        return False, {}
+        if not window:
+            continue
 
-    # Filter bearish candles (close < open)
-    bearish = [c for c in window if c["close"] < c["open"]]
-    if not bearish:
-        return False, {}
+        bearish = [c for c in window if c["close"] < c["open"]]
+        if not bearish:
+            continue
 
-    # Pick the one with the largest body
-    mother = max(bearish, key=lambda c: c["open"] - c["close"])
-    return True, mother
+        mother = max(bearish, key=lambda c: c["open"] - c["close"])
+        return True, mother
+
+    return False, {}
 
 
 def _volume_filter(candles: list[dict], mother: dict) -> bool:
