@@ -1,11 +1,10 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Grid3x3, TrendingUp, Zap, Info, Plus, Square, Play, Trash2, RefreshCw, ExternalLink } from 'lucide-react';
+import { Grid3x3, TrendingUp, Zap, Info, Plus, Square, Play, Trash2, RefreshCw } from 'lucide-react';
 import { Lang } from '../lib/i18n';
 import { listGridBots, createGridBot, stopGridBot, resumeGridBot, deleteGridBot, previewGridBot, getGridOrders, getSymbols } from '../lib/api';
 import GridControlChart from './GridControlChart';
-import GridBotDetail from './GridBotDetail';
 
 interface Props { lang: Lang; }
 
@@ -506,7 +505,7 @@ function CreateForm({ lang, onCreated }: { lang: Lang; onCreated: () => void }) 
   );
 }
 
-function BotCard({ bot, lang, onRefresh, onOpen }: { bot: any; lang: Lang; onRefresh: () => void; onOpen: () => void }) {
+function BotCard({ bot, lang, onRefresh }: { bot: any; lang: Lang; onRefresh: () => void }) {
   const ar = lang === 'ar';
   const [stopping, setStopping]     = useState(false);
   const [deleting, setDeleting]     = useState(false);
@@ -657,15 +656,6 @@ function BotCard({ bot, lang, onRefresh, onOpen }: { bot: any; lang: Lang; onRef
         </div>
       )}
 
-      {/* Live detail button */}
-      <button onClick={onOpen}
-        className="w-full flex items-center justify-center gap-2 py-2.5 rounded-2xl text-sm font-bold transition-all"
-        style={{ background: 'rgba(240,185,11,0.08)', color: '#F0B90B', border: '1px solid rgba(240,185,11,0.3)' }}>
-        <Zap size={13} />
-        {ar ? 'تحكم لايف في الشبكة' : 'Live Grid Control'}
-        <ExternalLink size={11} />
-      </button>
-
       <div className="flex gap-2 pt-1">
         {bot.running ? (
           <button onClick={handleStop} disabled={stopping}
@@ -707,22 +697,9 @@ function BotCard({ bot, lang, onRefresh, onOpen }: { bot: any; lang: Lang; onRef
 
 export default function GridBot({ lang }: Props) {
   const ar = lang === 'ar';
-  const [view, setView]           = useState<'list' | 'create'>('list');
-  const [selectedBotId, setSelectedBotId] = useState<number | null>(null);
-  const [bots, setBots]           = useState<any[]>([]);
-  const [loading, setLoading]     = useState(true);
-
-  // ── Detail view ──
-  if (selectedBotId !== null) {
-    return (
-      <GridBotDetail
-        botId={selectedBotId}
-        lang={lang}
-        onBack={() => setSelectedBotId(null)}
-        onDeleted={() => { setSelectedBotId(null); load(); }}
-      />
-    );
-  }
+  const [view, setView]       = useState<'list' | 'create'>('list');
+  const [bots, setBots]       = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     try { setBots(await listGridBots()); } catch {}
@@ -829,7 +806,7 @@ export default function GridBot({ lang }: Props) {
                 <RefreshCw size={12} /> {ar ? 'تحديث' : 'Refresh'}
               </button>
             </div>
-            {bots.map(b => <BotCard key={b.id} bot={b} lang={lang} onRefresh={load} onOpen={() => setSelectedBotId(b.id)} />)}
+            {bots.map(b => <BotCard key={b.id} bot={b} lang={lang} onRefresh={load} />)}
           </div>
         )}
       </div>
