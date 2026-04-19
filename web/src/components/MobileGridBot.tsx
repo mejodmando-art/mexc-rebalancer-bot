@@ -5,7 +5,7 @@ import { Lang } from '../lib/i18n';
 import {
   listGridBots, stopGridBot, resumeGridBot, deleteGridBot, getGridOrders, createGridBot, previewGridBot, getSymbols,
 } from '../lib/api';
-import GridControlChart from './GridControlChart';
+
 
 interface Props { lang: Lang; onNavigate?: (tab: any) => void; }
 
@@ -222,9 +222,8 @@ function CreateGridBotModal({ ar, onClose, onCreated }: {
   }, []);
 
   useEffect(() => {
-    if (!symbol) { setPreview(null); return; }
-    // Fall back to 100 so the chart renders immediately without requiring an amount
-    const inv = Math.max(parseFloat(investment) || 100, 1);
+    const inv = parseFloat(investment);
+    if (!symbol || inv < 1) { setPreview(null); return; }
     const t = setTimeout(async () => {
       setLoading(true);
       try {
@@ -291,35 +290,6 @@ function CreateGridBotModal({ ar, onClose, onCreated }: {
             {ar ? 'إنشاء بوت شبكي جديد' : 'New Grid Bot'}
           </h3>
           <button onClick={onClose} style={{ color: 'rgba(255,255,255,0.4)', fontSize: 20 }}>✕</button>
-        </div>
-
-        {/* ── Interactive Grid Control Chart ── */}
-        <div style={{ borderRadius: 16, overflow: 'hidden' }}>
-          {preview ? (
-            <GridControlChart
-              low={preview.price_low}
-              high={preview.price_high}
-              current={preview.current_price}
-              gridCount={gridCountManual ?? preview.grid_count ?? 10}
-              lowerPct={parseFloat(lowerPct) || 5}
-              upperPct={parseFloat(upperPct) || 5}
-              mode={mode}
-              lang={ar ? 'ar' : 'en'}
-              onDrag={(nl, nu) => {
-                setLowerPct(nl.toFixed(1));
-                if (mode !== 'infinity') setUpperPct(nu.toFixed(1));
-              }}
-              onCommit={(nl, nu) => {
-                setLowerPct(nl.toFixed(1));
-                if (mode !== 'infinity') setUpperPct(nu.toFixed(1));
-              }}
-            />
-          ) : (
-            <div className="flex items-center justify-center rounded-2xl"
-              style={{ height: 200, background: 'rgba(255,255,255,0.04)', color: 'rgba(255,255,255,0.3)', fontSize: 12 }}>
-              {loading ? (ar ? 'جاري تحميل الشارت...' : 'Loading chart...') : (ar ? 'جاري التحميل...' : 'Loading...')}
-            </div>
-          )}
         </div>
 
         {/* العملة */}

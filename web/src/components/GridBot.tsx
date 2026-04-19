@@ -1,11 +1,9 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Grid3x3, TrendingUp, Zap, Info, Plus, Square, Play, Trash2, RefreshCw } from 'lucide-react';
 import { Lang } from '../lib/i18n';
 import { listGridBots, createGridBot, stopGridBot, resumeGridBot, deleteGridBot, previewGridBot, getGridOrders, getSymbols } from '../lib/api';
-import GridControlChart from './GridControlChart';
-
 interface Props { lang: Lang; }
 
 function WaveChart({ low, high, current }: { low: number; high: number; current: number }) {
@@ -58,9 +56,8 @@ function CreateForm({ lang, onCreated }: { lang: Lang; onCreated: () => void }) 
   }, []);
 
   const fetchPreview = useCallback(async () => {
-    if (!symbol) { setPreview(null); return; }
-    // Use entered investment or fall back to 100 so the chart always renders
-    const inv = Math.max(parseFloat(investment) || 100, 1);
+    const inv = parseFloat(investment);
+    if (!symbol || inv < 1) { setPreview(null); return; }
     setLoading(true);
     try {
       setPreview(await previewGridBot(
@@ -115,35 +112,6 @@ function CreateForm({ lang, onCreated }: { lang: Lang; onCreated: () => void }) 
 
   return (
     <div className="space-y-4">
-
-      {/* ── Interactive Grid Chart — always visible ── */}
-      <div className="card p-3">
-        {preview ? (
-          <GridControlChart
-            low={preview.price_low}
-            high={preview.price_high}
-            current={preview.current_price}
-            gridCount={gridCountManual ?? preview.grid_count ?? 10}
-            lowerPct={parseFloat(lowerPct) || 5}
-            upperPct={parseFloat(upperPct) || 5}
-            mode={mode}
-            lang={lang}
-            onDrag={(nl, nu) => {
-              setLowerPct(nl.toFixed(1));
-              if (mode !== 'infinity') setUpperPct(nu.toFixed(1));
-            }}
-            onCommit={(nl, nu) => {
-              setLowerPct(nl.toFixed(1));
-              if (mode !== 'infinity') setUpperPct(nu.toFixed(1));
-            }}
-          />
-        ) : (
-          <div className="flex items-center justify-center rounded-2xl animate-pulse"
-            style={{ height: 200, background: 'var(--bg-input)', color: 'var(--text-muted)', fontSize: 12 }}>
-            {loading ? (ar ? 'جاري تحميل الشارت...' : 'Loading chart...') : (ar ? 'اختر عملة لعرض الشارت' : 'Select a symbol to load chart')}
-          </div>
-        )}
-      </div>
 
       {/* اختيار العملة */}
       <div className="card p-4 space-y-3">
@@ -595,21 +563,6 @@ function BotCard({ bot, lang, onRefresh }: { bot: any; lang: Lang; onRefresh: ()
           <span>{ar ? 'متوسط الشراء:' : 'Avg Buy:'} <span className="num font-bold" style={{ color: 'var(--text-main)' }}>${(bot.avg_buy_price||0).toFixed(4)}</span></span>
           <span>{ar ? 'محتفظ:' : 'Held:'} <span className="num font-bold" style={{ color: 'var(--text-main)' }}>{(bot.base_qty||0).toFixed(6)}</span></span>
         </div>
-      )}
-
-      {/* ── Read-only grid chart for active bots ── */}
-      {(bot.price_low > 0 && bot.price_high > 0) && (
-        <GridControlChart
-          low={bot.price_low}
-          high={bot.price_high}
-          current={bot.current_price ?? ((bot.price_low + bot.price_high) / 2)}
-          gridCount={bot.grid_count ?? 10}
-          lowerPct={bot.effective_lower_pct ?? bot.lower_pct ?? 5}
-          upperPct={bot.effective_upper_pct ?? bot.upper_pct ?? 5}
-          mode={bot.mode ?? 'normal'}
-          lang={lang}
-          readOnly
-        />
       )}
 
       <div className="flex justify-between text-xs px-1" style={{ color: 'var(--text-muted)' }}>
