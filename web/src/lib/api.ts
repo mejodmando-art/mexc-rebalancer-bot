@@ -98,48 +98,6 @@ export const startPortfolio      = (id: number) => req<{ ok: boolean; message: s
 export const stopPortfolio       = (id: number) => req<{ ok: boolean; message: string }>(`/api/portfolios/${id}/stop`,  { method: 'POST' });
 export const getPortfolioStatus  = (id: number) => req<{ portfolio_id: number; running: boolean; started_at: string | null; error: string | null }>(`/api/portfolios/${id}/status`);
 
-// ── Grid Bot ─────────────────────────────────────────────────────────────────
-export const listGridBots    = ()                    => req<any[]>('/api/grid-bots');
-export const getGridBot      = (id: number)          => req<any>(`/api/grid-bots/${id}`);
-export const getGridOrders   = (id: number)          => req<any[]>(`/api/grid-bots/${id}/orders`);
-export const createGridBot   = (body: {
-  symbol: string;
-  investment: number;
-  grid_count?: number;
-  lower_pct?: number;
-  upper_pct?: number;
-  price_low?: number;
-  price_high?: number;
-  expand_direction?: 'both' | 'lower' | 'upper';
-  mode?: 'normal' | 'infinity';
-  use_base_balance?: boolean;
-}) =>
-  req<{ ok: boolean; id: number }>('/api/grid-bots', { method: 'POST', body: JSON.stringify(body) });
-export const stopGridBot     = (id: number)          => req<{ ok: boolean }>(`/api/grid-bots/${id}/stop`,   { method: 'POST' });
-export const resumeGridBot   = (id: number)          => req<{ ok: boolean }>(`/api/grid-bots/${id}/resume`, { method: 'POST' });
-export const deleteGridBot   = (id: number)          => req<{ ok: boolean }>(`/api/grid-bots/${id}`,        { method: 'DELETE' });
-export const rebuildGridBot  = (id: number, price_low: number, price_high: number) =>
-  req<{ ok: boolean; bot_id: number }>(`/api/grid-bots/${id}/rebuild`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ price_low, price_high }),
-  });
-export const previewGridBot  = (
-  symbol: string,
-  investment: number,
-  gridCount?: number,
-  lowerPct?: number,
-  upperPct?: number,
-) => {
-  const params = new URLSearchParams({ symbol, investment: String(investment) });
-  if (gridCount && gridCount >= 2) params.set('grid_count', String(gridCount));
-  if (lowerPct !== undefined) params.set('lower_pct', String(lowerPct));
-  if (upperPct !== undefined) params.set('upper_pct', String(upperPct));
-  return req<{ symbol: string; current_price: number; price_low: number; price_high: number; grid_count: number; usdt_per_grid: number; step: number; profit_per_grid_pct: number; est_profit_per_grid: number; free_usdt: number | null }>(
-    `/api/grid-bots/preview?${params}`
-  );
-};
-
 export const getSymbols = () => req<string[]>('/api/symbols');
 
 export const getPortfolioAssets  = (id: number) => req<{

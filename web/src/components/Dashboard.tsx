@@ -12,7 +12,7 @@ import {
   getRebalanceJobStatus, getAccountTotal,
   listPortfolios, activatePortfolio, rebalancePortfolio, startPortfolio,
   stopPortfolio, getPortfolioAssets, stopAndSellPortfolio, getHistory,
-  listGridBots,
+
 } from '../lib/api';
 import { Lang, tr } from '../lib/i18n';
 import { useToast } from './Toast';
@@ -77,8 +77,7 @@ export default function Dashboard({ lang }: Props) {
   const [sellingPort,     setSellingPort]     = useState<number | null>(null);
   // History modal
   const [historyPort,     setHistoryPort]     = useState<{ name: string; rows: any[] } | null>(null);
-  // Grid bots data
-  const [gridBots,        setGridBots]        = useState<any[]>([]);
+
 
 
   const fetchPortfolioAssets = useCallback(async (list: any[]) => {
@@ -118,7 +117,7 @@ export default function Dashboard({ lang }: Props) {
         fetchPortfolioAssets(list);
       }).catch(() => {});
 
-      listGridBots().then(bots => setGridBots(bots)).catch(() => {});
+
     } catch (err: any) {
       if (!silent) toast.error(tr('errLoad', lang), err?.message);
     } finally {
@@ -420,21 +419,17 @@ export default function Dashboard({ lang }: Props) {
       </div>
 
       {/* ── COINS OVERVIEW ─────────────────────────────────────────────────── */}
-      {(portfolios.length > 0 || gridBots.length > 0) && (() => {
-        // Collect rebalance-bot coins: symbol → { value_usdt, hasLiveData }
-        // Use live data from allPortAssets if available, else fall back to portfolio.assets (no value)
+      {portfolios.length > 0 && (() => {
         const rebalanceMap: Record<string, { value_usdt: number; hasLiveData: boolean }> = {};
         portfolios.forEach(p => {
           const liveAssets = allPortAssets[p.id]?.assets;
           const staticAssets: any[] = p.assets ?? [];
-
           if (liveAssets && liveAssets.length > 0) {
             liveAssets.forEach((a: any) => {
               const sym = (a.symbol ?? '').replace(/USDT$/i, '').toUpperCase();
               if (!sym || sym === 'USDT') return;
               if (!rebalanceMap[sym]) rebalanceMap[sym] = { value_usdt: 0, hasLiveData: true };
               rebalanceMap[sym].value_usdt += a.value_usdt ?? 0;
-              rebalanceMap[sym].hasLiveData = true;
             });
           } else {
             staticAssets.forEach((a: any) => {
@@ -445,36 +440,15 @@ export default function Dashboard({ lang }: Props) {
           }
         });
 
-        // Collect grid-bot coins: symbol → { value_usdt }
-        // Use current_value_usdt (base_qty × live price) when available,
-        // fall back to investment amount if bot hasn't bought yet (base_qty=0)
-        const gridMap: Record<string, { value_usdt: number; hasPosition: boolean }> = {};
-        gridBots.forEach(g => {
-          const sym = (g.symbol ?? '').replace(/USDT$/i, '').toUpperCase();
-          if (!sym) return;
-          const baseQty = g.base_qty ?? 0;
-          const hasPosition = baseQty > 0;
-          // If bot has a position use live value, else show investment as deployed capital
-          const val = hasPosition
-            ? (g.current_value_usdt ?? 0)
-            : (g.investment ?? 0);
-          if (!gridMap[sym]) gridMap[sym] = { value_usdt: 0, hasPosition };
-          gridMap[sym].value_usdt += val;
-          if (hasPosition) gridMap[sym].hasPosition = true;
-        });
-
-        // Union of all symbols
-        const allSymbols = Array.from(new Set([...Object.keys(rebalanceMap), ...Object.keys(gridMap)]));
+        const allSymbols = Object.keys(rebalanceMap);
         if (allSymbols.length === 0) return null;
 
         const COLORS = ['#00D4AA','#60A5FA','#A78BFA','#F0B90B','#FF7B72','#34D399','#FB923C','#E879F9','#38BDF8','#FACC15'];
-
         const fmtVal = (v: number, hasLive: boolean) =>
           hasLive ? '$' + v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—';
 
         return (
           <div className="animate-fade-up rounded-2xl p-4 space-y-3" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', animationDelay: '0.05s' }}>
-            {/* Header */}
             <div className="flex items-center gap-2">
               <div className="w-1 h-4 rounded-full" style={{ background: 'linear-gradient(180deg,#7B5CF5,#3B82F6)' }} />
               <span className="text-xs font-bold" style={{ color: 'var(--text-main)' }}>
@@ -484,22 +458,12 @@ export default function Dashboard({ lang }: Props) {
                 {allSymbols.length}
               </span>
             </div>
-
-            {/* Coins list */}
             <div className="space-y-2">
               {allSymbols.map((sym, idx) => {
                 const rb = rebalanceMap[sym];
-                const gr = gridMap[sym];
-                const isShared = !!rb && !!gr;
                 const color = COLORS[idx % COLORS.length];
-
                 return (
-                  <div
-                    key={sym}
-                    className="flex items-center gap-3 px-3 py-2.5 rounded-xl"
-                    style={{ background: 'var(--bg-input)', border: '1px solid var(--border)' }}
-                  >
-                    {/* Coin icon + symbol */}
+                  <div key={sym} className="flex items-center gap-3 px-3 py-2.5 rounded-xl" style={{ background: 'var(--bg-input)', border: '1px solid var(--border)' }}>
                     <div className="flex items-center gap-2 min-w-0 flex-1">
                       <img
                         src={`https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons/32/color/${sym.toLowerCase()}.png`}
@@ -509,61 +473,10 @@ export default function Dashboard({ lang }: Props) {
                       />
                       <span className="font-bold text-sm" style={{ color }}>{sym}</span>
                     </div>
-
-                    {/* Badges + values */}
-                    <div className="flex items-center gap-2 flex-wrap justify-end">
-                      {isShared ? (
-                        <>
-                          <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg" style={{ background: 'rgba(0,212,170,0.08)', border: '1px solid rgba(0,212,170,0.2)' }}>
-                            <span className="text-[9px] font-bold px-1 py-0.5 rounded" style={{ background: 'rgba(0,212,170,0.15)', color: '#00D4AA' }}>
-                              {lang === 'ar' ? 'توازن' : 'Rebalance'}
-                            </span>
-                            <span className="num text-xs font-bold" style={{ color: '#00D4AA' }}>
-                              {fmtVal(rb.value_usdt, rb.hasLiveData)}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg" style={{ background: 'rgba(240,185,11,0.08)', border: '1px solid rgba(240,185,11,0.2)' }}>
-                            <span className="text-[9px] font-bold px-1 py-0.5 rounded" style={{ background: 'rgba(240,185,11,0.15)', color: '#F0B90B' }}>
-                              {lang === 'ar' ? 'شبكي' : 'Grid'}
-                            </span>
-                            <span className="num text-xs font-bold" style={{ color: '#F0B90B' }}>
-                              {gr.value_usdt > 0
-                                ? '$' + gr.value_usdt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-                                : '—'}
-                            </span>
-                            {!gr.hasPosition && gr.value_usdt > 0 && (
-                              <span className="text-[8px]" style={{ color: 'rgba(240,185,11,0.5)' }}>
-                                {lang === 'ar' ? 'استثمار' : 'inv'}
-                              </span>
-                            )}
-                          </div>
-                        </>
-                      ) : rb ? (
-                        <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg" style={{ background: 'rgba(0,212,170,0.08)', border: '1px solid rgba(0,212,170,0.2)' }}>
-                          <span className="text-[9px] font-bold px-1 py-0.5 rounded" style={{ background: 'rgba(0,212,170,0.15)', color: '#00D4AA' }}>
-                            {lang === 'ar' ? 'بوت توازن' : 'Rebalance Bot'}
-                          </span>
-                          <span className="num text-xs font-bold" style={{ color: '#00D4AA' }}>
-                            {fmtVal(rb.value_usdt, rb.hasLiveData)}
-                          </span>
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg" style={{ background: 'rgba(240,185,11,0.08)', border: '1px solid rgba(240,185,11,0.2)' }}>
-                          <span className="text-[9px] font-bold px-1 py-0.5 rounded" style={{ background: 'rgba(240,185,11,0.15)', color: '#F0B90B' }}>
-                            {lang === 'ar' ? 'بوت شبكي' : 'Grid Bot'}
-                          </span>
-                          <span className="num text-xs font-bold" style={{ color: '#F0B90B' }}>
-                            {gr!.value_usdt > 0
-                              ? '$' + gr!.value_usdt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-                              : '—'}
-                          </span>
-                          {!gr!.hasPosition && gr!.value_usdt > 0 && (
-                            <span className="text-[8px]" style={{ color: 'rgba(240,185,11,0.5)' }} title={lang === 'ar' ? 'مبلغ الاستثمار' : 'Investment amount'}>
-                              {lang === 'ar' ? 'استثمار' : 'inv'}
-                            </span>
-                          )}
-                        </div>
-                      )}
+                    <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg" style={{ background: 'rgba(0,212,170,0.08)', border: '1px solid rgba(0,212,170,0.2)' }}>
+                      <span className="num text-xs font-bold" style={{ color: '#00D4AA' }}>
+                        {fmtVal(rb.value_usdt, rb.hasLiveData)}
+                      </span>
                     </div>
                   </div>
                 );

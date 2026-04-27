@@ -1,9 +1,9 @@
 'use client';
 
-import { Moon, Sun, BarChart2, Wallet, Bot } from 'lucide-react';
+import { Moon, Sun, BarChart2, Wallet, PlusCircle } from 'lucide-react';
 import { Lang, tr } from '../lib/i18n';
 
-type Tab = 'dashboard' | 'portfolios' | 'create' | 'grid';
+type Tab = 'dashboard' | 'portfolios' | 'create';
 
 interface NavbarProps {
   active: Tab;
@@ -16,9 +16,9 @@ interface NavbarProps {
 }
 
 const TABS: { key: Tab; icon: React.ElementType; labelKey: string; color: string; glow: string }[] = [
-  { key: 'grid',       icon: Bot,       labelKey: 'gridBot',      color: '#818CF8', glow: 'rgba(129,140,248,0.45)' },
-  { key: 'portfolios', icon: Wallet,    labelKey: 'myPortfolios', color: '#60A5FA', glow: 'rgba(96,165,250,0.45)' },
-  { key: 'dashboard',  icon: BarChart2, labelKey: 'dashboard',    color: '#34D399', glow: 'rgba(52,211,153,0.45)' },
+  { key: 'create',     icon: PlusCircle, labelKey: 'createBot',    color: '#A78BFA', glow: 'rgba(167,139,250,0.45)' },
+  { key: 'portfolios', icon: Wallet,     labelKey: 'myPortfolios', color: '#60A5FA', glow: 'rgba(96,165,250,0.45)' },
+  { key: 'dashboard',  icon: BarChart2,  labelKey: 'dashboard',    color: '#34D399', glow: 'rgba(52,211,153,0.45)' },
 ];
 
 export default function Navbar({ active, onNav, botRunning, lang, onLangToggle, dark, onThemeToggle }: NavbarProps) {

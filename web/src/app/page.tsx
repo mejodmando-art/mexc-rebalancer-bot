@@ -6,14 +6,12 @@ import Sidebar from '../components/Sidebar';
 import Dashboard from '../components/Dashboard';
 import Portfolios from '../components/Portfolios';
 import CreateBot from '../components/CreateBot';
-import GridBot from '../components/GridBot';
-import MobileGridBot from '../components/MobileGridBot';
 import { ToastProvider } from '../components/Toast';
 import { getBotStatus } from '../lib/api';
 import { Lang } from '../lib/i18n';
 import ErrorBoundary from '../components/ErrorBoundary';
 
-type Tab = 'dashboard' | 'portfolios' | 'create' | 'grid';
+type Tab = 'dashboard' | 'portfolios' | 'create';
 
 export default function App() {
   const [tab,              setTab]              = useState<Tab>('dashboard');
@@ -78,14 +76,7 @@ export default function App() {
               {tab === 'dashboard'  && <Dashboard      lang={lang} />}
               {tab === 'portfolios' && <Portfolios     lang={lang} onActivated={() => setTab('dashboard')} onCreateBot={() => setTab('create')} onEditPortfolio={() => setTab('portfolios')} />}
               {tab === 'create'     && <CreateBot      lang={lang} onCreated={() => setTab('portfolios')} />}
-              {tab === 'grid'       && (
-                <>
-                  {/* Desktop grid bot view */}
-                  <div className="hidden lg:block"><GridBot lang={lang} /></div>
-                  {/* Mobile grid bot view */}
-                  <div className="block lg:hidden -mx-4 sm:-mx-6"><MobileGridBot lang={lang} onNavigate={setTab} /></div>
-                </>
-              )}
+
             </div>
           </main>
         </div>
