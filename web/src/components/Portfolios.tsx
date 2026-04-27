@@ -5,12 +5,12 @@ import {
   listPortfolios, activatePortfolio, deletePortfolio,
   rebalancePortfolio, getRebalanceJobStatus, cancelRebalance,
   stopAndSellPortfolio, startPortfolio, stopPortfolio,
-  savePortfolio, getPortfolio,
+  savePortfolio, getPortfolio, updatePortfolio,
 } from '../lib/api';
 import { Lang, tr } from '../lib/i18n';
 import {
   ShoppingCart, Scale, StopCircle, Play, Square,
-  Trash2, Settings, Loader2, CheckCircle2,
+  Trash2, Settings, Loader2, CheckCircle2, X, Plus,
 } from 'lucide-react';
 
 interface Props { lang: Lang; onActivated: () => void; onCreateBot?: () => void; onEditPortfolio?: (id: number) => void; }
@@ -398,6 +398,264 @@ function CopyModal({ source, lang, onClose, onDone }: CopyModalProps) {
   );
 }
 
+// ── Edit Portfolio Modal ─────────────────────────────────────────────────────
+interface EditAsset { symbol: string; allocation_pct: number; }
+type EditRebalMode = 'proportional' | 'timed' | 'unbalanced';
+type EditTimedFreq = '30min' | '1h' | '4h' | '8h' | '12h' | 'daily' | 'weekly' | 'monthly';
+
+interface EditModalProps {
+  portfolioId: number;
+  lang: Lang;
+  onClose: () => void;
+  onSaved: () => void;
+}
+
+function EditPortfolioModal({ portfolioId, lang, onClose, onSaved }: EditModalProps) {
+  const [loading, setLoading]     = useState(true);
+  const [saving,  setSaving]      = useState(false);
+  const [error,   setError]       = useState('');
+
+  const [botName,    setBotName]    = useState('');
+  const [totalUsdt,  setTotalUsdt]  = useState(1000);
+  const [assets,     setAssets]     = useState<EditAsset[]>([]);
+  const [rebalMode,  setRebalMode]  = useState<EditRebalMode>('proportional');
+  const [threshold,  setThreshold]  = useState(5);
+  const [timedFreq,  setTimedFreq]  = useState<EditTimedFreq>('daily');
+  const [timedHour,  setTimedHour]  = useState(10);
+
+  useEffect(() => {
+    getPortfolio(portfolioId).then((cfg: any) => {
+      setBotName(cfg?.bot?.name ?? '');
+      setTotalUsdt(cfg?.portfolio?.total_usdt ?? 1000);
+      setAssets((cfg?.portfolio?.assets ?? []).map((a: any) => ({
+        symbol: a.symbol ?? '',
+        allocation_pct: a.allocation_pct ?? 0,
+      })));
+      const mode = cfg?.rebalance?.mode ?? 'proportional';
+      setRebalMode(mode);
+      setThreshold(cfg?.rebalance?.proportional?.threshold_pct ?? 5);
+      setTimedFreq(cfg?.rebalance?.timed?.frequency ?? 'daily');
+      setTimedHour(cfg?.rebalance?.timed?.hour ?? 10);
+    }).catch((e: any) => setError('❌ ' + e.message))
+      .finally(() => setLoading(false));
+  }, [portfolioId]);
+
+  const totalPct = assets.reduce((s, a) => s + a.allocation_pct, 0);
+
+  const updateSymbol = (i: number, val: string) => {
+    setAssets(prev => prev.map((a, idx) => idx === i ? { ...a, symbol: val.toUpperCase() } : a));
+    setError('');
+  };
+  const updatePct = (i: number, val: number) =>
+    setAssets(prev => prev.map((a, idx) => idx === i ? { ...a, allocation_pct: val } : a));
+  const removeAsset = (i: number) =>
+    setAssets(prev => prev.filter((_, idx) => idx !== i));
+  const addAsset = () =>
+    setAssets(prev => [...prev, { symbol: '', allocation_pct: 0 }]);
+
+  const handleSave = async () => {
+    if (!botName.trim())                    { setError(lang === 'ar' ? 'أدخل اسم البوت' : 'Enter bot name'); return; }
+    if (assets.some(a => !a.symbol.trim())) { setError(lang === 'ar' ? 'أدخل رمز كل عملة' : 'Enter all symbols'); return; }
+    if (Math.abs(totalPct - 100) > 0.1)    { setError(lang === 'ar' ? 'المجموع يجب أن يساوي 100%' : 'Allocations must sum to 100%'); return; }
+    if (totalUsdt <= 0)                     { setError(lang === 'ar' ? 'أدخل مبلغ صحيح' : 'Enter valid amount'); return; }
+
+    setSaving(true); setError('');
+    try {
+      const full = await getPortfolio(portfolioId);
+      const updated = {
+        ...full,
+        bot: { ...(full?.bot ?? {}), name: botName.trim() },
+        portfolio: {
+          ...(full?.portfolio ?? {}),
+          assets: assets.map(a => ({ symbol: a.symbol.trim().toUpperCase(), allocation_pct: a.allocation_pct })),
+          total_usdt: totalUsdt,
+        },
+        rebalance: {
+          ...(full?.rebalance ?? {}),
+          mode: rebalMode,
+          proportional: { threshold_pct: threshold, check_interval_minutes: 5, min_deviation_to_execute_pct: 3 },
+          timed: { frequency: timedFreq, hour: timedHour },
+        },
+      };
+      await updatePortfolio(portfolioId, updated);
+      onSaved();
+      onClose();
+    } catch (e: any) {
+      setError('❌ ' + e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const TIMED_OPTS: { value: EditTimedFreq; label: string }[] = [
+    { value: '30min', label: '30m' }, { value: '1h', label: '1h' },
+    { value: '4h',    label: '4h'  }, { value: '8h', label: '8h' },
+    { value: '12h',   label: '12h' }, { value: 'daily',   label: lang === 'ar' ? 'يوم' : '1d' },
+    { value: 'weekly', label: lang === 'ar' ? 'أسبوع' : 'Week' },
+    { value: 'monthly', label: lang === 'ar' ? 'شهر' : 'Month' },
+  ];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm px-0 sm:px-4">
+      <div
+        className="w-full sm:max-w-lg rounded-t-3xl sm:rounded-2xl flex flex-col"
+        style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', maxHeight: '92vh' }}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 pt-5 pb-3 shrink-0">
+          <h2 className="text-base font-bold" style={{ color: 'var(--text-main)' }}>
+            ⚙️ {lang === 'ar' ? 'إعدادات المحفظة' : 'Portfolio Settings'}
+          </h2>
+          <button onClick={onClose} className="p-1 rounded-lg" style={{ color: 'var(--text-muted)' }}>
+            <X size={18} />
+          </button>
+        </div>
+
+        {loading ? (
+          <div className="flex items-center justify-center py-16">
+            <Loader2 size={28} className="animate-spin" style={{ color: 'var(--text-muted)' }} />
+          </div>
+        ) : (
+          <div className="overflow-y-auto flex-1 px-5 pb-5 space-y-4">
+
+            {/* Bot name */}
+            <div>
+              <div className="label">{lang === 'ar' ? 'اسم البوت' : 'Bot Name'}</div>
+              <input className="input" value={botName} onChange={e => setBotName(e.target.value)} />
+            </div>
+
+            {/* Assets */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <div className="label mb-0">{lang === 'ar' ? 'الأصول والنسب' : 'Assets & Allocations'}</div>
+                <button onClick={addAsset} className="btn-primary text-xs px-3 py-1 flex items-center gap-1">
+                  <Plus size={12} /> {lang === 'ar' ? 'إضافة' : 'Add'}
+                </button>
+              </div>
+              <div className="space-y-2">
+                {assets.map((a, i) => {
+                  const isDup = a.symbol.trim() !== '' &&
+                    assets.filter(x => x.symbol.trim().toUpperCase() === a.symbol.trim().toUpperCase()).length > 1;
+                  return (
+                    <div key={i} className="flex items-center gap-2">
+                      <input
+                        className={`input w-24 font-mono uppercase ${isDup ? 'border-red-500' : ''}`}
+                        value={a.symbol}
+                        onChange={e => updateSymbol(i, e.target.value)}
+                        placeholder="BTC"
+                        maxLength={10}
+                      />
+                      <div className="flex-1 relative">
+                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs pointer-events-none" style={{ color: 'var(--text-muted)' }}>%</span>
+                        <input
+                          type="number" min={0} max={100} step={0.1}
+                          className="input pr-8"
+                          value={a.allocation_pct}
+                          onChange={e => updatePct(i, parseFloat(e.target.value) || 0)}
+                        />
+                      </div>
+                      <button
+                        onClick={() => removeAsset(i)}
+                        disabled={assets.length <= 1}
+                        className="text-red-500 hover:text-red-400 disabled:opacity-30 text-xl leading-none px-1"
+                      >×</button>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className={`mt-2 text-sm font-semibold ${Math.abs(totalPct - 100) < 0.1 ? 'text-green-400' : 'text-red-400'}`}>
+                {lang === 'ar' ? 'المجموع' : 'Total'}: {totalPct.toFixed(1)}%{' '}
+                {Math.abs(totalPct - 100) < 0.1 ? '✅' : (lang === 'ar' ? '(يجب 100%)' : '(must be 100%)')}
+              </div>
+            </div>
+
+            {/* Investment */}
+            <div>
+              <div className="label">{lang === 'ar' ? 'المبلغ المستثمر (USDT)' : 'Invested Amount (USDT)'}</div>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm pointer-events-none" style={{ color: 'var(--text-muted)' }}>USDT</span>
+                <input
+                  type="number" min={1}
+                  className="input pl-16"
+                  value={totalUsdt}
+                  onChange={e => setTotalUsdt(parseFloat(e.target.value) || 0)}
+                />
+              </div>
+            </div>
+
+            {/* Rebalance mode */}
+            <div>
+              <div className="label mb-2">{lang === 'ar' ? 'وضع إعادة التوازن' : 'Rebalance Mode'}</div>
+              <div className="grid grid-cols-3 gap-2 mb-3">
+                {(['proportional', 'timed', 'unbalanced'] as EditRebalMode[]).map(m => (
+                  <button
+                    key={m}
+                    onClick={() => setRebalMode(m)}
+                    className={`p-2.5 rounded-xl border-2 text-center transition-colors ${rebalMode === m ? 'border-brand bg-brand/10' : 'border-gray-700 hover:border-gray-600'}`}
+                  >
+                    <div className="text-base">{m === 'proportional' ? '📊' : m === 'timed' ? '⏰' : '🔓'}</div>
+                    <div className="text-[10px] font-semibold mt-0.5" style={{ color: 'var(--text-main)' }}>
+                      {m === 'proportional' ? (lang === 'ar' ? 'نسبي' : 'Proportional') : m === 'timed' ? (lang === 'ar' ? 'زمني' : 'Timed') : (lang === 'ar' ? 'يدوي' : 'Manual')}
+                    </div>
+                  </button>
+                ))}
+              </div>
+
+              {rebalMode === 'proportional' && (
+                <div>
+                  <div className="label text-xs">{lang === 'ar' ? 'عتبة الانحراف' : 'Deviation Threshold'}</div>
+                  <div className="flex gap-2">
+                    {[1, 3, 5].map(t => (
+                      <button key={t} onClick={() => setThreshold(t)}
+                        className={`flex-1 py-2 rounded-xl border-2 text-sm font-bold transition-colors ${threshold === t ? 'border-brand bg-brand/10 text-brand' : 'border-gray-700 text-gray-400'}`}>
+                        {t}%
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {rebalMode === 'timed' && (
+                <div className="space-y-2">
+                  <div className="label text-xs">{lang === 'ar' ? 'التكرار' : 'Frequency'}</div>
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {TIMED_OPTS.map(opt => (
+                      <button key={opt.value} onClick={() => setTimedFreq(opt.value)}
+                        className={`py-1.5 rounded-xl border-2 text-xs font-semibold transition-colors ${timedFreq === opt.value ? 'border-brand bg-brand/10 text-brand' : 'border-gray-700 text-gray-400'}`}>
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                  {['daily', 'weekly', 'monthly'].includes(timedFreq) && (
+                    <div>
+                      <div className="label text-xs">{lang === 'ar' ? 'الساعة (UTC)' : 'Hour (UTC)'}</div>
+                      <input type="number" min={0} max={23} className="input w-20" value={timedHour}
+                        onChange={e => setTimedHour(parseInt(e.target.value) || 0)} />
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {error && <div className="text-sm text-red-400 bg-red-900/20 rounded-xl px-3 py-2">{error}</div>}
+
+            <div className="flex gap-2 pt-1">
+              <button onClick={onClose} className="btn-secondary flex-1">
+                {lang === 'ar' ? 'إلغاء' : 'Cancel'}
+              </button>
+              <button onClick={handleSave} disabled={saving} className="btn-primary flex-1 disabled:opacity-50">
+                {saving
+                  ? <Loader2 size={16} className="animate-spin mx-auto" />
+                  : (lang === 'ar' ? '💾 حفظ التغييرات' : '💾 Save Changes')}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Main component ───────────────────────────────────────────────────────────
 export default function Portfolios({ lang, onActivated, onCreateBot, onEditPortfolio }: Props) {
   const [portfolios, setPortfolios]       = useState<any[]>([]);
@@ -409,6 +667,7 @@ export default function Portfolios({ lang, onActivated, onCreateBot, onEditPortf
   const [rebalModal, setRebalModal]         = useState<{ id: number; name: string; active: boolean } | null>(null);
   const [stopSellModal, setStopSellModal]   = useState<{ id: number; name: string } | null>(null);
   const [togglingLoop, setTogglingLoop]     = useState<number | null>(null);
+  const [editModal, setEditModal]           = useState<number | null>(null);
 
 
   const load = useCallback(async () => {
@@ -497,6 +756,15 @@ export default function Portfolios({ lang, onActivated, onCreateBot, onEditPortf
 
   return (
     <>
+      {editModal !== null && (
+        <EditPortfolioModal
+          portfolioId={editModal}
+          lang={lang}
+          onClose={() => setEditModal(null)}
+          onSaved={() => { load(); setMsg(lang === 'ar' ? '✅ تم حفظ الإعدادات' : '✅ Settings saved'); }}
+        />
+      )}
+
       {rebalModal && (
         <RebalanceModal
           portfolioId={rebalModal.id}
@@ -753,7 +1021,7 @@ export default function Portfolios({ lang, onActivated, onCreateBot, onEditPortf
 
                 {/* إعدادات المحفظة */}
                 <button
-                  onClick={() => onEditPortfolio?.(p.id)}
+                  onClick={() => setEditModal(p.id)}
                   className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold transition-all active:scale-95"
                   style={{
                     background: 'rgba(96,165,250,0.07)',

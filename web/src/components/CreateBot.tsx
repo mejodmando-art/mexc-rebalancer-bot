@@ -7,7 +7,6 @@ import { Lang, tr } from '../lib/i18n';
 interface Asset {
   symbol: string;
   allocation_pct: number;
-  entry_price_usdt: number | null;
 }
 
 type RebalanceMode   = 'proportional' | 'timed' | 'unbalanced';
@@ -35,8 +34,8 @@ const ALLOC_MODES: { value: AllocationMode; labelKey: string; descKey: string }[
 
 export default function CreateBot({ lang, onCreated }: Props) {
   const [assets, setAssets]             = useState<Asset[]>([
-    { symbol: 'BTC', allocation_pct: 70, entry_price_usdt: null },
-    { symbol: 'ETH', allocation_pct: 30, entry_price_usdt: null },
+    { symbol: 'BTC', allocation_pct: 70 },
+    { symbol: 'ETH', allocation_pct: 30 },
   ]);
   const [botName, setBotName]           = useState('My MEXC Portfolio');
   const [totalUsdt, setTotalUsdt]       = useState(1000);
@@ -71,7 +70,7 @@ export default function CreateBot({ lang, onCreated }: Props) {
 
   const addAsset = () => {
     if (assets.length >= 20) return;
-    const next = [...assets, { symbol: '', allocation_pct: 0, entry_price_usdt: null }];
+    const next = [...assets, { symbol: '', allocation_pct: 0 }];
     setAssets(allocMode === 'equal' ? applyEqualAlloc(next) : next);
   };
 
@@ -94,11 +93,7 @@ export default function CreateBot({ lang, onCreated }: Props) {
     setAssets(up);
   };
 
-  const updateEntryPrice = (i: number, val: string) => {
-    const up = [...assets];
-    up[i] = { ...up[i], entry_price_usdt: val === '' ? null : parseFloat(val) };
-    setAssets(up);
-  };
+
 
   // ── Validation ──────────────────────────────────────────────────────────
 
@@ -127,7 +122,6 @@ export default function CreateBot({ lang, onCreated }: Props) {
           assets: assets.map(a => ({
             symbol: a.symbol.trim().toUpperCase(),
             allocation_pct: a.allocation_pct,
-            entry_price_usdt: a.entry_price_usdt ?? null,
           })),
           total_usdt: totalUsdt,
           initial_value_usdt: totalUsdt,
@@ -263,27 +257,7 @@ export default function CreateBot({ lang, onCreated }: Props) {
                   </button>
                 </div>
 
-                {/* Entry price (optional) */}
-                <div className="flex items-center gap-2">
-                  <span className="text-xs w-28 shrink-0" style={{ color: 'var(--text-muted)' }}>
-                    {tr('entryPrice', lang)}
-                  </span>
-                  <div className="flex-1 relative">
-                    <span
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-xs pointer-events-none"
-                      style={{ color: 'var(--text-muted)' }}
-                    >
-                      USDT
-                    </span>
-                    <input
-                      type="number" min={0} step="any"
-                      className="input pr-14 text-sm"
-                      placeholder={tr('entryPriceOpt', lang)}
-                      value={a.entry_price_usdt ?? ''}
-                      onChange={e => updateEntryPrice(i, e.target.value)}
-                    />
-                  </div>
-                </div>
+
               </div>
             );
           })}
