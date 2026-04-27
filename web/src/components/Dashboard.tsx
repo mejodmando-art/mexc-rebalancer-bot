@@ -2,9 +2,9 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import {
-  DollarSign, Wallet, TrendingUp, TrendingDown,
-  Play, Square, RefreshCw, Zap,
-  CheckCircle2, XCircle, ShoppingCart, History,
+  Play, Square, RefreshCw,
+  CheckCircle2, XCircle, ShoppingCart, Settings,
+  Scale, StopCircle, Loader2, ChevronDown, ChevronUp,
 } from 'lucide-react';
 import {
   getStatus, getBotStatus,
@@ -12,7 +12,7 @@ import {
   getRebalanceJobStatus, getAccountTotal,
   listPortfolios, activatePortfolio, rebalancePortfolio, startPortfolio,
   stopPortfolio, getPortfolioAssets, stopAndSellPortfolio, getHistory,
-
+  updatePortfolio, getPortfolio,
 } from '../lib/api';
 import { Lang, tr } from '../lib/i18n';
 import { useToast } from './Toast';
@@ -25,7 +25,7 @@ interface StatusData {
   total_usdt: number; assets: Asset[];
   bot_name?: string; mode?: string;
 }
-interface Props { lang: Lang }
+interface Props { lang: Lang; onNavigate?: (tab: 'portfolios' | 'create') => void; }
 
 function createRipple(e: React.MouseEvent<HTMLButtonElement>) {
   const btn = e.currentTarget;
@@ -40,7 +40,7 @@ function createRipple(e: React.MouseEvent<HTMLButtonElement>) {
   setTimeout(() => ripple.remove(), 700);
 }
 
-export default function Dashboard({ lang }: Props) {
+export default function Dashboard({ lang, onNavigate }: Props) {
   const toast = useToast();
 
   const [status,       setStatus]       = useState<StatusData | null>(null);
@@ -77,6 +77,10 @@ export default function Dashboard({ lang }: Props) {
   const [sellingPort,     setSellingPort]     = useState<number | null>(null);
   // History modal
   const [historyPort,     setHistoryPort]     = useState<{ name: string; rows: any[] } | null>(null);
+  // Expanded portfolio cards
+  const [expandedPorts,   setExpandedPorts]   = useState<Set<number>>(new Set());
+  const toggleExpand = (id: number) =>
+    setExpandedPorts(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
 
 
 
@@ -417,6 +421,239 @@ export default function Dashboard({ lang }: Props) {
 
 
       </div>
+
+      {/* ── PORTFOLIO CARDS ───────────────────────────────────────────────── */}
+      {portfolios.length > 0 && (
+        <div className="space-y-3 animate-fade-up" style={{ animationDelay: '0.04s' }}>
+          {portfolios.map((p, pi) => {
+            const assets: any[] = p.assets ?? [];
+            const liveData = allPortAssets[p.id];
+            const isExpanded = expandedPorts.has(p.id);
+            const isRunning = p.running;
+            const isActive  = p.active;
+            const modeIcon  = p.mode === 'proportional' ? '📊' : p.mode === 'timed' ? '⏰' : '🔓';
+            const BADGE_COLORS = ['#2DD4BF','#60A5FA','#C9A7FF','#F0B90B','#F87171','#34D399',
+                                  '#FB923C','#F472B6','#38BDF8','#FACC15','#A3E635','#E879F9',
+                                  '#FCD34D','#6EE7B7','#93C5FD','#FCA5A5','#67E8F9','#D8B4FE','#86EFAC','#FDE68A'];
+
+            return (
+              <div
+                key={p.id}
+                className="rounded-2xl overflow-hidden"
+                style={{
+                  background: 'var(--bg-card)',
+                  border: isActive
+                    ? '1px solid rgba(56,139,253,0.35)'
+                    : '1px solid var(--border)',
+                  boxShadow: isActive
+                    ? '0 0 0 1px rgba(56,139,253,0.08), 0 4px 20px rgba(56,139,253,0.12)'
+                    : 'var(--shadow-card)',
+                }}
+              >
+                {/* ── Card header ── */}
+                <button
+                  className="w-full flex items-center justify-between px-4 pt-4 pb-3 gap-3"
+                  onClick={() => toggleExpand(p.id)}
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    {/* Status dot */}
+                    <span
+                      className={`w-2 h-2 rounded-full shrink-0 ${isRunning ? 'pulse-dot' : ''}`}
+                      style={{ background: isRunning ? '#3FB950' : 'var(--text-muted)' }}
+                    />
+                    <span className="font-bold text-sm truncate" style={{ color: 'var(--text-main)' }}>
+                      {p.name}
+                    </span>
+                    {isActive && (
+                      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0"
+                        style={{ background: 'rgba(56,139,253,0.15)', color: '#60A5FA' }}>
+                        {lang === 'ar' ? 'نشطة' : 'Active'}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="text-xs font-mono font-bold" style={{ color: '#2DD4BF' }}>
+                      ${(p.total_usdt ?? 0).toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                    </span>
+                    <span className="text-sm">{modeIcon}</span>
+                    {isExpanded
+                      ? <ChevronUp size={14} style={{ color: 'var(--text-muted)' }} />
+                      : <ChevronDown size={14} style={{ color: 'var(--text-muted)' }} />}
+                  </div>
+                </button>
+
+                {/* ── Allocation bar ── */}
+                <div className="flex h-1 mx-4 rounded-full overflow-hidden mb-3">
+                  {assets.map((a, i) => (
+                    <div
+                      key={i}
+                      style={{
+                        width: `${a.allocation_pct ?? (100 / assets.length)}%`,
+                        background: BADGE_COLORS[i % BADGE_COLORS.length],
+                      }}
+                    />
+                  ))}
+                </div>
+
+                {/* ── Asset badges ── */}
+                <div className="flex flex-wrap gap-1.5 px-4 pb-3">
+                  {assets.map((a, i) => {
+                    const color = BADGE_COLORS[i % BADGE_COLORS.length];
+                    const live = liveData?.assets?.find((x: any) =>
+                      x.symbol?.replace(/USDT$/i,'').toUpperCase() === a.symbol?.toUpperCase()
+                    );
+                    return (
+                      <div
+                        key={i}
+                        className="flex items-center gap-1 px-2 py-1 rounded-xl text-[11px] font-bold"
+                        style={{
+                          background: `${color}14`,
+                          border: `1px solid ${color}30`,
+                          color,
+                        }}
+                      >
+                        <img
+                          src={`https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons/32/color/${a.symbol?.toLowerCase()}.png`}
+                          alt={a.symbol}
+                          className="w-3.5 h-3.5 rounded-full"
+                          onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                        />
+                        {a.symbol} {a.allocation_pct ? `${a.allocation_pct}%` : ''}
+                        {live?.value_usdt > 0 && (
+                          <span className="font-mono text-[9px] opacity-70">
+                            ${live.value_usdt.toFixed(1)}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* ── Expanded: stats + actions ── */}
+                {isExpanded && (
+                  <div className="px-4 pb-4 space-y-3 border-t" style={{ borderColor: 'var(--border)' }}>
+                    {/* Stats row */}
+                    <div className="grid grid-cols-3 gap-2 pt-3">
+                      {[
+                        { label: lang === 'ar' ? 'الأصول' : 'Assets', value: assets.length },
+                        { label: 'MODE', value: p.mode ?? '—', mono: false },
+                        { label: lang === 'ar' ? 'المبلغ' : 'Amount',
+                          value: `$${(p.total_usdt ?? 0).toLocaleString('en-US', { maximumFractionDigits: 0 })}` },
+                      ].map((s, i) => (
+                        <div key={i} className="rounded-xl px-2 py-2 text-center"
+                          style={{ background: 'var(--bg-input)', border: '1px solid var(--border)' }}>
+                          <div className="text-[9px] font-semibold mb-0.5" style={{ color: 'var(--text-muted)' }}>{s.label}</div>
+                          <div className="text-xs font-bold" style={{ color: 'var(--text-main)' }}>{s.value}</div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* P&L if live data */}
+                    {liveData && (
+                      <div className="rounded-xl px-3 py-2 flex items-center justify-between"
+                        style={{ background: 'var(--bg-input)', border: '1px solid var(--border)' }}>
+                        <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                          {lang === 'ar' ? 'القيمة الحالية' : 'Current Value'}
+                        </span>
+                        <span className="font-mono font-bold text-sm" style={{ color: '#2DD4BF' }}>
+                          ${(liveData.total_usdt ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Action buttons */}
+                    <div className="grid grid-cols-2 gap-2">
+                      {/* Start / Stop */}
+                      <button
+                        onClick={() => handlePortfolioToggle(p)}
+                        disabled={togglingLoop === p.id}
+                        className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-bold transition-all active:scale-95 disabled:opacity-50"
+                        style={{
+                          background: isRunning ? 'rgba(248,81,73,0.1)' : 'rgba(63,185,80,0.1)',
+                          border: `1px solid ${isRunning ? 'rgba(248,81,73,0.3)' : 'rgba(63,185,80,0.3)'}`,
+                          color: isRunning ? '#F85149' : '#3FB950',
+                        }}
+                      >
+                        {togglingLoop === p.id
+                          ? <Loader2 size={13} className="animate-spin" />
+                          : isRunning ? <Square size={13} /> : <Play size={13} />}
+                        {isRunning
+                          ? (lang === 'ar' ? 'إيقاف' : 'Stop')
+                          : (lang === 'ar' ? 'تشغيل' : 'Start')}
+                      </button>
+
+                      {/* Buy & Activate */}
+                      <button
+                        onClick={() => { setSelectedPortId(p.id); handleBuyAndActivate(p.id); }}
+                        disabled={buyActivating}
+                        className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-bold transition-all active:scale-95 disabled:opacity-50"
+                        style={{
+                          background: 'rgba(56,139,253,0.1)',
+                          border: '1px solid rgba(56,139,253,0.3)',
+                          color: '#60A5FA',
+                        }}
+                      >
+                        {buyActivating && selectedPortId === p.id
+                          ? <Loader2 size={13} className="animate-spin" />
+                          : <ShoppingCart size={13} />}
+                        {lang === 'ar' ? 'شراء وتفعيل' : 'Buy & Activate'}
+                      </button>
+
+                      {/* Rebalance */}
+                      <button
+                        onClick={() => handlePortfolioRebalance(p)}
+                        disabled={rebalancingPort === p.id}
+                        className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-bold transition-all active:scale-95 disabled:opacity-50"
+                        style={{
+                          background: 'rgba(45,212,191,0.08)',
+                          border: '1px solid rgba(45,212,191,0.25)',
+                          color: '#2DD4BF',
+                        }}
+                      >
+                        {rebalancingPort === p.id
+                          ? <Loader2 size={13} className="animate-spin" />
+                          : <Scale size={13} />}
+                        {lang === 'ar' ? 'إعادة توازن' : 'Rebalance'}
+                      </button>
+
+                      {/* Stop & Sell */}
+                      <button
+                        onClick={() => handleStopAndSell(p)}
+                        disabled={sellingPort === p.id}
+                        className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-bold transition-all active:scale-95 disabled:opacity-50"
+                        style={{
+                          background: 'rgba(248,81,73,0.08)',
+                          border: '1px solid rgba(248,81,73,0.22)',
+                          color: '#F85149',
+                        }}
+                      >
+                        {sellingPort === p.id
+                          ? <Loader2 size={13} className="animate-spin" />
+                          : <StopCircle size={13} />}
+                        {lang === 'ar' ? 'إيقاف وبيع' : 'Stop & Sell'}
+                      </button>
+                    </div>
+
+                    {/* Settings button */}
+                    <button
+                      onClick={() => onNavigate?.('portfolios')}
+                      className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-semibold transition-all active:scale-95"
+                      style={{
+                        background: 'rgba(56,139,253,0.07)',
+                        border: '1px solid rgba(56,139,253,0.2)',
+                        color: '#60A5FA',
+                      }}
+                    >
+                      <Settings size={13} />
+                      {lang === 'ar' ? 'إعدادات المحفظة' : 'Portfolio Settings'}
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* ── COINS OVERVIEW ─────────────────────────────────────────────────── */}
       {portfolios.length > 0 && (() => {
