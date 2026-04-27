@@ -443,41 +443,69 @@ export default function Dashboard({ lang }: Props) {
         const allSymbols = Object.keys(rebalanceMap);
         if (allSymbols.length === 0) return null;
 
-        const COLORS = ['#00D4AA','#60A5FA','#A78BFA','#F0B90B','#FF7B72','#34D399','#FB923C','#E879F9','#38BDF8','#FACC15'];
+        const COIN_COLORS = ['#2DD4BF','#60A5FA','#C9A7FF','#F0B90B','#F87171','#34D399','#FB923C','#F472B6','#38BDF8','#FACC15',
+                             '#A3E635','#E879F9','#FCD34D','#6EE7B7','#93C5FD','#FCA5A5','#67E8F9','#D8B4FE','#86EFAC','#FDE68A'];
         const fmtVal = (v: number, hasLive: boolean) =>
           hasLive ? '$' + v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—';
 
         return (
           <div className="animate-fade-up rounded-2xl p-4 space-y-3" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', animationDelay: '0.05s' }}>
+            {/* Header */}
             <div className="flex items-center gap-2">
-              <div className="w-1 h-4 rounded-full" style={{ background: 'linear-gradient(180deg,#7B5CF5,#3B82F6)' }} />
+              <div className="w-1 h-4 rounded-full" style={{ background: 'linear-gradient(180deg,#388BFD,#2DD4BF)' }} />
               <span className="text-xs font-bold" style={{ color: 'var(--text-main)' }}>
                 {lang === 'ar' ? 'العملات المُدارة' : 'Managed Coins'}
               </span>
-              <span className="text-[10px] px-1.5 py-0.5 rounded-full font-bold" style={{ background: 'rgba(123,92,245,0.15)', color: '#A78BFA' }}>
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full font-bold" style={{ background: 'rgba(56,139,253,0.15)', color: '#60A5FA' }}>
                 {allSymbols.length}
               </span>
             </div>
-            <div className="space-y-2">
+
+            {/* 5-column coin grid */}
+            <div className="grid grid-cols-5 gap-2">
               {allSymbols.map((sym, idx) => {
                 const rb = rebalanceMap[sym];
-                const color = COLORS[idx % COLORS.length];
+                const color = COIN_COLORS[idx % COIN_COLORS.length];
+                const val = fmtVal(rb.value_usdt, rb.hasLiveData);
                 return (
-                  <div key={sym} className="flex items-center gap-3 px-3 py-2.5 rounded-xl" style={{ background: 'var(--bg-input)', border: '1px solid var(--border)' }}>
-                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                  <div
+                    key={sym}
+                    className="flex flex-col items-center gap-1.5 py-3 px-1 rounded-2xl transition-all"
+                    style={{
+                      background: 'var(--bg-input)',
+                      border: `1px solid ${color}22`,
+                      boxShadow: `0 2px 12px ${color}10`,
+                    }}
+                  >
+                    {/* Icon */}
+                    <div
+                      className="w-9 h-9 rounded-full flex items-center justify-center shrink-0 overflow-hidden"
+                      style={{ background: `${color}18`, border: `1.5px solid ${color}40` }}
+                    >
                       <img
                         src={`https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons/32/color/${sym.toLowerCase()}.png`}
                         alt={sym}
-                        className="w-6 h-6 rounded-full shrink-0"
-                        onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                        className="w-6 h-6"
+                        onError={(e) => {
+                          const t = e.target as HTMLImageElement;
+                          t.style.display = 'none';
+                          t.parentElement!.innerHTML = `<span style="font-size:11px;font-weight:800;color:${color}">${sym.slice(0,2)}</span>`;
+                        }}
                       />
-                      <span className="font-bold text-sm" style={{ color }}>{sym}</span>
                     </div>
-                    <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg" style={{ background: 'rgba(0,212,170,0.08)', border: '1px solid rgba(0,212,170,0.2)' }}>
-                      <span className="num text-xs font-bold" style={{ color: '#00D4AA' }}>
-                        {fmtVal(rb.value_usdt, rb.hasLiveData)}
-                      </span>
-                    </div>
+
+                    {/* Symbol */}
+                    <span className="font-bold text-[11px] leading-none tracking-wide" style={{ color }}>
+                      {sym}
+                    </span>
+
+                    {/* Value */}
+                    <span
+                      className="font-mono text-[10px] font-semibold leading-none"
+                      style={{ color: rb.hasLiveData ? 'var(--text-main)' : 'var(--text-muted)' }}
+                    >
+                      {val}
+                    </span>
                   </div>
                 );
               })}
