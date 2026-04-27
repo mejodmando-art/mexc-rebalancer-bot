@@ -1,7 +1,12 @@
 import React, { useState } from 'react';
 import './EditPortfolioModal.css';
 
-const EditPortfolioModal = ({ isOpen, onClose }) => {
+interface EditPortfolioModalProps {
+    isOpen: boolean;
+    onClose: () => void;
+}
+
+const EditPortfolioModal = ({ isOpen, onClose }: EditPortfolioModalProps) => {
     const [botName, setBotName] = useState('');
     const [totalUSDT, setTotalUSDT] = useState(0);
     const [assets, setAssets] = useState([{ symbol: '', allocation: 0 }]);
@@ -12,9 +17,10 @@ const EditPortfolioModal = ({ isOpen, onClose }) => {
     const [sellAtTermination, setSellAtTermination] = useState(false);
     const [paperTrading, setPaperTrading] = useState(false);
 
-    const handleAssetChange = (index, field, value) => {
-        const newAssets = [...assets];
-        newAssets[index][field] = value;
+    const handleAssetChange = (index: number, field: 'symbol' | 'allocation', value: string | number) => {
+        const newAssets = assets.map((asset, i) =>
+            i === index ? { ...asset, [field]: value } : asset
+        );
         setAssets(newAssets);
     };
 
