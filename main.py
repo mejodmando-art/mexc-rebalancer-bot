@@ -26,10 +26,10 @@ log = logging.getLogger("main")
 
 from database import (
     init_db, get_running_portfolios, get_portfolio,
-    set_bot_running, list_portfolios, get_rebalance_history,
+    set_bot_running, list_portfolios, save_portfolio,
 )
 from engine import start_portfolio_loop, stop_portfolio_loop, is_portfolio_running
-from smart_portfolio import execute_rebalance, get_portfolio_value, get_pnl, load_config
+from smart_portfolio import execute_rebalance
 from mexc_client import MEXCClient
 
 
@@ -37,36 +37,19 @@ def _rebalance_fn(portfolio_id: int) -> list:
     cfg = get_portfolio(portfolio_id)
     if cfg is None:
         return []
-    client = MEXCClient()
-    return execute_rebalance(client, cfg, portfolio_id=portfolio_id)
+    return execute_rebalance(MEXCClient(), cfg, portfolio_id=portfolio_id)
 
 
-def _get_status_fn() -> dict:
-    cfg = load_config()
-    client = MEXCClient()
-    portfolio = get_portfolio_value(client, cfg["portfolio"]["assets"], budget_usdt=None)
-    targets = {a["symbol"]: a["allocation_pct"] for a in cfg["portfolio"]["assets"]}
-    pnl = get_pnl(cfg, current_usdt=portfolio["total_usdt"])
-    assets_out = []
-    for r in portfolio["assets"]:
-        diff = round(r["actual_pct"] - targets[r["symbol"]], 2)
-        assets_out.append({
-            "symbol": r["symbol"],
-            "balance": r["balance"],
-            "price": r["price"],
-            "value_usdt": r["value_usdt"],
-            "actual_pct": round(r["actual_pct"], 2),
-            "target_pct": targets[r["symbol"]],
-            "deviation": diff,
-        })
-    return {
-        "bot_name": cfg["bot"]["name"],
-        "total_usdt": portfolio["total_usdt"],
-        "mode": cfg["rebalance"]["mode"],
-        "assets": assets_out,
-        "pnl": pnl,
-        "paper_trading": cfg.get("paper_trading", False),
-    }
+def _buy_fn(symbol: str, usdt_amount: float) -> dict:
+    return MEXCClient().place_market_buy(symbol, usdt_amount)
+
+
+def _sell_fn(symbol: str, base_amount: float) -> dict:
+    return MEXCClient().place_market_sell(symbol, base_amount)
+
+
+def _get_balances_fn() -> dict:
+    return MEXCClient().get_all_balances()
 
 
 def main():
@@ -91,14 +74,16 @@ def main():
     log.info("Starting Telegram bot...")
     from bot.telegram_bot import run_bot
     run_bot(
-        get_status_fn=_get_status_fn,
         start_fn=start_portfolio_loop,
         stop_fn=stop_portfolio_loop,
         rebalance_fn=_rebalance_fn,
         list_portfolios_fn=list_portfolios,
         is_running_fn=is_portfolio_running,
-        get_history_fn=get_rebalance_history,
         get_portfolio_fn=get_portfolio,
+        save_portfolio_fn=save_portfolio,
+        buy_fn=_buy_fn,
+        sell_fn=_sell_fn,
+        get_balances_fn=_get_balances_fn,
     )
 
 
