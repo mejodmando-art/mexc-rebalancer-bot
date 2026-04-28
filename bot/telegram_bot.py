@@ -40,16 +40,17 @@ async def _deny(update: Update) -> None:
         await update.callback_query.answer("⛔ غير مصرح.", show_alert=True)
 
 # ── Injected functions ─────────────────────────────────────────────────────────
-_start_fn:         Callable = lambda pid: None
-_stop_fn:          Callable = lambda pid: None
-_rebalance_fn:     Callable = lambda pid: []
-_list_portfolios:  Callable = lambda: []
-_is_running_fn:    Callable = lambda pid: False
-_get_portfolio_fn: Callable = lambda pid: None
-_save_portfolio_fn:Callable = lambda name, cfg: None
-_buy_fn:           Callable = lambda symbol, usdt: {}
-_sell_fn:          Callable = lambda symbol, amount: {}
-_get_balances_fn:  Callable = lambda: {}
+_start_fn:            Callable = lambda pid: None
+_stop_fn:             Callable = lambda pid: None
+_rebalance_fn:        Callable = lambda pid: []
+_list_portfolios:     Callable = lambda: []
+_is_running_fn:       Callable = lambda pid: False
+_get_portfolio_fn:    Callable = lambda pid: None
+_save_portfolio_fn:   Callable = lambda name, cfg: None
+_update_portfolio_fn: Callable = lambda pid, cfg: None
+_buy_fn:              Callable = lambda symbol, usdt: {}
+_sell_fn:             Callable = lambda symbol, amount: {}
+_get_balances_fn:     Callable = lambda: {}
 
 # ── Keyboards ──────────────────────────────────────────────────────────────────
 def _kb_main() -> InlineKeyboardMarkup:
@@ -89,11 +90,15 @@ def _kb_portfolio_detail(pid: int, running: bool) -> InlineKeyboardMarkup:
         [toggle,
          InlineKeyboardButton("🔄 إعادة توازن", callback_data=f"paction:rebalance:{pid}")],
         [
-            InlineKeyboardButton("🟢 شراء",       callback_data=f"paction:buy:{pid}"),
-            InlineKeyboardButton("🔴 بيع",         callback_data=f"paction:sell:{pid}"),
+            InlineKeyboardButton("🟢 شراء",        callback_data=f"paction:buy:{pid}"),
+            InlineKeyboardButton("🔴 بيع",          callback_data=f"paction:sell:{pid}"),
         ],
-        [InlineKeyboardButton("💼 رصيد المحفظة",  callback_data=f"paction:balance:{pid}")],
-        [InlineKeyboardButton("🔙 رجوع للمحافظ",  callback_data="action:portfolios")],
+        [
+            InlineKeyboardButton("🗑️ حذف عملة",    callback_data=f"paction:remove:{pid}"),
+            InlineKeyboardButton("🔁 استبدال عملة", callback_data=f"paction:replace:{pid}"),
+        ],
+        [InlineKeyboardButton("💼 رصيد المحفظة",   callback_data=f"paction:balance:{pid}")],
+        [InlineKeyboardButton("🔙 رجوع للمحافظ",   callback_data="action:portfolios")],
     ])
 
 # ── Wizard keyboards ───────────────────────────────────────────────────────────
@@ -129,6 +134,21 @@ def _kb_balance_mode() -> InlineKeyboardMarkup:
         ],
         [InlineKeyboardButton("❌ إلغاء", callback_data="action:menu")],
     ])
+
+def _kb_asset_pick(assets: list, action: str, pid: int) -> InlineKeyboardMarkup:
+    """Inline keyboard listing each asset as a button. action: sell|remove|replace."""
+    rows = []
+    for i in range(0, len(assets), 3):
+        row = []
+        for a in assets[i:i+3]:
+            sym = a["symbol"]
+            row.append(InlineKeyboardButton(
+                f"{sym}",
+                callback_data=f"asset:{action}:{pid}:{sym}",
+            ))
+        rows.append(row)
+    rows.append([InlineKeyboardButton("❌ إلغاء", callback_data=f"portfolio:{pid}")])
+    return InlineKeyboardMarkup(rows)
 
 # ── Formatters ─────────────────────────────────────────────────────────────────
 def _fmt_portfolio_balance(pid: int) -> str:
@@ -426,22 +446,118 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> Non
             )
 
         elif action == "sell":
-            ctx.user_data["state"]     = "await_sell_symbol"
-            ctx.user_data["trade_pid"] = pid
             cfg    = _get_portfolio_fn(pid)
             assets = cfg.get("portfolio", {}).get("assets", []) if cfg else []
-            sym_list = "  ".join(f"`{a['symbol']}`" for a in assets) or "—"
+            if not assets:
+                await query.answer("لا توجد عملات في المحفظة.", show_alert=True)
+                return
             await _edit(
                 query,
-                f"🔴 *بيع*\n\nعملات المحفظة: {sym_list}\n\n"
-                "أرسل: `SYMBOL AMOUNT`\nمثال: `BTC 0.001`",
-                _kb_cancel(),
+                "🔴 *بيع — اختر العملة:*",
+                _kb_asset_pick(assets, "sell", pid),
+            )
+
+        elif action == "remove":
+            cfg    = _get_portfolio_fn(pid)
+            assets = cfg.get("portfolio", {}).get("assets", []) if cfg else []
+            if not assets:
+                await query.answer("لا توجد عملات في المحفظة.", show_alert=True)
+                return
+            await _edit(
+                query,
+                "🗑️ *حذف عملة — اختر العملة التي تريد حذفها:*",
+                _kb_asset_pick(assets, "remove", pid),
+            )
+
+        elif action == "replace":
+            cfg    = _get_portfolio_fn(pid)
+            assets = cfg.get("portfolio", {}).get("assets", []) if cfg else []
+            if not assets:
+                await query.answer("لا توجد عملات في المحفظة.", show_alert=True)
+                return
+            await _edit(
+                query,
+                "🔁 *استبدال عملة — اختر العملة التي تريد استبدالها:*",
+                _kb_asset_pick(assets, "replace", pid),
             )
 
         elif action == "balance":
             await _edit(query, "⏳ جاري جلب الرصيد...", _kb_back("action:portfolios"))
             text = _fmt_portfolio_balance(pid)
             await _edit(query, text, _kb_portfolio_detail(pid, _is_running_fn(pid)))
+
+    # ── Asset picker result ────────────────────────────────────────────────────
+    # callback_data = "asset:{action}:{pid}:{sym}"
+    elif data.startswith("asset:"):
+        _, act, pid_str, sym = data.split(":", 3)
+        pid = int(pid_str)
+
+        if act == "sell":
+            ctx.user_data["state"]      = "await_sell_amount"
+            ctx.user_data["trade_pid"]  = pid
+            ctx.user_data["trade_sym"]  = sym
+            await _edit(
+                query,
+                f"🔴 *بيع `{sym}`*\n\nأرسل الكمية:\nمثال: `0.001`",
+                _kb_back(f"paction:sell:{pid}"),
+            )
+
+        elif act == "remove":
+            ctx.user_data["state"]         = "confirm_remove"
+            ctx.user_data["trade_pid"]     = pid
+            ctx.user_data["trade_sym"]     = sym
+            await _edit(
+                query,
+                f"🗑️ هل تريد حذف `{sym}` من المحفظة؟\n\n"
+                "⚠️ سيتم إعادة توزيع النسب تلقائياً على باقي العملات.",
+                InlineKeyboardMarkup([
+                    [
+                        InlineKeyboardButton("✅ تأكيد الحذف", callback_data=f"confirm:remove:{pid}:{sym}"),
+                        InlineKeyboardButton("❌ إلغاء",        callback_data=f"portfolio:{pid}"),
+                    ]
+                ]),
+            )
+
+        elif act == "replace":
+            ctx.user_data["state"]         = "await_replace_new"
+            ctx.user_data["trade_pid"]     = pid
+            ctx.user_data["trade_sym"]     = sym
+            await _edit(
+                query,
+                f"🔁 *استبدال `{sym}`*\n\nأرسل رمز العملة الجديدة:\nمثال: `ADA`",
+                _kb_back(f"paction:replace:{pid}"),
+            )
+
+    # ── Confirm remove ─────────────────────────────────────────────────────────
+    elif data.startswith("confirm:remove:"):
+        _, _, pid_str, sym = data.split(":", 3)
+        pid = int(pid_str)
+        cfg = _get_portfolio_fn(pid)
+        if not cfg:
+            await query.answer("المحفظة غير موجودة.", show_alert=True)
+            return
+        assets = cfg.get("portfolio", {}).get("assets", [])
+        assets = [a for a in assets if a["symbol"].upper() != sym.upper()]
+        if not assets:
+            await _edit(query, "⚠️ لا يمكن حذف العملة الوحيدة في المحفظة.", _kb_portfolio_detail(pid, _is_running_fn(pid)))
+            return
+        # Redistribute allocations equally among remaining assets
+        pct = round(100 / len(assets), 4)
+        for a in assets:
+            a["allocation_pct"] = pct
+        diff = round(100 - sum(a["allocation_pct"] for a in assets), 4)
+        assets[-1]["allocation_pct"] = round(assets[-1]["allocation_pct"] + diff, 4)
+        cfg["portfolio"]["assets"] = assets
+        try:
+            _update_portfolio_fn(pid, cfg)
+            asset_lines = "\n".join(f"  • `{a['symbol']}` — `{a['allocation_pct']}%`" for a in assets)
+            await _edit(
+                query,
+                f"✅ *تم حذف `{sym}` وإعادة توزيع النسب:*\n\n{asset_lines}",
+                _kb_portfolio_detail(pid, _is_running_fn(pid)),
+            )
+        except Exception as e:
+            await _edit(query, f"❌ فشل الحذف: `{e}`", _kb_portfolio_detail(pid, _is_running_fn(pid)))
 
 # ── Wizard save helper ─────────────────────────────────────────────────────────
 async def _wizard_save(query, ctx: ContextTypes.DEFAULT_TYPE) -> None:
@@ -665,18 +781,14 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None
             await _reply(update, f"❌ فشل الشراء: `{e}`", _kb_main())
         ctx.user_data.clear()
 
-    # ── Trade: sell ────────────────────────────────────────────────────────────
-    elif state == "await_sell_symbol":
-        parts = text.upper().split()
-        if len(parts) != 2:
-            await _reply(update, "⚠️ الصيغة: `SYMBOL AMOUNT`\nمثال: `BTC 0.001`", _kb_cancel())
-            return
-        sym, amt_str = parts
+    # ── Trade: sell amount (after symbol chosen via button) ───────────────────
+    elif state == "await_sell_amount":
+        sym = ctx.user_data.get("trade_sym", "")
         try:
-            amt = float(amt_str)
+            amt = float(text)
             assert amt > 0
         except Exception:
-            await _reply(update, "⚠️ الكمية غير صحيحة.", _kb_cancel())
+            await _reply(update, "⚠️ أرسل كمية صحيحة (مثال: `0.001`).", _kb_cancel())
             return
         await _reply(update, f"⏳ جاري بيع `{amt}` من `{sym}`...")
         try:
@@ -688,6 +800,41 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None
             )
         except Exception as e:
             await _reply(update, f"❌ فشل البيع: `{e}`", _kb_main())
+        ctx.user_data.clear()
+
+    # ── Replace: new symbol ────────────────────────────────────────────────────
+    elif state == "await_replace_new":
+        new_sym = text.upper().strip()
+        pid     = ctx.user_data.get("trade_pid")
+        old_sym = ctx.user_data.get("trade_sym", "")
+        if not new_sym.isalpha():
+            await _reply(update, "⚠️ أرسل رمز عملة صحيح (مثال: `ADA`).", _kb_cancel())
+            return
+        cfg = _get_portfolio_fn(pid)
+        if not cfg:
+            await _reply(update, "❌ المحفظة غير موجودة.", _kb_main())
+            ctx.user_data.clear()
+            return
+        assets = cfg.get("portfolio", {}).get("assets", [])
+        existing = [a["symbol"].upper() for a in assets]
+        if new_sym in existing:
+            await _reply(update, f"⚠️ `{new_sym}` موجودة بالفعل في المحفظة.", _kb_cancel())
+            return
+        for a in assets:
+            if a["symbol"].upper() == old_sym.upper():
+                a["symbol"] = new_sym
+                break
+        cfg["portfolio"]["assets"] = assets
+        try:
+            _update_portfolio_fn(pid, cfg)
+            asset_lines = "\n".join(f"  • `{a['symbol']}` — `{a['allocation_pct']}%`" for a in assets)
+            await _reply(
+                update,
+                f"✅ *تم استبدال `{old_sym}` بـ `{new_sym}`:*\n\n{asset_lines}",
+                _kb_main(),
+            )
+        except Exception as e:
+            await _reply(update, f"❌ فشل الاستبدال: `{e}`", _kb_main())
         ctx.user_data.clear()
 
     else:
@@ -729,34 +876,36 @@ async def cmd_done(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
 
 # ── Entry point ────────────────────────────────────────────────────────────────
 def run_bot(
-    start_fn:           Callable,
-    stop_fn:            Callable,
-    rebalance_fn:       Callable,
-    list_portfolios_fn: Callable,
-    is_running_fn:      Callable,
-    get_portfolio_fn:   Callable,
-    save_portfolio_fn:  Callable,
-    buy_fn:             Callable,
-    sell_fn:            Callable,
-    get_balances_fn:    Callable,
+    start_fn:             Callable,
+    stop_fn:              Callable,
+    rebalance_fn:         Callable,
+    list_portfolios_fn:   Callable,
+    is_running_fn:        Callable,
+    get_portfolio_fn:     Callable,
+    save_portfolio_fn:    Callable,
+    buy_fn:               Callable,
+    sell_fn:              Callable,
+    get_balances_fn:      Callable,
+    update_portfolio_fn:  Callable = lambda pid, cfg: None,
     # backward-compat — unused
-    get_status_fn:      Callable = lambda: {},
-    get_history_fn:     Callable = lambda limit, portfolio_id=1: [],
+    get_status_fn:        Callable = lambda: {},
+    get_history_fn:       Callable = lambda limit, portfolio_id=1: [],
 ) -> None:
     global _start_fn, _stop_fn, _rebalance_fn, _list_portfolios
     global _is_running_fn, _get_portfolio_fn, _save_portfolio_fn
-    global _buy_fn, _sell_fn, _get_balances_fn
+    global _update_portfolio_fn, _buy_fn, _sell_fn, _get_balances_fn
 
-    _start_fn          = start_fn
-    _stop_fn           = stop_fn
-    _rebalance_fn      = rebalance_fn
-    _list_portfolios   = list_portfolios_fn
-    _is_running_fn     = is_running_fn
-    _get_portfolio_fn  = get_portfolio_fn
-    _save_portfolio_fn = save_portfolio_fn
-    _buy_fn            = buy_fn
-    _sell_fn           = sell_fn
-    _get_balances_fn   = get_balances_fn
+    _start_fn             = start_fn
+    _stop_fn              = stop_fn
+    _rebalance_fn         = rebalance_fn
+    _list_portfolios      = list_portfolios_fn
+    _is_running_fn        = is_running_fn
+    _get_portfolio_fn     = get_portfolio_fn
+    _save_portfolio_fn    = save_portfolio_fn
+    _update_portfolio_fn  = update_portfolio_fn
+    _buy_fn               = buy_fn
+    _sell_fn              = sell_fn
+    _get_balances_fn      = get_balances_fn
 
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
     if not token:

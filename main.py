@@ -27,6 +27,7 @@ log = logging.getLogger("main")
 from database import (
     init_db, get_running_portfolios, get_portfolio,
     set_bot_running, list_portfolios, save_portfolio,
+    update_portfolio_config,
 )
 from engine import start_portfolio_loop, stop_portfolio_loop, is_portfolio_running
 from smart_portfolio import execute_rebalance
@@ -81,6 +82,7 @@ def main():
         is_running_fn=is_portfolio_running,
         get_portfolio_fn=get_portfolio,
         save_portfolio_fn=save_portfolio,
+        update_portfolio_fn=update_portfolio_config,
         buy_fn=_buy_fn,
         sell_fn=_sell_fn,
         get_balances_fn=_get_balances_fn,
