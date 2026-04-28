@@ -83,11 +83,13 @@ def _make_loop(portfolio_id: int, stop_event: threading.Event) -> None:
 
                 if current_mode == "proportional":
                     interval = cfg["rebalance"]["proportional"]["check_interval_minutes"] * 60
+                    buy_enabled = cfg.get("buy_enabled", False)
                     if needs_rebalance_proportional(client, cfg, exclude_symbols=sl_tp_symbols):
                         result = execute_rebalance(
                             client, cfg,
                             exclude_symbols=sl_tp_symbols,
                             portfolio_id=portfolio_id,
+                            buy_enabled=buy_enabled,
                         )
                         trades = [r for r in result if r.get("action") in ("BUY", "SELL")]
                         if trades:
@@ -102,6 +104,7 @@ def _make_loop(portfolio_id: int, stop_event: threading.Event) -> None:
                     timed_cfg = cfg["rebalance"]["timed"]
                     frequency = timed_cfg["frequency"]
                     target_hour = timed_cfg.get("hour", 0)
+                    buy_enabled = cfg.get("buy_enabled", False)
                     if timed_next_run is None:
                         timed_next_run = next_run_time(frequency, target_hour=target_hour)
                     if datetime.utcnow() >= timed_next_run:
@@ -109,6 +112,7 @@ def _make_loop(portfolio_id: int, stop_event: threading.Event) -> None:
                             client, cfg,
                             exclude_symbols=sl_tp_symbols,
                             portfolio_id=portfolio_id,
+                            buy_enabled=buy_enabled,
                         )
                         trades = [r for r in result if r.get("action") in ("BUY", "SELL")]
                         if trades:

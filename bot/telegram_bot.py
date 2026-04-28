@@ -436,16 +436,50 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> Non
                 await _edit(query, f"❌ فشلت إعادة التوازن: `{e}`", _kb_back("action:portfolios"))
 
         elif action == "buy":
-            ctx.user_data["state"]     = "await_buy_symbol"
-            ctx.user_data["trade_pid"] = pid
             cfg    = _get_portfolio_fn(pid)
             assets = cfg.get("portfolio", {}).get("assets", []) if cfg else []
-            sym_list = "  ".join(f"`{a['symbol']}`" for a in assets) or "—"
+            if not assets:
+                await query.answer("لا توجد عملات في المحفظة.", show_alert=True)
+                return
             await _edit(
                 query,
-                f"🟢 *شراء*\n\nعملات المحفظة: {sym_list}\n\n"
-                "أرسل: `SYMBOL USDT_AMOUNT`\nمثال: `BTC 50`",
-                _kb_cancel(),
+                "🟢 *شراء — اختر نوع الشراء:*",
+                InlineKeyboardMarkup([
+                    [
+                        InlineKeyboardButton("💰 شراء عملة محددة",   callback_data=f"paction:buy_pick:{pid}"),
+                        InlineKeyboardButton("🟢 شراء المحفظة كلها", callback_data=f"paction:buy_all:{pid}"),
+                    ],
+                    [InlineKeyboardButton("❌ إلغاء", callback_data=f"portfolio:{pid}")],
+                ]),
+            )
+
+        elif action == "buy_pick":
+            cfg    = _get_portfolio_fn(pid)
+            assets = cfg.get("portfolio", {}).get("assets", []) if cfg else []
+            if not assets:
+                await query.answer("لا توجد عملات في المحفظة.", show_alert=True)
+                return
+            await _edit(
+                query,
+                "🟢 *شراء عملة — اختر العملة:*",
+                _kb_asset_pick(assets, "buy", pid),
+            )
+
+        elif action == "buy_all":
+            cfg    = _get_portfolio_fn(pid)
+            assets = cfg.get("portfolio", {}).get("assets", []) if cfg else []
+            sym_list = "\n".join(f"  • `{a['symbol']}` — `{a['allocation_pct']}%`" for a in assets)
+            await _edit(
+                query,
+                f"🟢 *تأكيد شراء المحفظة كلها*\n\n"
+                f"سيتم شراء جميع العملات حسب النسب:\n{sym_list}\n\n"
+                "هل أنت متأكد؟",
+                InlineKeyboardMarkup([
+                    [
+                        InlineKeyboardButton("✅ تأكيد الشراء الكامل", callback_data=f"confirm:buy_all:{pid}"),
+                        InlineKeyboardButton("❌ إلغاء",                callback_data=f"portfolio:{pid}"),
+                    ]
+                ]),
             )
 
         elif action == "sell":
@@ -533,7 +567,17 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> Non
         _, act, pid_str, sym = data.split(":", 3)
         pid = int(pid_str)
 
-        if act == "sell":
+        if act == "buy":
+            ctx.user_data["state"]      = "await_buy_amount"
+            ctx.user_data["trade_pid"]  = pid
+            ctx.user_data["trade_sym"]  = sym
+            await _edit(
+                query,
+                f"🟢 *شراء `{sym}`*\n\nأرسل المبلغ بـ USDT:\nمثال: `50`",
+                _kb_back(f"paction:buy:{pid}"),
+            )
+
+        elif act == "sell":
             ctx.user_data["state"]      = "await_sell_amount"
             ctx.user_data["trade_pid"]  = pid
             ctx.user_data["trade_sym"]  = sym
@@ -601,6 +645,28 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> Non
             lines += ["\n⚠️ *أخطاء:*"] + errors
         if not results and not errors:
             lines = ["ℹ️ لا توجد أرصدة للبيع."]
+        await _edit(query, "\n".join(lines), _kb_portfolio_detail(pid, _is_running_fn(pid)))
+
+    # ── Confirm buy all ────────────────────────────────────────────────────────
+    elif data.startswith("confirm:buy_all:"):
+        pid = int(data.split(":")[2])
+        cfg = _get_portfolio_fn(pid)
+        if not cfg:
+            await query.answer("المحفظة غير موجودة.", show_alert=True)
+            return
+        await _edit(query, "⏳ *جاري شراء المحفظة كلها...*", _kb_back(f"portfolio:{pid}"))
+        try:
+            cfg["buy_enabled"] = True
+            result = _rebalance_fn(pid)
+            trades = [r for r in result if r.get("action") == "BUY"]
+            if trades:
+                lines = ["✅ *تم الشراء:*\n"]
+                for r in trades:
+                    lines.append(f"🟢 `{r['symbol']}` — `{r.get('diff_usdt', 0):.2f} USDT`")
+            else:
+                lines = ["ℹ️ لا توجد عملات تحتاج شراء حالياً."]
+        except Exception as e:
+            lines = [f"❌ فشل الشراء: `{e}`"]
         await _edit(query, "\n".join(lines), _kb_portfolio_detail(pid, _is_running_fn(pid)))
 
     # ── Confirm remove ─────────────────────────────────────────────────────────
@@ -831,18 +897,14 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None
             ]),
         )
 
-    # ── Trade: buy ─────────────────────────────────────────────────────────────
-    elif state == "await_buy_symbol":
-        parts = text.upper().split()
-        if len(parts) != 2:
-            await _reply(update, "⚠️ الصيغة: `SYMBOL USDT_AMOUNT`\nمثال: `BTC 50`", _kb_cancel())
-            return
-        sym, amt_str = parts
+    # ── Trade: buy amount (after symbol chosen via button) ────────────────────
+    elif state == "await_buy_amount":
+        sym = ctx.user_data.get("trade_sym", "")
         try:
-            amt = float(amt_str)
+            amt = float(text)
             assert amt > 0
         except Exception:
-            await _reply(update, "⚠️ المبلغ غير صحيح.", _kb_cancel())
+            await _reply(update, "⚠️ أرسل مبلغاً صحيحاً بـ USDT (مثال: `50`).", _kb_cancel())
             return
         await _reply(update, f"⏳ جاري شراء `{sym}` بـ `{amt} USDT`...")
         try:

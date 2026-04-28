@@ -384,7 +384,8 @@ def get_portfolio_value(
 
 def execute_rebalance(client: MEXCClient, cfg: dict,
                       exclude_symbols: set[str] | None = None,
-                      portfolio_id: int = 1) -> list:
+                      portfolio_id: int = 1,
+                      buy_enabled: bool = True) -> list:
     """
     Rebalance logic:
     1. Compute the effective portfolio total = sum(asset values) + free USDT
@@ -512,6 +513,12 @@ def execute_rebalance(client: MEXCClient, cfg: dict,
         time.sleep(3)
 
     # ── Buys — re-fetch USDT after sells settle ──────────────────────────
+    if not buy_enabled:
+        for b in buys:
+            b["entry"]["action"] = "SKIP_BUY_DISABLED"
+            details.append(b["entry"])
+        return details
+
     # Re-read the live USDT balance so that proceeds from sells are included.
     if not paper:
         try:
