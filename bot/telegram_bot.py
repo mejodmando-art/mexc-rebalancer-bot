@@ -522,26 +522,16 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> Non
             )
 
         elif action == "rebalance":
-            await _edit(query, "⏳ *جاري إعادة التوازن...*", _kb_back("action:portfolios"))
-            try:
-                result = _rebalance_fn(pid)
-                trades = [r for r in result if r.get("action") in ("BUY", "SELL")]
-                if trades:
-                    lines = ["✅ *تمت إعادة التوازن:*\n"]
-                    for r in trades:
-                        icon = "🟢" if r["action"] == "BUY" else "🔴"
-                        lines.append(
-                            f"{icon} `{r['symbol']}` {r['action']} `{r.get('diff_usdt', 0):+.2f}$`"
-                        )
-                    await _edit(query, "\n".join(lines), _kb_portfolio_detail(pid, _is_running_fn(pid)))
-                else:
-                    await _edit(
-                        query,
-                        "✅ *المحفظة متوازنة — لا توجد تعديلات.*",
-                        _kb_portfolio_detail(pid, _is_running_fn(pid)),
-                    )
-            except Exception as e:
-                await _edit(query, f"❌ فشلت إعادة التوازن: `{e}`", _kb_back("action:portfolios"))
+            await _edit(
+                query,
+                "🔄 *تأكيد إعادة التوازن*\n\nسيتم بيع العملات الزائدة وشراء الناقصة حسب النسب المحددة.",
+                InlineKeyboardMarkup([
+                    [
+                        InlineKeyboardButton("✅ تأكيد", callback_data=f"confirm:rebalance:{pid}"),
+                        InlineKeyboardButton("❌ إلغاء", callback_data=f"portfolio:{pid}"),
+                    ]
+                ]),
+            )
 
         elif action == "buy":
             cfg    = _get_portfolio_fn(pid)
@@ -665,7 +655,7 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> Non
             )
 
         elif action == "balance":
-            await _edit(query, "⏳ جاري جلب الرصيد...", _kb_back("action:portfolios"))
+            await _edit(query, "⏳ جاري جلب الرصيد...", _kb_back("action:menu"))
             text = _fmt_portfolio_balance(pid)
             await _edit(query, text, _kb_portfolio_detail(pid, _is_running_fn(pid)))
 
@@ -720,6 +710,25 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> Non
                 f"🔁 *استبدال `{sym}`*\n\nأرسل رمز العملة الجديدة:\nمثال: `ADA`",
                 _kb_back(f"paction:replace:{pid}"),
             )
+
+    # ── Confirm rebalance ──────────────────────────────────────────────────────
+    elif data.startswith("confirm:rebalance:"):
+        pid = int(data.split(":")[2])
+        await _edit(query, "⏳ *جاري إعادة التوازن...*", _kb_back("action:menu"))
+        try:
+            result = _rebalance_fn(pid)
+            trades = [r for r in result if r.get("action") in ("BUY", "SELL")]
+            if trades:
+                lines = ["✅ *تمت إعادة التوازن:*\n"]
+                for r in trades:
+                    icon = "🟢" if r["action"] == "BUY" else "🔴"
+                    lines.append(f"{icon} `{r['symbol']}` `{r.get('diff_usdt', 0):+.2f}$`")
+                await _edit(query, "\n".join(lines), _kb_portfolio_detail(pid, _is_running_fn(pid)))
+            else:
+                await _edit(query, "✅ *المحفظة متوازنة — لا توجد تعديلات.*",
+                            _kb_portfolio_detail(pid, _is_running_fn(pid)))
+        except Exception as e:
+            await _edit(query, f"❌ فشلت إعادة التوازن: `{e}`", _kb_back("action:menu"))
 
     # ── Confirm sell all ───────────────────────────────────────────────────────
     elif data.startswith("confirm:sell_all:"):
