@@ -4,7 +4,7 @@ Telegram bot — Arabic inline-keyboard interface for the MEXC Rebalancer.
 Commands
 --------
 /start  /menu  — main menu
-/done         — finalise bot creation wizard
+/done         — finalise bot creation wizard (manual allocation mode)
 """
 from __future__ import annotations
 
@@ -55,16 +55,19 @@ _get_balances_fn:  Callable = lambda: {}
 def _kb_main() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("➕ إنشاء بوت",   callback_data="action:create_bot"),
-            InlineKeyboardButton("📋 المحافظ",      callback_data="action:portfolios"),
+            InlineKeyboardButton("➕ إنشاء بوت",    callback_data="action:create_bot"),
+            InlineKeyboardButton("📋 المحافظ",       callback_data="action:portfolios"),
         ],
         [
-            InlineKeyboardButton("💰 الرصيد العام", callback_data="action:balance_all"),
+            InlineKeyboardButton("💰 الرصيد العام",  callback_data="action:balance_all"),
         ],
     ])
 
 def _kb_back(target: str = "action:menu") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[InlineKeyboardButton("🔙 رجوع", callback_data=target)]])
+
+def _kb_cancel() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton("❌ إلغاء", callback_data="action:menu")]])
 
 def _kb_portfolios(portfolios: list) -> InlineKeyboardMarkup:
     rows = []
@@ -93,8 +96,39 @@ def _kb_portfolio_detail(pid: int, running: bool) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🔙 رجوع للمحافظ",  callback_data="action:portfolios")],
     ])
 
-def _kb_cancel() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([[InlineKeyboardButton("❌ إلغاء", callback_data="action:menu")]])
+# ── Wizard keyboards ───────────────────────────────────────────────────────────
+def _kb_alloc_mode() -> InlineKeyboardMarkup:
+    """Step: choose allocation mode after entering symbols."""
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("⚖️ متساوي تلقائي", callback_data="wizard:alloc:equal"),
+            InlineKeyboardButton("✏️ يدوي",           callback_data="wizard:alloc:manual"),
+        ],
+        [InlineKeyboardButton("❌ إلغاء", callback_data="action:menu")],
+    ])
+
+def _kb_deviation() -> InlineKeyboardMarkup:
+    """Step: choose rebalance deviation threshold."""
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("1%",  callback_data="wizard:dev:1"),
+            InlineKeyboardButton("3%",  callback_data="wizard:dev:3"),
+            InlineKeyboardButton("5%",  callback_data="wizard:dev:5"),
+            InlineKeyboardButton("10%", callback_data="wizard:dev:10"),
+        ],
+        [InlineKeyboardButton("🔢 مخصص", callback_data="wizard:dev:custom")],
+        [InlineKeyboardButton("❌ إلغاء", callback_data="action:menu")],
+    ])
+
+def _kb_balance_mode() -> InlineKeyboardMarkup:
+    """Step: choose how much capital to use."""
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("💯 كل الرصيد",   callback_data="wizard:bal:all"),
+            InlineKeyboardButton("💵 مبلغ محدد",   callback_data="wizard:bal:custom"),
+        ],
+        [InlineKeyboardButton("❌ إلغاء", callback_data="action:menu")],
+    ])
 
 # ── Formatters ─────────────────────────────────────────────────────────────────
 def _fmt_portfolio_balance(pid: int) -> str:
@@ -149,6 +183,30 @@ def _fmt_all_balances() -> str:
     lines.append(f"\n💰 *الإجمالي:* `{total:.2f} USDT`")
     return "\n".join(lines)
 
+def _fmt_wizard_summary(ctx: ContextTypes.DEFAULT_TYPE) -> str:
+    """Build a readable summary of wizard state so far."""
+    ud = ctx.user_data
+    name   = ud.get("new_bot_name", "—")
+    syms   = ud.get("new_bot_symbols", [])
+    mode   = ud.get("alloc_mode", "—")
+    dev    = ud.get("deviation_pct")
+    bal    = ud.get("balance_mode", "—")
+    amount = ud.get("balance_usdt")
+
+    sym_str  = "  ".join(f"`{s}`" for s in syms) if syms else "—"
+    mode_str = "⚖️ متساوي تلقائي" if mode == "equal" else "✏️ يدوي"
+    dev_str  = f"`{dev}%`" if dev is not None else "—"
+    bal_str  = "💯 كل الرصيد" if bal == "all" else (f"💵 `{amount} USDT`" if amount else "—")
+
+    return (
+        f"📝 *ملخص البوت:*\n\n"
+        f"الاسم: *{name}*\n"
+        f"العملات: {sym_str}\n"
+        f"التوزيع: {mode_str}\n"
+        f"الانحراف: {dev_str}\n"
+        f"الرصيد: {bal_str}"
+    )
+
 # ── Helpers ────────────────────────────────────────────────────────────────────
 async def _edit(query, text: str, kb: InlineKeyboardMarkup) -> None:
     await query.edit_message_text(text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
@@ -172,13 +230,10 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> Non
 
     data = query.data
 
+    # ── Main menu ──────────────────────────────────────────────────────────────
     if data == "action:menu":
         ctx.user_data.clear()
         await _edit(query, "🤖 *MEXC Portfolio Rebalancer*\n\nاختر من القائمة:", _kb_main())
-
-    elif data == "action:create_bot":
-        ctx.user_data["state"] = "await_bot_name"
-        await _edit(query, "➕ *إنشاء بوت جديد*\n\nأرسل *اسم البوت*:", _kb_cancel())
 
     elif data == "action:balance_all":
         await _edit(query, "⏳ جاري جلب الأرصدة...", _kb_back())
@@ -194,6 +249,101 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> Non
             p["running"] = _is_running_fn(p["id"])
         await _edit(query, "📋 *المحافظ:*\n\nاختر محفظة:", _kb_portfolios(portfolios))
 
+    # ── Wizard: start ──────────────────────────────────────────────────────────
+    elif data == "action:create_bot":
+        ctx.user_data.clear()
+        ctx.user_data["state"] = "wizard_name"
+        await _edit(
+            query,
+            "➕ *إنشاء بوت جديد*\n\n"
+            "*الخطوة 1/5* — أرسل *اسم البوت:*",
+            _kb_cancel(),
+        )
+
+    # ── Wizard: allocation mode ────────────────────────────────────────────────
+    elif data == "wizard:alloc:equal":
+        ctx.user_data["alloc_mode"] = "equal"
+        ctx.user_data["state"]      = "wizard_deviation"
+        syms = ctx.user_data.get("new_bot_symbols", [])
+        n    = len(syms)
+        pct  = round(100 / n, 2) if n else 0
+        sym_lines = "\n".join(f"  • `{s}` — `{pct}%`" for s in syms)
+        await _edit(
+            query,
+            f"✅ التوزيع المتساوي: كل عملة `{pct}%`\n\n"
+            f"{sym_lines}\n\n"
+            "*الخطوة 3/5* — اختر نسبة الانحراف لإعادة التوازن:",
+            _kb_deviation(),
+        )
+
+    elif data == "wizard:alloc:manual":
+        ctx.user_data["alloc_mode"] = "manual"
+        ctx.user_data["state"]      = "wizard_manual_alloc"
+        syms = ctx.user_data.get("new_bot_symbols", [])
+        sym_str = "  ".join(f"`{s}`" for s in syms)
+        await _edit(
+            query,
+            f"✏️ *التوزيع اليدوي*\n\n"
+            f"العملات: {sym_str}\n\n"
+            "*الخطوة 3/5* — أرسل النسب بالترتيب:\n"
+            f"`{' '.join(syms)}`\n"
+            "مثال: `40 30 20 10`\n\n"
+            "_المجموع يجب أن يساوي 100%_",
+            _kb_cancel(),
+        )
+
+    # ── Wizard: deviation preset ───────────────────────────────────────────────
+    elif data.startswith("wizard:dev:"):
+        val = data.split(":")[2]
+        if val == "custom":
+            ctx.user_data["state"] = "wizard_deviation_custom"
+            await _edit(
+                query,
+                "*الخطوة 3/5* — أرسل نسبة الانحراف المخصصة (مثال: `2.5`):",
+                _kb_cancel(),
+            )
+        else:
+            ctx.user_data["deviation_pct"] = float(val)
+            ctx.user_data["state"]         = "wizard_balance"
+            await _edit(
+                query,
+                f"✅ الانحراف: `{val}%`\n\n"
+                "*الخطوة 4/5* — كيف تريد تحديد رأس المال؟",
+                _kb_balance_mode(),
+            )
+
+    # ── Wizard: balance mode ───────────────────────────────────────────────────
+    elif data == "wizard:bal:all":
+        ctx.user_data["balance_mode"] = "all"
+        ctx.user_data["balance_usdt"] = 0
+        ctx.user_data["state"]        = "wizard_confirm"
+        summary = _fmt_wizard_summary(ctx)
+        await _edit(
+            query,
+            f"{summary}\n\n"
+            "*الخطوة 5/5* — هل تريد حفظ البوت؟",
+            InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("✅ حفظ",   callback_data="wizard:confirm:yes"),
+                    InlineKeyboardButton("❌ إلغاء", callback_data="action:menu"),
+                ]
+            ]),
+        )
+
+    elif data == "wizard:bal:custom":
+        ctx.user_data["balance_mode"] = "custom"
+        ctx.user_data["state"]        = "wizard_balance_amount"
+        await _edit(
+            query,
+            "*الخطوة 4/5* — أرسل المبلغ بـ USDT (مثال: `500`):",
+            _kb_cancel(),
+        )
+
+    # ── Wizard: confirm & save ─────────────────────────────────────────────────
+    elif data == "wizard:confirm:yes":
+        await _wizard_save(query, ctx)
+
+    # ── Portfolio detail ───────────────────────────────────────────────────────
     elif data.startswith("portfolio:"):
         pid = int(data.split(":")[1])
         cfg = _get_portfolio_fn(pid)
@@ -201,22 +351,29 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> Non
             await query.answer("المحفظة غير موجودة.", show_alert=True)
             return
         running = _is_running_fn(pid)
-        name = cfg.get("bot", {}).get("name", f"محفظة {pid}")
+        name    = cfg.get("bot", {}).get("name", f"محفظة {pid}")
         mode_map = {"proportional": "نسبي", "timed": "مجدول", "unbalanced": "يدوي"}
-        mode = mode_map.get(cfg.get("rebalance", {}).get("mode", ""), "—")
-        assets = cfg.get("portfolio", {}).get("assets", [])
+        mode     = mode_map.get(cfg.get("rebalance", {}).get("mode", ""), "—")
+        assets   = cfg.get("portfolio", {}).get("assets", [])
         asset_lines = "\n".join(
             f"  • `{a['symbol']}` — `{a['allocation_pct']}%`" for a in assets
+        )
+        dev = (
+            cfg.get("rebalance", {})
+               .get("proportional", {})
+               .get("min_deviation_to_execute_pct", "—")
         )
         status_icon = "🟢 شغالة" if running else "⚫ موقوفة"
         text = (
             f"📋 *{name}*\n\n"
             f"الحالة: {status_icon}\n"
-            f"الوضع: `{mode}`\n\n"
+            f"الوضع: `{mode}`\n"
+            f"الانحراف: `{dev}%`\n\n"
             f"*الأصول:*\n{asset_lines}"
         )
         await _edit(query, text, _kb_portfolio_detail(pid, running))
 
+    # ── Portfolio actions ──────────────────────────────────────────────────────
     elif data.startswith("paction:"):
         parts  = data.split(":")
         action = parts[1]
@@ -258,7 +415,7 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> Non
         elif action == "buy":
             ctx.user_data["state"]     = "await_buy_symbol"
             ctx.user_data["trade_pid"] = pid
-            cfg = _get_portfolio_fn(pid)
+            cfg    = _get_portfolio_fn(pid)
             assets = cfg.get("portfolio", {}).get("assets", []) if cfg else []
             sym_list = "  ".join(f"`{a['symbol']}`" for a in assets) or "—"
             await _edit(
@@ -271,7 +428,7 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> Non
         elif action == "sell":
             ctx.user_data["state"]     = "await_sell_symbol"
             ctx.user_data["trade_pid"] = pid
-            cfg = _get_portfolio_fn(pid)
+            cfg    = _get_portfolio_fn(pid)
             assets = cfg.get("portfolio", {}).get("assets", []) if cfg else []
             sym_list = "  ".join(f"`{a['symbol']}`" for a in assets) or "—"
             await _edit(
@@ -286,85 +443,204 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> Non
             text = _fmt_portfolio_balance(pid)
             await _edit(query, text, _kb_portfolio_detail(pid, _is_running_fn(pid)))
 
+# ── Wizard save helper ─────────────────────────────────────────────────────────
+async def _wizard_save(query, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    ud       = ctx.user_data
+    bot_name = ud.get("new_bot_name", "بوت جديد")
+    syms     = ud.get("new_bot_symbols", [])
+    mode     = ud.get("alloc_mode", "equal")
+    dev      = ud.get("deviation_pct", 3.0)
+    bal_mode = ud.get("balance_mode", "all")
+    amount   = ud.get("balance_usdt", 0)
 
-# ── Message handler (wizard steps) ────────────────────────────────────────────
+    if not syms:
+        await _edit(query, "⚠️ لا توجد عملات.", _kb_cancel())
+        return
+
+    # Build assets list
+    if mode == "equal":
+        pct = round(100 / len(syms), 4)
+        assets = [{"symbol": s, "allocation_pct": pct} for s in syms]
+        # Adjust last to ensure sum == 100
+        diff = 100 - sum(a["allocation_pct"] for a in assets)
+        assets[-1]["allocation_pct"] = round(assets[-1]["allocation_pct"] + diff, 4)
+    else:
+        assets = ud.get("new_bot_assets", [])
+
+    cfg = {
+        "bot": {"name": bot_name},
+        "portfolio": {
+            "assets": assets,
+            "total_usdt": amount,
+            "initial_value_usdt": 0,
+            "allocation_mode": "equal" if mode == "equal" else "manual",
+        },
+        "rebalance": {
+            "mode": "proportional",
+            "proportional": {
+                "threshold_pct": dev,
+                "check_interval_minutes": 5,
+                "min_deviation_to_execute_pct": dev,
+            },
+            "timed": {"frequency": "daily", "hour": 10},
+            "unbalanced": {},
+        },
+        "risk": {"stop_loss_pct": None, "take_profit_pct": None},
+        "termination": {"sell_at_termination": False},
+        "asset_transfer": {"enable_asset_transfer": False},
+        "paper_trading": False,
+        "last_rebalance": None,
+    }
+
+    try:
+        pid = _save_portfolio_fn(bot_name, cfg)
+        asset_lines = "\n".join(
+            f"  • `{a['symbol']}` — `{a['allocation_pct']}%`" for a in assets
+        )
+        bal_str = "💯 كل الرصيد" if bal_mode == "all" else f"💵 `{amount} USDT`"
+        await _edit(
+            query,
+            f"✅ *تم إنشاء البوت بنجاح!*\n\n"
+            f"الاسم: *{bot_name}*\n"
+            f"ID: `{pid}`\n"
+            f"الانحراف: `{dev}%`\n"
+            f"الرصيد: {bal_str}\n\n"
+            f"*الأصول:*\n{asset_lines}\n\n"
+            "اذهب للمحافظ لتشغيله.",
+            _kb_main(),
+        )
+    except Exception as e:
+        await _edit(query, f"❌ فشل الحفظ: `{e}`", _kb_main())
+
+    ctx.user_data.clear()
+
+
+# ── Message handler (wizard + trade steps) ────────────────────────────────────
 async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     if not _allowed(update):
         return await _deny(update)
 
-    state = ctx.user_data.get("state")
+    state = ctx.user_data.get("state", "")
     text  = (update.message.text or "").strip()
 
-    # Step 1: bot name
-    if state == "await_bot_name":
+    # ── Wizard step 1: bot name ────────────────────────────────────────────────
+    if state == "wizard_name":
         if not text:
             await _reply(update, "⚠️ أرسل اسماً صحيحاً.", _kb_cancel())
             return
-        ctx.user_data["new_bot_name"]   = text
-        ctx.user_data["new_bot_assets"] = []
-        ctx.user_data["state"]          = "await_assets"
+        ctx.user_data["new_bot_name"] = text
+        ctx.user_data["state"]        = "wizard_symbols"
         await _reply(
             update,
             f"✅ الاسم: *{text}*\n\n"
-            "أرسل العملات والنسب:\n"
-            "`BTC 40, ETH 30, BNB 30`\n\n"
-            "أو عملة في كل رسالة: `BTC 40`\n\n"
-            "حتى *20 عملة* — أرسل /done عند الانتهاء.",
+            "*الخطوة 2/5* — أرسل العملات بدون نسب:\n"
+            "`BTC ETH BNB SOL`\n\n"
+            "_يمكنك إرسالها في رسالة واحدة أو عدة رسائل — أرسل /done عند الانتهاء_",
             _kb_cancel(),
         )
 
-    # Step 2: assets
-    elif state == "await_assets":
-        assets: list = ctx.user_data.get("new_bot_assets", [])
-        existing_syms = {a["symbol"].upper() for a in assets}
-        errors = []
+    # ── Wizard step 2: symbols ─────────────────────────────────────────────────
+    elif state == "wizard_symbols":
+        syms: list = ctx.user_data.setdefault("new_bot_symbols", [])
+        existing   = {s.upper() for s in syms}
+        added, skipped = [], []
 
-        entries = [e.strip() for e in text.replace(",", " ").split() if e.strip()]
-        pairs = []
-        i = 0
-        while i < len(entries) - 1:
-            sym_c = entries[i].upper()
-            pct_c = entries[i + 1]
-            try:
-                float(pct_c)
-                pairs.append((sym_c, pct_c))
-                i += 2
-            except ValueError:
-                errors.append(f"تجاهلت `{entries[i]}`")
-                i += 1
+        for token in text.replace(",", " ").upper().split():
+            sym = token.strip()
+            if not sym:
+                continue
+            if sym in existing:
+                skipped.append(sym)
+            elif len(syms) >= 20:
+                skipped.append(f"{sym} (الحد 20)")
+            else:
+                syms.append(sym)
+                existing.add(sym)
+                added.append(sym)
 
-        for sym, pct_str in pairs:
-            try:
-                pct = float(pct_str)
-            except ValueError:
-                errors.append(f"نسبة غير صحيحة: `{pct_str}`")
-                continue
-            if pct <= 0 or pct > 100:
-                errors.append(f"النسبة يجب أن تكون 1-100: `{sym} {pct}`")
-                continue
-            if sym in existing_syms:
-                errors.append(f"`{sym}` مضافة بالفعل")
-                continue
-            if len(assets) >= 20:
-                errors.append("وصلت للحد الأقصى (20 عملة)")
-                break
-            assets.append({"symbol": sym, "allocation_pct": pct})
-            existing_syms.add(sym)
-
-        ctx.user_data["new_bot_assets"] = assets
-        total_pct = sum(a["allocation_pct"] for a in assets)
-        lines = [f"📋 *العملات المضافة ({len(assets)}/20):*\n"]
-        for a in assets:
-            lines.append(f"  • `{a['symbol']}` — `{a['allocation_pct']}%`")
-        lines.append(f"\n*المجموع:* `{total_pct:.1f}%`")
-        if errors:
-            lines.append("\n⚠️ " + "\n⚠️ ".join(errors))
-        if abs(total_pct - 100) > 0.01:
-            lines.append(f"\n_المجموع يجب أن يساوي 100% — حالياً {total_pct:.1f}%_")
-        lines.append("\nأرسل /done للحفظ أو أضف المزيد.")
+        ctx.user_data["new_bot_symbols"] = syms
+        sym_str = "  ".join(f"`{s}`" for s in syms)
+        lines   = [f"📋 *العملات ({len(syms)}/20):*\n{sym_str}"]
+        if skipped:
+            lines.append(f"\n⚠️ تجاهلت: {' '.join(skipped)}")
+        lines.append("\nأضف المزيد أو أرسل /done للمتابعة.")
         await _reply(update, "\n".join(lines), _kb_cancel())
 
-    # Trade: buy
+    # ── Wizard step 3a: manual allocation ─────────────────────────────────────
+    elif state == "wizard_manual_alloc":
+        syms  = ctx.user_data.get("new_bot_symbols", [])
+        parts = text.replace(",", " ").split()
+        if len(parts) != len(syms):
+            await _reply(
+                update,
+                f"⚠️ أرسل {len(syms)} أرقام بالترتيب.\n"
+                f"العملات: {' '.join(syms)}\n"
+                "مثال: `40 30 20 10`",
+                _kb_cancel(),
+            )
+            return
+        try:
+            pcts = [float(p) for p in parts]
+        except ValueError:
+            await _reply(update, "⚠️ أرقام غير صحيحة.", _kb_cancel())
+            return
+        if any(p <= 0 for p in pcts):
+            await _reply(update, "⚠️ كل نسبة يجب أن تكون أكبر من 0.", _kb_cancel())
+            return
+        total = sum(pcts)
+        if abs(total - 100) > 0.01:
+            await _reply(update, f"⚠️ المجموع `{total:.1f}%` — يجب أن يساوي 100%.", _kb_cancel())
+            return
+        assets = [{"symbol": s, "allocation_pct": p} for s, p in zip(syms, pcts)]
+        ctx.user_data["new_bot_assets"] = assets
+        ctx.user_data["state"]          = "wizard_deviation"
+        lines = ["✅ *التوزيع:*\n"]
+        for a in assets:
+            lines.append(f"  • `{a['symbol']}` — `{a['allocation_pct']}%`")
+        lines.append("\n*الخطوة 3/5* — اختر نسبة الانحراف:")
+        await _reply(update, "\n".join(lines), _kb_deviation())
+
+    # ── Wizard step 3b: custom deviation ──────────────────────────────────────
+    elif state == "wizard_deviation_custom":
+        try:
+            dev = float(text)
+            assert 0 < dev <= 50
+        except Exception:
+            await _reply(update, "⚠️ أرسل رقماً بين 0.1 و 50.", _kb_cancel())
+            return
+        ctx.user_data["deviation_pct"] = dev
+        ctx.user_data["state"]         = "wizard_balance"
+        await _reply(
+            update,
+            f"✅ الانحراف: `{dev}%`\n\n"
+            "*الخطوة 4/5* — كيف تريد تحديد رأس المال؟",
+            _kb_balance_mode(),
+        )
+
+    # ── Wizard step 4: custom balance amount ──────────────────────────────────
+    elif state == "wizard_balance_amount":
+        try:
+            amount = float(text)
+            assert amount > 0
+        except Exception:
+            await _reply(update, "⚠️ أرسل مبلغاً صحيحاً (مثال: `500`).", _kb_cancel())
+            return
+        ctx.user_data["balance_usdt"] = amount
+        ctx.user_data["state"]        = "wizard_confirm"
+        summary = _fmt_wizard_summary(ctx)
+        await _reply(
+            update,
+            f"{summary}\n\n"
+            "*الخطوة 5/5* — هل تريد حفظ البوت؟",
+            InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("✅ حفظ",   callback_data="wizard:confirm:yes"),
+                    InlineKeyboardButton("❌ إلغاء", callback_data="action:menu"),
+                ]
+            ]),
+        )
+
+    # ── Trade: buy ─────────────────────────────────────────────────────────────
     elif state == "await_buy_symbol":
         parts = text.upper().split()
         if len(parts) != 2:
@@ -389,7 +665,7 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None
             await _reply(update, f"❌ فشل الشراء: `{e}`", _kb_main())
         ctx.user_data.clear()
 
-    # Trade: sell
+    # ── Trade: sell ────────────────────────────────────────────────────────────
     elif state == "await_sell_symbol":
         parts = text.upper().split()
         if len(parts) != 2:
@@ -418,74 +694,38 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None
         await _reply(update, "اختر من القائمة:", _kb_main())
 
 
-# ── /done — finalise bot creation ─────────────────────────────────────────────
+# ── /done — finalise wizard ────────────────────────────────────────────────────
 async def cmd_done(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     if not _allowed(update):
         return await _deny(update)
-    if ctx.user_data.get("state") != "await_assets":
+
+    state = ctx.user_data.get("state", "")
+
+    # From symbols step → move to allocation mode choice
+    if state == "wizard_symbols":
+        syms = ctx.user_data.get("new_bot_symbols", [])
+        if not syms:
+            await _reply(update, "⚠️ أضف عملة واحدة على الأقل.", _kb_cancel())
+            return
+        if len(syms) < 2:
+            await _reply(update, "⚠️ أضف عملتين على الأقل.", _kb_cancel())
+            return
+        sym_str = "  ".join(f"`{s}`" for s in syms)
+        ctx.user_data["state"] = "wizard_alloc_mode"
+        await _reply(
+            update,
+            f"✅ العملات: {sym_str}\n\n"
+            "*الخطوة 3/5* — كيف تريد توزيع النسب؟",
+            _kb_alloc_mode(),
+        )
+
+    # From manual alloc or deviation step → nothing pending
+    elif state in ("wizard_manual_alloc", "wizard_deviation", "wizard_balance",
+                   "wizard_balance_amount", "wizard_confirm"):
+        await _reply(update, "⚠️ أكمل الخطوة الحالية أولاً.", _kb_cancel())
+
+    else:
         await _reply(update, "لا يوجد شيء لحفظه.", _kb_main())
-        return
-
-    assets   = ctx.user_data.get("new_bot_assets", [])
-    bot_name = ctx.user_data.get("new_bot_name", "بوت جديد")
-
-    if not assets:
-        await _reply(update, "⚠️ أضف عملة واحدة على الأقل.", _kb_cancel())
-        return
-
-    total_pct = sum(a["allocation_pct"] for a in assets)
-    if abs(total_pct - 100) > 0.01:
-        await _reply(
-            update,
-            f"⚠️ مجموع النسب `{total_pct:.1f}%` — يجب أن يساوي 100%.",
-            _kb_cancel(),
-        )
-        return
-
-    cfg = {
-        "bot": {"name": bot_name},
-        "portfolio": {
-            "assets": assets,
-            "total_usdt": 0,
-            "initial_value_usdt": 0,
-            "allocation_mode": "ai_balance",
-        },
-        "rebalance": {
-            "mode": "proportional",
-            "proportional": {
-                "threshold_pct": 5,
-                "check_interval_minutes": 5,
-                "min_deviation_to_execute_pct": 3,
-            },
-            "timed": {"frequency": "daily", "hour": 10},
-            "unbalanced": {},
-        },
-        "risk": {"stop_loss_pct": None, "take_profit_pct": None},
-        "termination": {"sell_at_termination": False},
-        "asset_transfer": {"enable_asset_transfer": False},
-        "paper_trading": False,
-        "last_rebalance": None,
-    }
-
-    try:
-        pid = _save_portfolio_fn(bot_name, cfg)
-        asset_lines = "\n".join(
-            f"  • `{a['symbol']}` — `{a['allocation_pct']}%`" for a in assets
-        )
-        await _reply(
-            update,
-            f"✅ *تم إنشاء البوت بنجاح!*\n\n"
-            f"الاسم: *{bot_name}*\n"
-            f"ID: `{pid}`\n\n"
-            f"*الأصول:*\n{asset_lines}\n\n"
-            "اذهب للمحافظ لتشغيله.",
-            _kb_main(),
-        )
-    except Exception as e:
-        await _reply(update, f"❌ فشل الحفظ: `{e}`", _kb_main())
-
-    ctx.user_data.clear()
-
 
 # ── Entry point ────────────────────────────────────────────────────────────────
 def run_bot(
