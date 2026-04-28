@@ -453,8 +453,46 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> Non
                 return
             await _edit(
                 query,
-                "🔴 *بيع — اختر العملة:*",
+                "🔴 *بيع — اختر نوع البيع:*",
+                InlineKeyboardMarkup([
+                    [
+                        InlineKeyboardButton("💰 بيع عملة محددة", callback_data=f"paction:sell_pick:{pid}"),
+                        InlineKeyboardButton("🔴 بيع المحفظة كلها", callback_data=f"paction:sell_all:{pid}"),
+                    ],
+                    [InlineKeyboardButton("❌ إلغاء", callback_data=f"portfolio:{pid}")],
+                ]),
+            )
+
+        elif action == "sell_pick":
+            cfg    = _get_portfolio_fn(pid)
+            assets = cfg.get("portfolio", {}).get("assets", []) if cfg else []
+            if not assets:
+                await query.answer("لا توجد عملات في المحفظة.", show_alert=True)
+                return
+            await _edit(
+                query,
+                "🔴 *بيع عملة — اختر العملة:*",
                 _kb_asset_pick(assets, "sell", pid),
+            )
+
+        elif action == "sell_all":
+            cfg    = _get_portfolio_fn(pid)
+            assets = cfg.get("portfolio", {}).get("assets", []) if cfg else []
+            if not assets:
+                await query.answer("لا توجد عملات في المحفظة.", show_alert=True)
+                return
+            sym_list = "\n".join(f"  • `{a['symbol']}`" for a in assets)
+            await _edit(
+                query,
+                f"⚠️ *تأكيد بيع المحفظة كلها*\n\n"
+                f"سيتم بيع جميع العملات:\n{sym_list}\n\n"
+                "هل أنت متأكد؟",
+                InlineKeyboardMarkup([
+                    [
+                        InlineKeyboardButton("✅ تأكيد البيع الكامل", callback_data=f"confirm:sell_all:{pid}"),
+                        InlineKeyboardButton("❌ إلغاء",               callback_data=f"portfolio:{pid}"),
+                    ]
+                ]),
             )
 
         elif action == "remove":
@@ -527,6 +565,40 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> Non
                 f"🔁 *استبدال `{sym}`*\n\nأرسل رمز العملة الجديدة:\nمثال: `ADA`",
                 _kb_back(f"paction:replace:{pid}"),
             )
+
+    # ── Confirm sell all ───────────────────────────────────────────────────────
+    elif data.startswith("confirm:sell_all:"):
+        pid = int(data.split(":")[2])
+        cfg = _get_portfolio_fn(pid)
+        if not cfg:
+            await query.answer("المحفظة غير موجودة.", show_alert=True)
+            return
+        assets = cfg.get("portfolio", {}).get("assets", [])
+        await _edit(query, "⏳ *جاري بيع المحفظة كلها...*", _kb_back(f"portfolio:{pid}"))
+        results, errors = [], []
+        try:
+            balances = _get_balances_fn()
+        except Exception as e:
+            await _edit(query, f"❌ فشل جلب الأرصدة: `{e}`", _kb_portfolio_detail(pid, _is_running_fn(pid)))
+            return
+        for a in assets:
+            sym = a["symbol"].upper()
+            if sym == "USDT":
+                continue
+            bal = balances.get(sym, 0.0)
+            if bal <= 0:
+                continue
+            try:
+                res = _sell_fn(f"{sym}USDT", bal)
+                results.append(f"🔴 `{sym}` — Order ID: `{res.get('orderId', '—')}`")
+            except Exception as e:
+                errors.append(f"❌ `{sym}`: `{e}`")
+        lines = ["✅ *تم بيع المحفظة:*\n"] + results
+        if errors:
+            lines += ["\n⚠️ *أخطاء:*"] + errors
+        if not results and not errors:
+            lines = ["ℹ️ لا توجد أرصدة للبيع."]
+        await _edit(query, "\n".join(lines), _kb_portfolio_detail(pid, _is_running_fn(pid)))
 
     # ── Confirm remove ─────────────────────────────────────────────────────────
     elif data.startswith("confirm:remove:"):
