@@ -81,14 +81,15 @@ def _kb_portfolios(portfolios: list) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(rows)
 
 def _kb_portfolio_detail(pid: int, running: bool) -> InlineKeyboardMarkup:
-    toggle = (
-        InlineKeyboardButton("⏹️ إيقاف",  callback_data=f"paction:stop:{pid}")
-        if running else
-        InlineKeyboardButton("▶️ تشغيل",  callback_data=f"paction:start:{pid}")
-    )
+    if running:
+        service_btn = InlineKeyboardButton("🔴 بيع + وقف الخدمة", callback_data=f"paction:sell_stop:{pid}")
+    else:
+        service_btn = InlineKeyboardButton("🟢 شراء + بدء الخدمة", callback_data=f"paction:buy_start:{pid}")
     return InlineKeyboardMarkup([
-        [toggle,
-         InlineKeyboardButton("🔄 إعادة توازن", callback_data=f"paction:rebalance:{pid}")],
+        [
+            service_btn,
+            InlineKeyboardButton("🔄 إعادة توازن", callback_data=f"paction:rebalance:{pid}"),
+        ],
         [
             InlineKeyboardButton("🟢 شراء",        callback_data=f"paction:buy:{pid}"),
             InlineKeyboardButton("🔴 بيع",          callback_data=f"paction:sell:{pid}"),
@@ -413,6 +414,42 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> Non
             _stop_fn(pid)
             await _edit(query, "⏹️ *البوت أُوقف*", _kb_portfolio_detail(pid, False))
 
+        elif action == "buy_start":
+            # شراء المحفظة كلها ثم بدء الخدمة
+            cfg    = _get_portfolio_fn(pid)
+            assets = cfg.get("portfolio", {}).get("assets", []) if cfg else []
+            sym_list = "\n".join(f"  • `{a['symbol']}` — `{a['allocation_pct']}%`" for a in assets)
+            await _edit(
+                query,
+                f"🟢 *تأكيد شراء المحفظة وبدء الخدمة*\n\n"
+                f"سيتم شراء جميع العملات حسب النسب:\n{sym_list}\n\n"
+                "ثم تبدأ الخدمة تلقائياً. هل أنت متأكد؟",
+                InlineKeyboardMarkup([
+                    [
+                        InlineKeyboardButton("✅ تأكيد", callback_data=f"confirm:buy_start:{pid}"),
+                        InlineKeyboardButton("❌ إلغاء", callback_data=f"portfolio:{pid}"),
+                    ]
+                ]),
+            )
+
+        elif action == "sell_stop":
+            # بيع المحفظة كلها ثم وقف الخدمة
+            cfg    = _get_portfolio_fn(pid)
+            assets = cfg.get("portfolio", {}).get("assets", []) if cfg else []
+            sym_list = "\n".join(f"  • `{a['symbol']}`" for a in assets)
+            await _edit(
+                query,
+                f"🔴 *تأكيد بيع المحفظة ووقف الخدمة*\n\n"
+                f"سيتم بيع جميع العملات:\n{sym_list}\n\n"
+                "ثم تتوقف الخدمة. هل أنت متأكد؟",
+                InlineKeyboardMarkup([
+                    [
+                        InlineKeyboardButton("✅ تأكيد", callback_data=f"confirm:sell_stop:{pid}"),
+                        InlineKeyboardButton("❌ إلغاء", callback_data=f"portfolio:{pid}"),
+                    ]
+                ]),
+            )
+
         elif action == "rebalance":
             await _edit(query, "⏳ *جاري إعادة التوازن...*", _kb_back("action:portfolios"))
             try:
@@ -646,6 +683,58 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> Non
         if not results and not errors:
             lines = ["ℹ️ لا توجد أرصدة للبيع."]
         await _edit(query, "\n".join(lines), _kb_portfolio_detail(pid, _is_running_fn(pid)))
+
+    # ── Confirm buy_start (شراء + بدء الخدمة) ────────────────────────────────
+    elif data.startswith("confirm:buy_start:"):
+        pid = int(data.split(":")[2])
+        await _edit(query, "⏳ *جاري شراء المحفظة وبدء الخدمة...*", _kb_back(f"portfolio:{pid}"))
+        try:
+            result = _rebalance_fn(pid)
+            trades = [r for r in result if r.get("action") == "BUY"]
+            _start_fn(pid)
+            lines = ["✅ *تم الشراء وبدأت الخدمة:*\n"]
+            for r in trades:
+                lines.append(f"🟢 `{r['symbol']}` — `{r.get('diff_usdt', 0):.2f} USDT`")
+            if not trades:
+                lines = ["✅ *بدأت الخدمة*\nℹ️ لا توجد عملات تحتاج شراء حالياً."]
+        except Exception as e:
+            lines = [f"❌ فشل: `{e}`"]
+        await _edit(query, "\n".join(lines), _kb_portfolio_detail(pid, _is_running_fn(pid)))
+
+    # ── Confirm sell_stop (بيع + وقف الخدمة) ─────────────────────────────────
+    elif data.startswith("confirm:sell_stop:"):
+        pid = int(data.split(":")[2])
+        cfg = _get_portfolio_fn(pid)
+        if not cfg:
+            await query.answer("المحفظة غير موجودة.", show_alert=True)
+            return
+        assets = cfg.get("portfolio", {}).get("assets", [])
+        await _edit(query, "⏳ *جاري بيع المحفظة ووقف الخدمة...*", _kb_back(f"portfolio:{pid}"))
+        _stop_fn(pid)
+        results, errors = [], []
+        try:
+            balances = _get_balances_fn()
+        except Exception as e:
+            await _edit(query, f"❌ فشل جلب الأرصدة: `{e}`", _kb_portfolio_detail(pid, False))
+            return
+        for a in assets:
+            sym = a["symbol"].upper()
+            if sym == "USDT":
+                continue
+            bal = balances.get(sym, 0.0)
+            if bal <= 0:
+                continue
+            try:
+                res = _sell_fn(f"{sym}USDT", bal)
+                results.append(f"🔴 `{sym}` — Order ID: `{res.get('orderId', '—')}`")
+            except Exception as e:
+                errors.append(f"❌ `{sym}`: `{e}`")
+        lines = ["⏹️ *الخدمة أُوقفت*\n✅ *تم البيع:*\n"] + results
+        if errors:
+            lines += ["\n⚠️ *أخطاء:*"] + errors
+        if not results and not errors:
+            lines = ["⏹️ *الخدمة أُوقفت*\nℹ️ لا توجد أرصدة للبيع."]
+        await _edit(query, "\n".join(lines), _kb_portfolio_detail(pid, False))
 
     # ── Confirm buy all ────────────────────────────────────────────────────────
     elif data.startswith("confirm:buy_all:"):
