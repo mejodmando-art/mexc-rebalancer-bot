@@ -163,10 +163,10 @@ def _fmt_portfolio_balance(pid: int) -> str:
     except Exception as e:
         return f"❌ خطأ في جلب الأرصدة: `{e}`"
     name = cfg.get("bot", {}).get("name", f"محفظة {pid}")
-    lines = [f"💼 *رصيد {name}:*\n"]
-    total = 0.0
     from mexc_client import MEXCClient
     client = MEXCClient()
+    lines = [f"💼 *رصيد {name}:*\n"]
+    total = 0.0
     for a in assets:
         sym = a["symbol"].upper()
         bal = balances.get(sym, 0.0)
@@ -176,7 +176,10 @@ def _fmt_portfolio_balance(pid: int) -> str:
             price = 0.0
         val = bal * price
         total += val
-        lines.append(f"• `{sym}`: `{bal:.6f}` ≈ `{val:.2f} USDT`")
+        if val > 0:
+            lines.append(f"• `{sym}`: `{val:.2f} USDT`")
+    if len(lines) == 1:
+        lines.append("_لا توجد أرصدة._")
     lines.append(f"\n💰 *الإجمالي:* `{total:.2f} USDT`")
     return "\n".join(lines)
 
@@ -199,7 +202,7 @@ def _fmt_all_balances() -> str:
             price = 0.0
         val = bal * price
         total += val
-        lines.append(f"• `{sym}`: `{bal:.6f}` ≈ `{val:.2f} USDT`")
+        lines.append(f"• `{sym}`: `{val:.2f} USDT`")
     lines.append(f"\n💰 *الإجمالي:* `{total:.2f} USDT`")
     return "\n".join(lines)
 
