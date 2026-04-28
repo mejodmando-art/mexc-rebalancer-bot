@@ -99,7 +99,7 @@ def _kb_portfolio_detail(pid: int, running: bool) -> InlineKeyboardMarkup:
             InlineKeyboardButton("🔁 استبدال عملة", callback_data=f"paction:replace:{pid}"),
         ],
         [InlineKeyboardButton("💼 رصيد المحفظة",   callback_data=f"paction:balance:{pid}")],
-        [InlineKeyboardButton("🔙 رجوع للمحافظ",   callback_data="action:portfolios")],
+        [InlineKeyboardButton("🔙 رجوع",            callback_data="action:menu")],
     ])
 
 # ── Wizard keyboards ───────────────────────────────────────────────────────────
@@ -238,12 +238,82 @@ async def _edit(query, text: str, kb: InlineKeyboardMarkup) -> None:
 async def _reply(update: Update, text: str, kb=None) -> None:
     await update.message.reply_text(text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
 
+# ── Home screen builder ────────────────────────────────────────────────────────
+def _build_home() -> tuple[str, InlineKeyboardMarkup]:
+    """
+    Returns (text, keyboard) for the home screen.
+    - No portfolios  → simple menu with create button
+    - One portfolio  → show its controls directly
+    - Many portfolios → show portfolio list buttons + create
+    """
+    portfolios = _list_portfolios()
+    for p in portfolios:
+        p["running"] = _is_running_fn(p["id"])
+
+    if not portfolios:
+        text = "🤖 *MEXC Portfolio Rebalancer*\n\nلا توجد محافظ بعد."
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("➕ إنشاء بوت", callback_data="action:create_bot")],
+            [InlineKeyboardButton("💰 الرصيد العام", callback_data="action:balance_all")],
+        ])
+        return text, kb
+
+    if len(portfolios) == 1:
+        p       = portfolios[0]
+        pid     = p["id"]
+        running = p["running"]
+        name    = p.get("name", f"محفظة {pid}")
+        status  = "🟢 شغالة" if running else "⚫ موقوفة"
+
+        if running:
+            service_btn = InlineKeyboardButton("🔴 بيع + وقف الخدمة", callback_data=f"paction:sell_stop:{pid}")
+        else:
+            service_btn = InlineKeyboardButton("🟢 شراء + بدء الخدمة", callback_data=f"paction:buy_start:{pid}")
+
+        text = f"🤖 *{name}*\nالحالة: {status}"
+        kb = InlineKeyboardMarkup([
+            [
+                service_btn,
+                InlineKeyboardButton("🔄 إعادة توازن", callback_data=f"paction:rebalance:{pid}"),
+            ],
+            [
+                InlineKeyboardButton("🟢 شراء",         callback_data=f"paction:buy:{pid}"),
+                InlineKeyboardButton("🔴 بيع",           callback_data=f"paction:sell:{pid}"),
+            ],
+            [
+                InlineKeyboardButton("🗑️ حذف عملة",     callback_data=f"paction:remove:{pid}"),
+                InlineKeyboardButton("🔁 استبدال عملة",  callback_data=f"paction:replace:{pid}"),
+            ],
+            [InlineKeyboardButton("💼 رصيد المحفظة",    callback_data=f"paction:balance:{pid}")],
+            [
+                InlineKeyboardButton("➕ إنشاء بوت",    callback_data="action:create_bot"),
+                InlineKeyboardButton("💰 الرصيد العام", callback_data="action:balance_all"),
+            ],
+        ])
+        return text, kb
+
+    # Many portfolios — list them with status, plus create/balance at bottom
+    rows = []
+    for p in portfolios:
+        pid  = p["id"]
+        name = p.get("name", f"محفظة {pid}")
+        icon = "🟢" if p["running"] else "⚫"
+        rows.append([InlineKeyboardButton(f"{icon} {name}", callback_data=f"portfolio:{pid}")])
+    rows.append([
+        InlineKeyboardButton("➕ إنشاء بوت",    callback_data="action:create_bot"),
+        InlineKeyboardButton("💰 الرصيد العام", callback_data="action:balance_all"),
+    ])
+    text = "🤖 *MEXC Portfolio Rebalancer*\n\nاختر محفظة:"
+    return text, InlineKeyboardMarkup(rows)
+
+
 # ── /start ─────────────────────────────────────────────────────────────────────
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     if not _allowed(update):
         return await _deny(update)
     ctx.user_data.clear()
-    await _reply(update, "🤖 *MEXC Portfolio Rebalancer*\n\nاختر من القائمة:", _kb_main())
+    text, kb = _build_home()
+    await _reply(update, text, kb)
 
 # ── Callback handler ───────────────────────────────────────────────────────────
 async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
@@ -257,7 +327,8 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> Non
     # ── Main menu ──────────────────────────────────────────────────────────────
     if data == "action:menu":
         ctx.user_data.clear()
-        await _edit(query, "🤖 *MEXC Portfolio Rebalancer*\n\nاختر من القائمة:", _kb_main())
+        text, kb = _build_home()
+        await _edit(query, text, kb)
 
     elif data == "action:balance_all":
         await _edit(query, "⏳ جاري جلب الأرصدة...", _kb_back())
