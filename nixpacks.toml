@@ -1,19 +1,9 @@
 [phases.setup]
-nixPkgs = ["nodejs_20", "nodePackages.npm"]
 aptPkgs = ["python3", "python3-pip", "python3-venv"]
 
 [phases.install]
 cmds = [
-  "python3 -m pip install --break-system-packages -r requirements.txt",
-  "npm install --prefix web"
-]
-
-[phases.build]
-cmds = [
-  "npm run build --prefix web",
-  "mkdir -p static",
-  "cp -r web/out/. static/",
-  "ls static/index.html && echo '✓ static OK'"
+  "python3 -m pip install --break-system-packages -r requirements.txt"
 ]
 
 [start]
